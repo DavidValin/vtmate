@@ -14,7 +14,6 @@ use std::time::Instant;
 
 mod config;
 mod util;
-mod file;
 mod ui;
 mod keyboard;
 mod audio;
@@ -46,13 +45,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
   let _ = START_INSTANT.get_or_init(Instant::now);
 
-  let mut args = crate::config::Args::parse();
+  let args = crate::config::Args::parse();
   crate::log::set_verbose(args.verbose);
-
-  // Expand computed defaults that can't be expressed as static clap defaults.
-  if args.whisper_model_path.trim().is_empty() {
-    args.whisper_model_path = stt::default_whisper_model_path();
-  }
 
   // CLI-configurable knobs (previously hard-coded / env).
   let vad_thresh: f32 = args.sound_threshold_peak;
@@ -221,7 +215,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args_for_conv = args_for_conv.clone();
     move || {
       if let Err(e) = conversation::conversation_thread(
-        &START_INSTANT,
         voice_selected,
         rx_utt,
         tx_tts_audio_into_router,

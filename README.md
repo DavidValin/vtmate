@@ -3,7 +3,7 @@
 ai mate is a terminal based audio conversation system between a user and an AI model that runs locally in your machine.
 
 - llm system: ollama
-- speech to text (stt): whisper.cpp
+- speech to text (stt): whisper
 - text to speech (tts): OpenTTS
 
 ## How it works
@@ -27,8 +27,8 @@ Install dependencies:
 - Download Docker: `https://docs.docker.com/engine/install` (needed for STT)
 - Download Ollama: `https://ollama.com/download` (needed for ai responses)
 - Pull an ollama model: `ollama pull llama3.2:3b` (or the model you want to use)
-- Download Whisper.cpp: `https://github.com/ggml-org/whisper.cpp`, see 'Quick Start' (needed for TTS)
-- Download Whisper model (stt): `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-q5_0.bin?download=true`
+- Download Whisper: `https://huggingface.co/Mozilla/whisperfile/resolve/main/whisper-medium.llamafile?download=true`, this contains whisper.cpp + whisper model (needed for TTS)
+- Make `whisper-medium.llamafile` executable (`chmod +x whisper-medium.llamafile`)
 - (Only Windows) Install Windows Terminal (which supports emojis): `https://apps.microsoft.com/detail/9n0dx20hk701` (use this terminal to run ai-mate)
 - (Only MacOS / Linux) Install `pkg-config` and alsa development libraries (called `libasound2-dev` or `alsa-lib-devel` or `alsa-lib`)
 
@@ -56,8 +56,9 @@ The `ai-mate` program will be under `~/.cargo/bin`. Make sure this directory is 
 
 ## How to use it
 
-Before starting, make sure ollama and OpenTTS are both running and your microphone and speakers ready:
+Run services:
 
+- `./whisper-medium.llamafile`
 - `ollama serve`
 - `docker run --rm --platform=linux/amd64 -p 5500:5500 synesthesiam/opentts:all` (it will pull the image the first time). Adjust the platform as needed depending on your hardware. This container contains within all the voices for all languages.
 
@@ -70,7 +71,6 @@ ai-mate \
   --language en \
   --sound-threshold-peak 0.10 \
   --end-silence-ms 850 \
-  --whisper-model-path "$HOME/.whisper-models/ggml-large-v3-q5_0.bin" \
   --ollama-url "http://localhost:11434/api/generate" \
   --ollama-model "llama3.2:3b" \
   --opentts-base-url "http://0.0.0.0:5500/api/tts?vocoder=high&denoiserStrength=0.005&&speakerId=&ssml=false&ssmlNumbers=true&ssmlDates=true&ssmlCurrency=true&cache=false"
@@ -79,7 +79,7 @@ ai-mate \
 You can just override a specific variable, for example:
 
 ```
-ai-mate --ollama-model "llama3.2:3b" --language es --whisper-model-path "$HOME/ggml-medium.bin"
+ai-mate --ollama-model "llama3.2:3b" --language es
 ```
 
 If you need help:
@@ -130,12 +130,12 @@ For conveniance create bash aliases with the options you want to use, example:
 
 ```
 # English
-alias ai-mate_qwen='ai-mate --ollama-model "qwen3:30b" --whisper-model-path "$HOME/ggml-medium.bin"'
-alias ai-mate_llama='ai-mate --ollama-model "llama3:8b" --whisper-model-path "$HOME/ggml-medium.bin"'
+alias ai-mate_qwen='ai-mate --ollama-model "qwen3:30b"'
+alias ai-mate_llama='ai-mate --ollama-model "llama3:8b"'
 
 # Spanish
-alias ai-mate_es_qwen='ai-mate --ollama-model "qwen3:30b" --language es --whisper-model-path "$HOME/ggml-medium.bin"'
-alias ai-mate_es_llama='ai-mate --ollama-model "llama3:8b" --language es --whisper-model-path "$HOME/ggml-medium.bin"'
+alias ai-mate_es_qwen='ai-mate --ollama-model "qwen3:30b" --language es'
+alias ai-mate_es_llama='ai-mate --ollama-model "llama3:8b" --language es'
 ```
 
 Have fun o:)

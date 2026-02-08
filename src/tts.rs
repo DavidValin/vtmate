@@ -46,9 +46,7 @@ pub const DEFAULT_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
     ("zh", "coqui-tts:zh_baker"),
 ];
 
-
 // TUNABLES
-
 pub const CHUNK_FRAMES: usize = 512;             // Frames per chunk (per-channel interleaved)
 pub const QUEUE_CAP_FRAMES: usize = 48_000 * 15; // Playback queue capacity in frames at output SR; 15 seconds worth (scaled by channels)
 

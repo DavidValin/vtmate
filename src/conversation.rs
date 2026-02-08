@@ -2,17 +2,16 @@
 //  Conversation
 // ------------------------------------------------------------------
 
-
-
-use crossbeam_channel::{Receiver, Sender, select};
-use std::sync::{Arc, Mutex, OnceLock,atomic::{AtomicU64, Ordering}};
-use std::time::{Instant};
+use crossbeam_channel::{select, Receiver, Sender};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, Mutex,
+};
 
 // API
 // ------------------------------------------------------------------
 
 pub fn conversation_thread(
-   start_instant:&OnceLock<Instant>,
   voice: &str,
   rx_utt: Receiver<crate::audio::AudioChunk>,
   tx_audio_into_router: Sender<crate::audio::AudioChunk>,
@@ -24,19 +23,15 @@ pub fn conversation_thread(
   status_line: Arc<Mutex<String>>,
   print_lock: Arc<Mutex<()>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-  crate::log::log("info", &format!("Whisper model: {}", args.whisper_model_path));
   crate::log::log("info", &format!("Ollama model: {}", args.ollama_model));
-
-  // Warm up Whisper model (first transcription can be slow as the model loads).
-  crate::stt::warm_up_whisper(&start_instant, &args)?;
 
   loop {
     select! {
       recv(stop_all_rx) -> _ => break,
       recv(rx_utt) -> msg => {
         let Ok(utt) = msg else { break };
-
-        let user_text = crate::stt::whisper_transcribe(start_instant, &utt, &args)?;
+        let pcm: Vec<i16> = utt.data.iter().map(|s| ((*s).clamp(-1.0, 1.0) * (i16::MAX as f32)) as i16).collect();
+        let user_text = crate::stt::whisper_transcribe(&pcm, utt.sample_rate, utt.channels, "")?;
         let user_text = user_text.trim().to_string();
         if user_text.is_empty() {
           continue;
@@ -191,15 +186,22 @@ impl PhraseSpeaker {
       || self.buf.ends_with('!')
       || self.buf.ends_with('?')
       || self.buf.len() >= 140;
-    if trigger { self.flush() } else { None }
+    if trigger {
+      self.flush()
+    } else {
+      None
+    }
   }
   fn flush(&mut self) -> Option<String> {
     let out = self.buf.trim().to_string();
     self.buf.clear();
-    if out.is_empty() { None } else { Some(out) }
+    if out.is_empty() {
+      None
+    } else {
+      Some(out)
+    }
   }
 }
-
 
 fn strip_special_chars(s: &str) -> String {
   s.chars()

@@ -2,150 +2,75 @@
 //  STT - Speech to Text
 // ------------------------------------------------------------------
 
-
-
-use std::sync::{OnceLock};
-use std::time::{Instant};
-use std::path::PathBuf;
-use std::process::Command;
+use hound;
+use reqwest::blocking::multipart;
+use std::io::Cursor;
 
 // API
 // ------------------------------------------------------------------
 
-pub fn default_whisper_model_path() -> String {
-  let fallback = ".whisper-models/ggml-large-v3-q5_0.bin";
-  if let Some(home) = crate::file::home_dir() {
-    return home.join(fallback).to_string_lossy().to_string();
-  }
-  // Last resort: relative path.
-  fallback.to_string()
-}
+pub fn whisper_transcribe(
+  pcm_chunks: &[i16],
+  sample_rate: u32,
+  channels: u16,
+  openai_api_key: &str,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+  // Convert PCM to f32, resample to 16kHz mono, then encode to WAV in memory
+  // Convert input to f32 samples
+  let samples_f32: Vec<f32> = pcm_chunks
+    .iter()
+    .map(|&s| s as f32 / i16::MAX as f32)
+    .collect();
+  // Resample to 16kHz mono
+  let resampled = crate::audio::resample_to(&samples_f32, channels, sample_rate, 16_000);
+  let mono = crate::audio::mix_to_mono(&resampled, channels);
+  // Convert back to i16
+  let wav_data: Vec<i16> = mono
+    .iter()
+    .map(|&s| (s * i16::MAX as f32).clamp(-i16::MAX as f32, i16::MAX as f32) as i16)
+    .collect();
 
-
-pub fn warm_up_whisper(
-  start_instant:&OnceLock<Instant>,
-  args: &crate::config::Args
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-  // Resolve early so we fail fast with a clear error if Whisper isn't installed.
-  let whisper_bin = resolve_whisper_program(args)?;
-
-  crate::log::log("info", &format!("Whisper binary: {}", whisper_bin.to_string_lossy()));
-  crate::log::log("info", "Warming up Whisper model...");
-
-  // A short silence chunk is enough to force model load / init.
-  let silence = crate::audio::AudioChunk {
-    data: vec![0.0; 16_000 / 2], // ~0.5s at 16kHz
+  // Write WAV to memory
+  let mut cursor = Cursor::new(Vec::<u8>::new());
+  let spec = hound::WavSpec {
     channels: 1,
     sample_rate: 16_000,
+    bits_per_sample: 16,
+    sample_format: hound::SampleFormat::Int,
   };
+  let mut writer = hound::WavWriter::new(&mut cursor, spec)?;
+  for &sample in wav_data.iter() {
+    writer.write_sample(sample)?;
+  }
+  writer.finalize()?;
 
-  // We don't care what the transcription is; we just want to pay the one-time init cost upfront.
-  let _ = whisper_transcribe(&start_instant, &silence, args)?;
+  let wav_bytes = cursor.into_inner();
 
-  crate::log::log("info", "Whisper warm-up complete.");
+  // ---- multipart upload ----
+  let file_part = multipart::Part::bytes(wav_bytes)
+    .file_name("audio.wav")
+    .mime_str("audio/wav")?;
 
-  Ok(())
-}
+  let form = multipart::Form::new()
+    .text("model", "whisper-1")
+    .text("temperature", "0.0")
+    .text("temperature_inc", "0.2")
+    .text("response_format", "json")
+    .part("file", file_part);
 
+  let client = reqwest::blocking::Client::new();
+  let resp = client
+    .post("http://127.0.0.1:8080/inference")
+    .bearer_auth(openai_api_key)
+    .multipart(form)
+    .send()?;
 
-pub fn whisper_transcribe(
-   start_instant:&OnceLock<Instant>,
-  utt: &crate::audio::AudioChunk,
-  args: &crate::config::Args,
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-  let wav_path = crate::audio::write_tmp_wav_16k_mono(start_instant, utt)?;
-
-  // Equivalent to the old whisper-wrapper.sh:
-  //   whisper-cli -m <MODEL> -np -nt -f <WAV>
-  let whisper_bin = resolve_whisper_program(args)?;
-  let wav_s = wav_path.to_string_lossy().to_string();
-  let out = Command::new(&whisper_bin)
-    .args([
-      "-m",
-      args.whisper_model_path.as_str(),
-      "-np",
-      "-nt",
-      "--language",
-      args.language.as_str(),
-      "-f",
-      wav_s.as_str(),
-    ])
-    .output()?;
-
-  if !out.status.success() {
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    return Err(format!("Whisper command failed: {stderr}").into());
+  // Better error visibility if non-2xx
+  let status = resp.status();
+  let json: serde_json::Value = resp.json()?;
+  if !status.is_success() {
+    return Err(format!("Whisper HTTP error {}: {}", status, json).into());
   }
 
-  // Remove newlines in Rust so it works cross-platform (Linux/macOS/Windows).
-  let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-  let cleaned = stdout.replace(['\r', '\n'], "");
-  Ok(cleaned.trim().to_string())
-}
-
-// PRIVATE
-// ------------------------------------------------------------------
-
-fn find_in_path(program: &str) -> Option<PathBuf> {
-  let path_var = std::env::var_os("PATH")?;
-  let paths = std::env::split_paths(&path_var);
-
-  // On Windows, PATHEXT defines executable extensions.
-  let exts: Vec<String> = if cfg!(windows) {
-    std::env::var("PATHEXT")
-      .ok()
-      .map(|v| {
-        v.split(';')
-          .map(|s| s.trim().to_string())
-          .filter(|s| !s.is_empty())
-          .collect()
-      })
-      .unwrap_or_else(|| vec![".EXE".into(), ".CMD".into(), ".BAT".into()])
-  } else {
-    vec!["".into()]
-  };
-
-  for dir in paths {
-    for ext in &exts {
-      let candidate = dir.join(format!("{program}{ext}"));
-      if candidate.is_file() {
-        return Some(candidate);
-      }
-    }
-  }
-  None
-}
-
-
-fn resolve_whisper_program(
-  args: &crate::config::Args,
-) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
-  if let Some(cmd) = args
-    .whisper_cmd
-    .as_deref()
-    .map(str::trim)
-    .filter(|s| !s.is_empty())
-  {
-    let p = PathBuf::from(cmd);
-    if p.components().count() > 1 {
-      if p.is_file() {
-        return Ok(p);
-      }
-      return Err(format!("WHISPER_CMD points to a non-existent file: {cmd}").into());
-    }
-
-    if let Some(found) = find_in_path(cmd) {
-      return Ok(found);
-    }
-    return Err(format!("Whisper command '{cmd}' not found in PATH").into());
-  }
-
-  if let Some(found) = find_in_path("whisper-cli") {
-    return Ok(found);
-  }
-  if let Some(found) = find_in_path("whisper") {
-    return Ok(found);
-  }
-
-  Err("Could not find a Whisper CLI. Install 'whisper-cli' (preferred) or 'whisper' and ensure it is in PATH.".into())
+  Ok(json["text"].as_str().unwrap_or_default().to_string())
 }

@@ -50,18 +50,7 @@ pub struct Args {
   /// End an utterance after this much continuous silence (ms)
   #[arg(long, default_value_t = END_SILENCE_MS_DEFAULT, env = "END_SILENCE_MS")]
   pub end_silence_ms: u64,
-
-  /// Whisper model path (ggml .bin) used by whisper-cli/whisper
-  /// Defaults to "$HOME/.whisper-models/ggml-large-v3-q5_0.bin".
-  #[arg(long, default_value = "", env = "WHISPER_MODEL_PATH")]
-  pub whisper_model_path: String,
-
-  /// Whisper command to run (optional). If omitted, we try to find "whisper-cli" then "whisper" in PATH.
-  /// This remains for backwards-compatibility with the previous WHISPER_CMD env var.
-  #[arg(long, env = "WHISPER_CMD")]
-  pub whisper_cmd: Option<String>,
 }
-
 
 
 // CLI parameters default values ---------------------------------------------------

@@ -5,10 +5,6 @@
 
 
 use cpal::traits::{DeviceTrait, HostTrait};
-use std::sync::{OnceLock};
-use crate::log::log;
-use std::time::{Instant};
-use std::path::PathBuf;
 
 // API
 // ------------------------------------------------------------------
@@ -151,33 +147,4 @@ pub fn resample_to(
   else {
     resample_interleaved_linear(input, channels, in_sr, out_sr)
   }
-}
-
-
-pub fn write_tmp_wav_16k_mono(
-    start_instant:&OnceLock<Instant>,
-    utt: &AudioChunk,
-) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
-  let mono = crate::audio:: mix_to_mono(&utt.data, utt.channels);
-  let mono_16k = resample_linear(&mono, utt.sample_rate, 16_000);
-
-  let mut path = std::env::temp_dir();
-  path.push(format!("aichat_utt_{}.wav", crate::util::now_ms(&start_instant)));
-
-  let spec = hound::WavSpec {
-      channels: 1,
-      sample_rate: 16_000,
-      bits_per_sample: 16,
-      sample_format: hound::SampleFormat::Int,
-  };
-
-  let mut writer = hound::WavWriter::create(&path, spec)?;
-  log("info", &format!("Writing {} samples to {:?}", mono_16k.len(), path));
-  for &s in &mono_16k {
-    let v = (s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
-    writer.write_sample(v)?;
-  }
-  writer.finalize()?;
-  log("info", &format!("Writing {} samples to {:?}", mono_16k.len(), path));
-  Ok(path)
 }
