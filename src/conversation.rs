@@ -24,6 +24,7 @@ pub fn conversation_thread(
   print_lock: Arc<Mutex<()>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   crate::log::log("info", &format!("Ollama model: {}", args.ollama_model));
+  let mut conversation_history = String::new();
 
   loop {
     select! {
@@ -32,6 +33,7 @@ pub fn conversation_thread(
         let Ok(utt) = msg else { break };
         let pcm: Vec<i16> = utt.data.iter().map(|s| ((*s).clamp(-1.0, 1.0) * (i16::MAX as f32)) as i16).collect();
         let user_text = crate::stt::whisper_transcribe(&pcm, utt.sample_rate, utt.channels, "")?;
+        let prompt = format!("{}\n{}: {}", conversation_history, crate::ui::USER_LABEL, user_text);
         let user_text = user_text.trim().to_string();
         if user_text.is_empty() {
           continue;
@@ -40,7 +42,7 @@ pub fn conversation_thread(
         // Print user line (keep spinner/emojis only on the latest bottom line).
         crate::ui::ui_println(&print_lock, &status_line, "");
         crate::ui::ui_println(&print_lock, &status_line, &format!("{} {user_text}", crate::ui::USER_LABEL));
-
+        conversation_history.push_str(&format!("{}: {}\n", crate::ui::USER_LABEL, user_text));
         ui.thinking.store(true, Ordering::Relaxed);
 
         // Snapshot interruption counter for this assistant turn.
@@ -64,6 +66,7 @@ pub fn conversation_thread(
           crate::ui::ui_println(&print_lock, &status_line, "🛑 USER interrupted");
           crate::ui::ui_println(&print_lock, &status_line, "");
         };
+
         let mut on_piece = |piece: &str| {
           if interrupted {
             return;
@@ -86,6 +89,7 @@ pub fn conversation_thread(
 
           if let Some(phrase) = speaker.push_text(piece) {
             crate::ui::ui_println(&print_lock, &status_line, &phrase);
+            conversation_history.push_str(&format!("{}: {}\n", crate::ui::ASSIST_LABEL, phrase));
 
             let outcome = match crate::tts::speak_via_opentts(
               &strip_special_chars(&phrase),
@@ -120,7 +124,7 @@ pub fn conversation_thread(
         };
 
         let _ = crate::llm::ollama_stream_response_into(
-          &user_text,
+          &prompt,
           args.ollama_url.as_str(),
           args.ollama_model.as_str(),
           stop_all_rx.clone(),
@@ -128,6 +132,7 @@ pub fn conversation_thread(
           my_interrupt,
           &mut on_piece,
         );
+
         if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
           // interruption detected, skip remaining speech
           continue;
@@ -143,6 +148,7 @@ pub fn conversation_thread(
 
         if let Some(phrase) = speaker.flush() {
           crate::ui::ui_println(&print_lock, &status_line, &phrase);
+          conversation_history.push_str(&format!("{}: {}\n", crate::ui::ASSIST_LABEL, phrase));
           let outcome = crate::tts::speak_via_opentts(
             &strip_special_chars(&phrase),
             args.opentts_base_url.as_str(),
