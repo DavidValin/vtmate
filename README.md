@@ -29,10 +29,10 @@ Install dependencies:
 - Download Docker: `https://docs.docker.com/engine/install` (needed for STT)
 - Download Ollama: `https://ollama.com/download` (needed for ai responses)
 - Pull an ollama model: `ollama pull llama3.2:3b` (or the model you want to use)
-- Download Whisper: `https://huggingface.co/Mozilla/whisperfile/resolve/main/whisper-medium.llamafile?download=true`, this contains whisper.cpp + whisper model (needed for TTS)
-- Make `whisper-medium.llamafile` executable (`chmod +x whisper-medium.llamafile`)
+- Download Whisper: `https://huggingface.co/Mozilla/whisperfile/resolve/main/whisper-medium.llamafile?download=true` (needed for TTS) this contains whisper.cpp + whisper model.
+- (Only MacOS / Linux): `whisper-medium.llamafile` executable (`chmod +x whisper-medium.llamafile`)
+- (Only Windows): rename `whisper-medium.llamafile` to `whisper-medium.exe`
 - (Only Windows) Install Windows Terminal (which supports emojis): `https://apps.microsoft.com/detail/9n0dx20hk701` (use this terminal to run ai-mate)
-- (Only MacOS / Linux) Install `pkg-config` and alsa development libraries (called `libasound2-dev` or `alsa-lib-devel` or `alsa-lib`)
 
 ### Option A - Download a built binary for your operating system
 
@@ -43,15 +43,13 @@ Move the binary to a folder in your $PATH so you can use `ai-mate` command anywh
 
 If you have the ai-mate source code locally:
 
+- (Only MacOS / Linux) Install `pkg-config` and alsa development libraries (called `libasound2-dev` or `alsa-lib-devel` or `alsa-lib`)
+
+The compile from source code:
+
 ```
 cargo build --release
 cargo install --path .
-```
-
-Otherwise fetch, build and install it using cargo:
-
-```
- cargo install ai-mate
 ```
 
 The `ai-mate` program will be under `~/.cargo/bin`. Make sure this directory is added to your $PATH, otherwise add it.
