@@ -34,18 +34,22 @@ Install dependencies:
 
 ### Option A - Download a built binary for your operating system
 
-You have 2 options:
-
-- Using cargo: `cargo install ai-mate`
-- Download from `https://github.com/DavidValin/ai-mate/releases`
-
+Download from `https://github.com/DavidValin/ai-mate/releases`
 Move the binary to a folder in your $PATH so you can use `ai-mate` command anywhere
 
 ### Option B - Build ai-mate from source
 
+If you have the ai-mate source code locally:
+
 ```
 cargo build --release
 cargo install --path .
+```
+
+Otherwise fetch, build and install it using cargo:
+
+```
+ `cargo install ai-mate`
 ```
 
 The `ai-mate` program will be under `~/.cargo/bin`. Make sure this directory is added to your $PATH, otherwise add it.
