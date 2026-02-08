@@ -129,17 +129,17 @@ cp "target/aarch64-unknown-linux-gnu/release/${BIN_NAME}" "${LINUX_ARM64_BIN}"
 chmod +x "${LINUX_ARM64_BIN}" || true
 
 ########################################
-# Windows amd64 build (cross)
+# Windows x86 (32-bit) build (cross) — NO amd64
 ########################################
-echo "== Windows amd64 build (cross) =="
+echo "== Windows x86 (32-bit) build (cross) =="
 command -v cross >/dev/null 2>&1 || cargo install --locked cross
-rustup target add x86_64-pc-windows-gnu
+rustup target add i686-pc-windows-gnu
 
 CROSS_CONTAINER_OPTS="--platform=linux/amd64" \
-cross build --release --target x86_64-pc-windows-gnu
+cross build --release --target i686-pc-windows-gnu
 
-WIN_AMD64_BIN="${DIST_DIR}/${BIN_NAME}-${VERSION}-windows-amd64.exe"
-cp "target/x86_64-pc-windows-gnu/release/${BIN_NAME}.exe" "${WIN_AMD64_BIN}"
+WIN_X86_BIN="${DIST_DIR}/${BIN_NAME}-${VERSION}-windows-x86.exe"
+cp "target/i686-pc-windows-gnu/release/${BIN_NAME}.exe" "${WIN_X86_BIN}"
 
 ########################################
 # Packaging: tar.gz + SHA256
