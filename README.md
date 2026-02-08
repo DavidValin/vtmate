@@ -1,10 +1,10 @@
+![ai mate screenshot](https://github.com/DavidValin/ai-mate/raw/main/preview.png)
+
 ai mate is a terminal based audio conversation system between a user and an AI model that runs locally in your machine.
 
 - llm system: ollama
 - speech to text (stt): whisper.cpp
 - text to speech (tts): OpenTTS
-
-![ai mate screenshot](https://github.com/DavidValin/ai-mate/raw/main/preview.png)
 
 ## How it works
 
