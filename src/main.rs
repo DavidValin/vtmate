@@ -43,13 +43,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   ██╔══██║██║╚════╝██║╚██╔╝██║██╔══██║   ██║   ██╔══╝  
   ██║  ██║██║      ██║ ╚═╝ ██║██║  ██║   ██║   ███████╗
   ╚═╝  ╚═╝╚═╝      ╚═╝     ╚═╝╚═╝  ╚═╝   ╚═╝   ╚══════╝
- "#
+  "#
   );
 
   let _ = START_INSTANT.get_or_init(Instant::now);
 
   let args = crate::config::Args::parse();
-  // silence whisper logs
+  // silence external whisper logs
   unsafe {
     whisper_rs::set_log_callback(Some(noop_whisper_log), std::ptr::null_mut());
   }
@@ -65,22 +65,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     process::exit(1);
   }
 
-  // CLI-configurable knobs (previously hard-coded / env).
   let vad_thresh: f32 = args.sound_threshold_peak;
   let end_silence_ms: u64 = args.end_silence_ms;
 
   let host = cpal::default_host();
-
   let (in_dev, _in_stream) = audio::pick_input_stream(&host).unwrap_or_else(|msg| {
     log::log("error", &format!("{}", msg));
     process::exit(1)
   });
-
   let (out_dev, _out_stream) = audio::pick_output_stream(&host).unwrap_or_else(|msg| {
     log::log("error", &format!("{}", msg));
     process::exit(1)
   });
-
   log::log(
     "info",
     &format!(
@@ -96,13 +92,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ),
   );
 
-  // Truth is CPAL output config
   let out_cfg_supported = out_dev.default_output_config()?;
   let out_cfg: cpal::StreamConfig = out_cfg_supported.clone().into();
   let out_sample_rate = out_cfg.sample_rate.0;
   let out_channels = out_cfg.channels;
 
-  // Pick an input config that matches output SR as closely as possible
   let in_cfg_supported = config::pick_input_config(&in_dev, out_sample_rate)?;
   let in_cfg: cpal::StreamConfig = in_cfg_supported.clone().into();
 
@@ -129,43 +123,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     &format!("Playback stream SR (truth): {}", out_sample_rate),
   );
 
-  // Global stop signal
   let (stop_all_tx, stop_all_rx) = bounded::<()>(1);
-
-  // record/external -> router
   let (tx_rec, rx_rec) = bounded::<audio::AudioChunk>(32);
-  // router -> play
   let (tx_play, rx_play) = bounded::<audio::AudioChunk>(32);
-  // utterance audio (record thread -> conversation thread)
   let (tx_utt, rx_utt) = bounded::<audio::AudioChunk>(4);
+
+  // Clones for threads
+  let tx_play_for_router = tx_play.clone();
+  let rx_play_for_router = rx_play.clone();
+  let tx_play_for_playback = tx_play.clone();
+  let rx_play_for_playback = rx_play.clone();
+  let tx_audio_into_router = tx_play.clone();
+  let rx_audio_into_router = rx_play.clone();
+  let stop_all_rx_for_playback = stop_all_rx.clone();
+  let stop_all_rx_for_router = stop_all_rx.clone();
+  let stop_all_rx_for_record = stop_all_rx.clone();
+  let stop_all_rx_for_conversation = stop_all_rx.clone();
+  let stop_all_rx_for_keyboard = stop_all_rx.clone();
   let tx_utt_rec = tx_utt.clone();
-  // stop playback signal
-  let (stop_play_tx, stop_play_rx) = bounded::<()>(2);
-  // Conversation interruption counter (increment when user speaks over TTS)
-  let interrupt_counter = Arc::new(AtomicU64::new(0));
-  // Pause flag (space toggles while playing)
-  let paused = Arc::new(AtomicBool::new(false));
-  // Playback state + gate hangover
+  let (stop_play_tx, stop_play_rx) = bounded::<()>(2); // stop playback signal
+  let interrupt_counter = Arc::new(AtomicU64::new(0)); // Conversation interruption counter (increment when user speaks over TTS)
+  let paused = Arc::new(AtomicBool::new(false)); // Pause flag (space toggles while playing)
   let playback_active = Arc::new(AtomicBool::new(false));
   let gate_until_ms = Arc::new(AtomicU64::new(0));
-  // UI state
   let ui = ui::UiState {
     thinking: Arc::new(AtomicBool::new(false)),
     playing: Arc::new(AtomicBool::new(false)),
     speaking: Arc::new(AtomicBool::new(false)),
     peak: Arc::new(Mutex::new(0.0)),
   };
-  // Shared status-line text + a single print lock so UI repaint and content prints never interleave.
-  let status_line = Arc::new(Mutex::new(String::new()));
+  let status_line = Arc::new(Mutex::new(String::new())); // Shared status-line text + a single print lock so UI repaint and content prints never interleave.
   let print_lock = Arc::new(Mutex::new(()));
 
-  // Voice selection handled once before loop
-  let voice_selected = tts::DEFAULT_VOICES_PER_LANGUAGE
+  let voice_selected = tts::DEFAULT_KOKORO_VOICES_PER_LANGUAGE
     .iter()
     .find(|(lang, _)| *lang == args.language.as_str())
     .map(|(_, voice)| *voice)
-    .unwrap_or("glow-speak:en-us_ljspeech");
-
+    .unwrap_or("af_sky");
   log::log("info", &format!("Language: {}", args.language));
   log::log("info", &format!("TTS voice: {}", voice_selected));
 
@@ -182,7 +176,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   let play_handle = thread::spawn({
     let playback_active = playback_active.clone();
     let gate_until_ms = gate_until_ms.clone();
-    let stop_all_rx = stop_all_rx.clone();
+    let stop_all_rx = stop_all_rx_for_playback.clone();
     let paused = paused.clone();
     let out_dev = out_dev.clone();
     let out_cfg_supported_thread = out_cfg_supported.clone();
@@ -194,9 +188,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         out_dev,
         out_cfg_supported_thread,
         out_cfg_thread,
-        rx_play,
+        rx_play_for_playback,
         stop_play_rx,
-        stop_all_rx,
+        stop_all_rx.clone(),
         playback_active,
         gate_until_ms,
         paused,
@@ -208,44 +202,56 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
   // ---- Thread: router ----
   let router_handle = thread::spawn({
-    let stop_all_rx = stop_all_rx.clone();
-    move || router::router_thread(rx_rec, tx_play, out_channels, stop_all_rx)
-  });
-
-  // ---- Thread: record ----
-  let rec_handle = thread::spawn({
-    let playback_active = playback_active.clone();
-    let gate_until_ms = gate_until_ms.clone();
-    let stop_all_rx = stop_all_rx.clone();
-    let stop_play_tx = stop_play_tx.clone();
-    let interrupt_counter = interrupt_counter.clone();
-    let in_dev = in_dev.clone();
-    let tx_rec_thread = tx_rec.clone();
-    let in_cfg_supported_thread = in_cfg_supported.clone();
-    let in_cfg_thread = in_cfg.clone();
-    let ui = ui.clone();
     move || {
-      record::record_thread(
-        START_INSTANT.clone(),
-        in_dev,
-        in_cfg_supported_thread,
-        in_cfg_thread.clone(),
-        tx_rec_thread.clone(),
-        tx_utt_rec.clone(),
-        vad_thresh.clone(),
-        end_silence_ms.clone(),
-        playback_active.clone(),
-        gate_until_ms.clone(),
-        stop_play_tx.clone(),
-        interrupt_counter.clone(),
-        stop_all_rx.clone(),
-        ui.peak.clone(),
-        ui.clone(),
+      router::router_thread(
+        rx_play_for_router,
+        tx_play_for_router,
+        out_channels,
+        stop_all_rx_for_router.clone(),
       )
     }
   });
 
-  // ---- Thread: conversation ----
+  let (tx_audio_into_router, rx_audio_into_router) = (tx_play.clone(), rx_play.clone());
+
+  // ---- Thread: record ----
+  let rec_handle = thread::spawn({
+    let start_instant = START_INSTANT.clone();
+    let device = in_dev.clone();
+    let supported = in_cfg_supported;
+    let config = in_cfg;
+    let tx = tx_rec.clone();
+    let tx_utt = tx_utt.clone();
+    let vad_thresh = vad_thresh;
+    let end_silence_ms = end_silence_ms;
+    let playback_active = playback_active.clone();
+    let gate_until_ms = gate_until_ms.clone();
+    let stop_play_tx = stop_play_tx.clone();
+    let interrupt_counter = interrupt_counter.clone();
+    let stop_all_rx = stop_all_rx_for_record.clone();
+    let peak = ui.peak.clone();
+    let ui = ui.clone();
+    move || {
+      record::record_thread(
+        start_instant,
+        device,
+        supported,
+        config,
+        tx,
+        tx_utt,
+        vad_thresh,
+        end_silence_ms,
+        playback_active,
+        gate_until_ms,
+        stop_play_tx,
+        interrupt_counter,
+        stop_all_rx,
+        peak,
+        ui,
+      )
+    }
+  });
+
   let conv_handle = thread::spawn({
     let out_sample_rate = out_sample_rate;
     let interrupt_counter = interrupt_counter.clone();
@@ -253,15 +259,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ui = ui.clone();
     let status_line = status_line.clone();
     let print_lock = print_lock.clone();
-    let tx_utt_rec = tx_utt.clone();
-    let rx_utt = rx_utt.clone();
-    let stop_all_rx = stop_all_rx.clone();
     move || {
       conversation::conversation_thread(
         voice_selected,
         rx_utt,
-        tx_utt_rec,
-        stop_all_rx,
+        tx_audio_into_router.clone(),
+        stop_all_rx.clone(),
         out_sample_rate,
         interrupt_counter,
         args,
@@ -272,10 +275,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
   });
 
-  // ---- Thread: keyboard (space = pause/resume while playing; Enter/Esc = quit) ----
   let key_handle = thread::spawn({
     let stop_all_tx = stop_all_tx.clone();
-    let stop_all_rx = stop_all_rx.clone();
+    let stop_all_rx = stop_all_rx_for_keyboard.clone();
     let paused = paused.clone();
     let playback_active = playback_active.clone();
     move || keyboard::keyboard_thread(stop_all_tx, stop_all_rx, paused, playback_active)
@@ -303,7 +305,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   let _ = router_handle.join().unwrap();
   let _ = play_handle.join().unwrap();
   let _ = conv_handle.join().unwrap();
-  ui_handle.join().unwrap();
+  let _ = ui_handle.join().unwrap();
 
   Ok(())
 }

@@ -10,14 +10,92 @@ use std::sync::{
   atomic::{AtomicU64, Ordering},
 };
 use urlencoding;
-
-use crate::audio;
+use kokoro_tiny::TtsEngine;
 
 // API
 // ------------------------------------------------------------------
 
-// Voice mapping – key: language id, value: voice string
-pub const DEFAULT_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
+// TUNABLES
+// ------------------------------------------------------------------
+
+pub const CHUNK_FRAMES: usize = 512; // Frames per chunk (per-channel interleaved)
+pub const QUEUE_CAP_FRAMES: usize = 48_000 * 15; // Playback queue capacity in frames at output SR; 15 seconds worth (scaled by channels)
+
+/// Result of attempting to synthesize/stream a TTS phrase.
+/// We distinguish a clean completion from a user interruption so the
+/// conversation thread can reliably print "USER interrupted" and stop
+/// emitting further assistant output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpeakOutcome {
+  Completed,
+  Interrupted,
+}
+
+//  Kokoro Tiny TTS integration -------------------------------------
+// +++++++++++++++++++++++++++++
+
+pub const DEFAULT_KOKORO_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
+  ("ar", ""),
+  ("bn", ""),
+  ("ca", ""),
+  ("cs", ""),
+  ("de", ""),
+  ("el", ""),
+  ("en", "af_sky"),
+  ("es", ""),
+  ("fi", ""),
+  ("fr", ""),
+  ("gu", ""),
+  ("hi", ""),
+  ("hu", ""),
+  ("it", ""),
+  ("ja", ""),
+  ("kn", ""),
+  ("ko", ""),
+  ("mr", ""),
+  ("nl", ""),
+  ("pa", ""),
+  ("ru", ""),
+  ("sv", ""),
+  ("sw", ""),
+  ("ta", ""),
+  ("te", ""),
+  ("tr", ""),
+  ("zh", ""),
+];
+
+pub fn speak_via_kokoro(
+  text: &str,
+  _opentts_base_url: &str,
+  language: &str,
+  voice: &str,
+  tx: Sender<crate::audio::AudioChunk>,
+  stop_all_rx: Receiver<()>,
+  interrupt_counter: Arc<AtomicU64>,
+  expected_interrupt: u64,
+) -> Result<SpeakOutcome, Box<dyn std::error::Error + Send + Sync>> {
+  if text.is_empty() {
+    return Ok(SpeakOutcome::Completed);
+  }
+  let rt = tokio::runtime::Builder::new_current_thread()
+    .enable_all()
+    .build()?;
+  let mut tts = rt.block_on(TtsEngine::new())?;
+  let mut samples: Vec<f32> = tts.synthesize(text, Some(voice))?;
+  // Kokoro always returns 24 kHz PCM. No resampling needed here.
+  let chunk = crate::audio::AudioChunk {
+    data: samples,
+    channels: 1,
+    sample_rate: 24000,
+  };
+  tx.send(chunk)?;
+  Ok(SpeakOutcome::Completed)
+}
+
+//  OpenTTS integration ---------------------------------------------
+// +++++++++++++++++++++++++++++
+
+pub const DEFAULT_OPENTTS_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
   ("ar", "festival:ara_norm_ziad_hts"),
   ("bn", "flite:cmu_indic_ben_rm"),
   ("ca", "festival:upc_ca_ona_hts"),
@@ -46,21 +124,6 @@ pub const DEFAULT_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
   ("tr", "marytts:dfki-ot-hsmm"),
   ("zh", "coqui-tts:zh_baker"),
 ];
-
-// TUNABLES
-pub const CHUNK_FRAMES: usize = 512; // Frames per chunk (per-channel interleaved)
-pub const QUEUE_CAP_FRAMES: usize = 48_000 * 15; // Playback queue capacity in frames at output SR; 15 seconds worth (scaled by channels)
-
-/// Result of attempting to synthesize/stream a TTS phrase.
-///
-/// We distinguish a clean completion from a user interruption so the
-/// conversation thread can reliably print "USER interrupted" and stop
-/// emitting further assistant output.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SpeakOutcome {
-  Completed,
-  Interrupted,
-}
 
 pub fn speak_via_opentts(
   text: &str,
@@ -99,15 +162,6 @@ pub fn speak_via_opentts(
 // PRIVATE
 // ------------------------------------------------------------------
 
-// Critical invariant:
-//  AudioChunk.sample_rate MUST equal CPAL output stream's sample_rate,
-//  otherwise you get slow/fast playback.
-//
-// This function guarantees that by:
-// - reading the whole WAV "data" chunk
-// - decoding PCM16LE -> f32 interleaved
-// - resampling interleaved to target_sr (playback SR)
-// - sending chunks with sample_rate = target_sr
 fn stream_wav16le_over_http(
   url: &str,
   tx: Sender<crate::audio::AudioChunk>,
@@ -194,12 +248,6 @@ fn stream_wav16le_over_http(
   );
 
   // IMPORTANT: Don't `read_exact(data_len)` in one shot.
-  // That can block until the entire WAV payload downloads, which prevents us
-  // from reacting to user interruption (mic speech) during multi-phrase TTS.
-  //
-  // Fast path: OpenTTS usually honors the `sample_rate=...` query param, so
-  // we can stream-decode PCM16LE and forward it immediately without buffering
-  // the full response.
   let samples_per_chunk = CHUNK_FRAMES * channels as usize;
 
   if sample_rate == target_sr {
@@ -237,7 +285,6 @@ fn stream_wav16le_over_http(
         }
 
         let mut data = pending.drain(..samples_per_chunk).collect::<Vec<f32>>();
-
         // frame-align
         let aligned = data.len() - (data.len() % channels as usize);
         if aligned == 0 {
@@ -248,12 +295,11 @@ fn stream_wav16le_over_http(
         tx.send(crate::audio::AudioChunk {
           data,
           channels,
-          sample_rate: target_sr, // MUST match playback SR
+          sample_rate: target_sr,
         })?;
       }
     }
 
-    // Flush remainder (frame aligned)
     let aligned = pending.len() - (pending.len() % channels as usize);
     pending.truncate(aligned);
     if !pending.is_empty() {
@@ -270,8 +316,6 @@ fn stream_wav16le_over_http(
       })?;
     }
   } else {
-    // Slow path: if OpenTTS didn't match the requested sample rate, buffer
-    // the full payload and resample (keeps existing feature working).
     let mut pcm = vec![0u8; data_len as usize];
     reader.read_exact(&mut pcm)?;
     if stop_all_rx.try_recv().is_ok() {

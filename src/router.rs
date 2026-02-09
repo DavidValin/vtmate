@@ -19,11 +19,12 @@ pub fn router_thread(
       recv(rx) -> msg => {
         let Ok(chunk) = msg else { break };
         let converted = convert_channels(&chunk.data, chunk.channels, out_channels);
-        let _ = tx.send(crate::audio::AudioChunk {
+        let out_chunk = crate::audio::AudioChunk {
           data: converted,
           channels: out_channels,
           sample_rate: chunk.sample_rate,
-        });
+        };
+        let _ = tx.send(out_chunk);
       }
     }
   }

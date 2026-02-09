@@ -240,8 +240,6 @@ pub fn playback_thread(
         let Ok(chunk) = msg else { break };
 
         // Sanity: must match playback SR
-
-
         let channels = out_channels as usize;
         let max_samples = crate::tts::QUEUE_CAP_FRAMES * channels;
 
@@ -255,7 +253,6 @@ pub fn playback_thread(
           }
           thread::sleep(Duration::from_millis(5));
         }
-
         {
           let mut q = queue.lock().unwrap();
           // resample if needed

@@ -91,20 +91,19 @@ pub fn conversation_thread(
             crate::ui::ui_println(&print_lock, &status_line, &phrase);
             conversation_history.push_str(&format!("{}: {}\n", crate::ui::ASSIST_LABEL, phrase));
 
-            let outcome = match crate::tts::speak_via_opentts(
+            let outcome = match crate::tts::speak_via_kokoro(
               &strip_special_chars(&phrase),
               args.opentts_base_url.as_str(),
               args.language.as_str(),
               voice,
-              out_sample_rate,
               tx_audio_into_router.clone(),
               stop_all_rx.clone(),
               interrupt_counter.clone(),
               my_interrupt,
             ) {
               Ok(o) => o,
-              Err(_e) => {
-                crate::log::log("error", "error communicating with TTS, please make sure the service is up; start OpenTTS using: \x1b[90mdocker run --rm -p 5500:5500 synesthesiam/opentts:all\x1b[0m");
+              Err(e) => {
+                crate::log::log("error", &format!("TTS error: {}", e));
                 interrupted = true;
                 return;
               }
@@ -148,17 +147,22 @@ pub fn conversation_thread(
         if let Some(phrase) = speaker.flush() {
           crate::ui::ui_println(&print_lock, &status_line, &phrase);
           conversation_history.push_str(&format!("{}: {}\n", crate::ui::ASSIST_LABEL, phrase));
-          let outcome = crate::tts::speak_via_opentts(
+          let outcome = match crate::tts::speak_via_kokoro(
             &strip_special_chars(&phrase),
             args.opentts_base_url.as_str(),
             args.language.as_str(),
             voice,
-            out_sample_rate,
             tx_audio_into_router.clone(),
             stop_all_rx.clone(),
             interrupt_counter.clone(),
             my_interrupt,
-          )?;
+          ) {
+            Ok(o) => o,
+            Err(e) => {
+              crate::log::log("error", &format!("TTS error: {}", e));
+              return Err(e.into()); // propagate
+            }
+          };
 
           if outcome == crate::tts::SpeakOutcome::Interrupted
             || interrupt_counter.load(Ordering::SeqCst) != my_interrupt
