@@ -17,6 +17,7 @@ use std::time::Duration;
 use urlencoding;
 
 // API
+use crate::log;
 // ------------------------------------------------------------------
 
 // TUNABLES
