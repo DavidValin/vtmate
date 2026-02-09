@@ -2,7 +2,7 @@
 //  Router
 // ------------------------------------------------------------------
 
-use crossbeam_channel::{Receiver, Sender, select};
+use crossbeam_channel::{select, Receiver, Sender};
 
 // API
 // ------------------------------------------------------------------

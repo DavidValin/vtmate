@@ -26,6 +26,6 @@ pub fn log(msg_type: &str, msg: &str) {
     "error" => "❌",
     _ => "",
   };
-  write!(out, "\r\x1b[K{}  {}\n", emoji, msg).unwrap();
+  write!(out, "\r\x1b[K{}  \x1b[90m{}\x1b[0m\n", emoji, msg).unwrap();
   out.flush().unwrap();
 }

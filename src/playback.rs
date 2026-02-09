@@ -3,12 +3,12 @@
 // ------------------------------------------------------------------
 
 use cpal::traits::{DeviceTrait, StreamTrait};
-use crossbeam_channel::{Receiver, select};
+use crossbeam_channel::{select, Receiver};
 use std::collections::VecDeque;
 use std::sync::OnceLock;
 use std::sync::{
-  Arc, Mutex,
   atomic::{AtomicBool, AtomicU64, Ordering},
+  Arc, Mutex,
 };
 use std::thread;
 use std::time::Duration;
