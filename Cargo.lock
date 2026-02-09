@@ -25,6 +25,7 @@ dependencies = [
  "cpal",
  "crossbeam-channel",
  "crossterm",
+ "espeak-rs",
  "hound",
  "kokoro-tiny",
  "reqwest",
@@ -1157,8 +1158,6 @@ dependencies = [
 [[package]]
 name = "kokoro-tiny"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eea29a0b5c7b28a98ef23589df3ffacd93e38b7704aa72f84a746a422b5c1315"
 dependencies = [
  "atty",
  "clap",
@@ -2945,7 +2944,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

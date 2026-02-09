@@ -3,14 +3,16 @@
 // ------------------------------------------------------------------
 
 use crossbeam_channel::{Receiver, Sender};
+use kokoro_tiny::TtsEngine;
+use espeak_rs::text_to_phonemes;
 use reqwest;
 use std::io::{BufReader, Read};
 use std::sync::{
-  Arc,
   atomic::{AtomicU64, Ordering},
+  Arc,
 };
 use urlencoding;
-use kokoro_tiny::TtsEngine;
+
 
 // API
 // ------------------------------------------------------------------
@@ -34,6 +36,123 @@ pub enum SpeakOutcome {
 //  Kokoro Tiny TTS integration -------------------------------------
 // +++++++++++++++++++++++++++++
 
+// ALL voices available per language
+// ----------------------------------
+// AMERICAN ENGLISH (a)
+// -----------------
+// Female
+//   af_alloy
+//   af_aoede
+//   af_bella
+//   af_heart
+//   af_jessica
+//   af_kore
+//   af_nicole
+//   af_nova
+//   af_river
+//   af_sarah
+//   af_sky
+
+// Male
+//   am_adam
+//   am_echo
+//   am_eric
+//   am_fenrir
+//   am_liam
+//   am_michael
+//   am_onyx
+//   am_puck
+//   am_santa
+
+
+// BRITISH ENGLISH (b)
+// -----------------
+// Female
+//   bf_alice
+//   bf_emma
+//   bf_isabella
+//   bf_lily
+
+// Male
+//   bm_daniel
+//   bm_fable
+//   bm_george
+//   bm_lewis
+
+
+// SPANISH (e)
+// -----------------
+// Female
+//   ef_dora
+
+// Male
+//   em_alex
+//   em_santa
+
+
+// FRENCH (f)
+
+// Female
+//   ff_siwis
+
+
+// HINDI (h)
+// -----------------
+// Female
+//   hf_alpha
+//   hf_beta
+
+// Male
+//   hm_omega
+//   hm_psi
+
+
+// ITALIAN (i)
+// -----------------
+// Female
+//   if_sara
+
+// Male
+//   im_nicola
+
+
+// PORTUGUESE – BRAZIL (p)
+// -----------------
+// Female
+//   pf_dora
+
+// Male
+//   pm_alex
+//   pm_santa
+
+
+// JAPANESE (j)
+// -----------------
+// Female
+//   jf_alpha
+//   jf_gongitsune
+//   jf_nezumi
+//   jf_tebukuro
+
+// Male
+//   jm_kumo
+
+
+// MANDARIN CHINESE (z)
+// -----------------
+// Female
+//   zf_xiaobei
+//   zf_xiaoni
+//   zf_xiaoxiao
+//   zf_xiaoyi
+
+// Male
+//   zm_yunjian
+//   zm_yunxi
+//   zm_yunxia
+//   zm_yunyang
+
+
 pub const DEFAULT_KOKORO_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
   ("ar", ""),
   ("bn", ""),
@@ -42,7 +161,7 @@ pub const DEFAULT_KOKORO_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
   ("de", ""),
   ("el", ""),
   ("en", "af_sky"),
-  ("es", ""),
+  ("es", "em_santa"),
   ("fi", ""),
   ("fr", ""),
   ("gu", ""),
@@ -67,7 +186,7 @@ pub const DEFAULT_KOKORO_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
 pub fn speak_via_kokoro(
   text: &str,
   _opentts_base_url: &str,
-  language: &str,
+  language: &str, // "en", "es", "fr", "it", "pt", "ja", "zh", ...
   voice: &str,
   tx: Sender<crate::audio::AudioChunk>,
   stop_all_rx: Receiver<()>,
@@ -77,17 +196,26 @@ pub fn speak_via_kokoro(
   if text.is_empty() {
     return Ok(SpeakOutcome::Completed);
   }
+
   let rt = tokio::runtime::Builder::new_current_thread()
     .enable_all()
     .build()?;
-  let mut tts = rt.block_on(TtsEngine::new())?;
-  let mut samples: Vec<f32> = tts.synthesize(text, Some(voice))?;
+
+  let mut engine = rt.block_on(TtsEngine::new())?;
+
+  let samples: Vec<f32> = engine.synthesize_with_lang(
+    text,
+    Some(voice),
+    language, // ← THIS is the fix ("es" for ef_dora)
+  ).map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?;
+
   // Kokoro always returns 24 kHz PCM. No resampling needed here.
   let chunk = crate::audio::AudioChunk {
     data: samples,
     channels: 1,
-    sample_rate: 24000,
+    sample_rate: 24_000, // kokoro-tiny output
   };
+
   tx.send(chunk)?;
   Ok(SpeakOutcome::Completed)
 }
@@ -329,7 +457,8 @@ fn stream_wav16le_over_http(
       let s = i16::from_le_bytes([pcm[i], pcm[i + 1]]);
       decoded.push(s as f32 / 32768.0);
     }
-    let decoded = audio::resample_interleaved_linear(&decoded, channels, sample_rate, target_sr);
+    let decoded =
+      crate::audio::resample_interleaved_linear(&decoded, channels, sample_rate, target_sr);
     let mut offset = 0usize;
     while offset < decoded.len() {
       if stop_all_rx.try_recv().is_ok() {
