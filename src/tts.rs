@@ -150,7 +150,7 @@ pub const DEFAULT_KOKORO_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
   ("de", ""),
   ("el", ""),
   ("en", "af_sky"),
-  ("es", "em_santa"),
+  ("es", "em_alex"),
   ("fi", ""),
   ("fr", ""),
   ("gu", ""),
@@ -174,7 +174,6 @@ pub const DEFAULT_KOKORO_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
 
 pub fn speak_via_kokoro(
   text: &str,
-  _opentts_base_url: &str,
   language: &str, // "en", "es", "fr", "it", "pt", "ja", "zh", ...
   voice: &str,
   tx: Sender<crate::audio::AudioChunk>,

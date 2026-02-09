@@ -93,7 +93,6 @@ pub fn conversation_thread(
 
             let outcome = match crate::tts::speak_via_kokoro(
               &strip_special_chars(&phrase),
-              args.opentts_base_url.as_str(),
               args.language.as_str(),
               voice,
               tx_audio_into_router.clone(),
@@ -149,7 +148,6 @@ pub fn conversation_thread(
           conversation_history.push_str(&format!("{}: {}\n", crate::ui::ASSIST_LABEL, phrase));
           let outcome = match crate::tts::speak_via_kokoro(
             &strip_special_chars(&phrase),
-            args.opentts_base_url.as_str(),
             args.language.as_str(),
             voice,
             tx_audio_into_router.clone(),
