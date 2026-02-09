@@ -137,3 +137,5 @@ alias ai-mate_es_llama='ai-mate --ollama-model "llama3:8b" --language es'
 ```
 
 Have fun o:)
+
+
