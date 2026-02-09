@@ -2,75 +2,82 @@
 //  STT - Speech to Text
 // ------------------------------------------------------------------
 
-use hound;
-use reqwest::blocking::multipart;
-use std::io::Cursor;
+use crate::audio;
+use whisper_rs::{FullParams, SamplingStrategy, WhisperContext};
 
-// API
-// ------------------------------------------------------------------
+/// Warm‑up helper for Whisper
+/// Call this once at startup to load the model and perform a no‑op
+/// inference to cache the model into memory.
+pub fn whisper_warmup(
+  whisper_model_path: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  if !std::path::Path::new(whisper_model_path).is_file() {
+    return Err(format!("Whisper model not found: {}", whisper_model_path).into());
+  }
+  let ctx = WhisperContext::new_with_params(whisper_model_path, Default::default())?;
+  let mut state = ctx.create_state()?;
+  let empty: Vec<f32> = vec![0.0; 160]; // 10 ms at 16kHz
+  state.full(
+    FullParams::new(SamplingStrategy::BeamSearch {
+      beam_size: 1,
+      patience: -1.0,
+    }),
+    &empty,
+  )?;
+  Ok(())
+}
 
 pub fn whisper_transcribe(
   pcm_chunks: &[i16],
   sample_rate: u32,
-  channels: u16,
-  openai_api_key: &str,
+  whisper_model_path: &str,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-  // Convert PCM to f32, resample to 16kHz mono, then encode to WAV in memory
-  // Convert input to f32 samples
-  let samples_f32: Vec<f32> = pcm_chunks
-    .iter()
-    .map(|&s| s as f32 / i16::MAX as f32)
-    .collect();
-  // Resample to 16kHz mono
-  let resampled = crate::audio::resample_to(&samples_f32, channels, sample_rate, 16_000);
-  let mono = crate::audio::mix_to_mono(&resampled, channels);
-  // Convert back to i16
-  let wav_data: Vec<i16> = mono
-    .iter()
-    .map(|&s| (s * i16::MAX as f32).clamp(-i16::MAX as f32, i16::MAX as f32) as i16)
-    .collect();
+  let mut inter_samples = vec![0f32; pcm_chunks.len()];
+  whisper_rs::convert_integer_to_float_audio(pcm_chunks, &mut inter_samples)?;
 
-  // Write WAV to memory
-  let mut cursor = Cursor::new(Vec::<u8>::new());
-  let spec = hound::WavSpec {
-    channels: 1,
-    sample_rate: 16_000,
-    bits_per_sample: 16,
-    sample_format: hound::SampleFormat::Int,
+  let mono_samples = {
+    let mono = whisper_rs::convert_stereo_to_mono_audio(&inter_samples)
+      .map_err(|e| format!("Failed to convert audio: {:?}", e))?;
+    if sample_rate != 16000 {
+      audio::resample_to(&mono, 1, sample_rate, 16000)
+    } else {
+      mono
+    }
   };
-  let mut writer = hound::WavWriter::new(&mut cursor, spec)?;
-  for &sample in wav_data.iter() {
-    writer.write_sample(sample)?;
+
+  let model_path = whisper_model_path;
+  if !std::path::Path::new(&model_path).is_file() {
+    return Err(format!("Whisper model not found: {}", model_path).into());
   }
-  writer.finalize()?;
-
-  let wav_bytes = cursor.into_inner();
-
-  // ---- multipart upload ----
-  let file_part = multipart::Part::bytes(wav_bytes)
-    .file_name("audio.wav")
-    .mime_str("audio/wav")?;
-
-  let form = multipart::Form::new()
-    .text("model", "whisper-1")
-    .text("temperature", "0.0")
-    .text("temperature_inc", "0.2")
-    .text("response_format", "json")
-    .part("file", file_part);
-
-  let client = reqwest::blocking::Client::new();
-  let resp = client
-    .post("http://127.0.0.1:8080/inference")
-    .bearer_auth(openai_api_key)
-    .multipart(form)
-    .send()?;
-
-  // Better error visibility if non-2xx
-  let status = resp.status();
-  let json: serde_json::Value = resp.json()?;
-  if !status.is_success() {
-    return Err(format!("Whisper HTTP error {}: {}", status, json).into());
+  if !std::path::Path::new(&model_path).is_file() {
+    return Err(format!("Whisper model not found: {}", model_path).into());
   }
+  let ctx = WhisperContext::new_with_params(&model_path, Default::default())?;
+  let mut state = ctx.create_state()?;
+  let mut params = FullParams::new(SamplingStrategy::BeamSearch {
+    beam_size: 5,
+    patience: -1.0,
+  });
+  params.set_print_progress(false);
+  params.set_print_special(false);
+  params.set_print_timestamps(false);
+  params.set_print_realtime(false);
 
-  Ok(json["text"].as_str().unwrap_or_default().to_string())
+  state
+    .full(params, &mono_samples[..])
+    .map_err(|e| format!("Inference failed: {:?}", e))?;
+
+  let mut result = String::new();
+  let seg_count = state.full_n_segments() as usize;
+  for i in 0..seg_count {
+    let seg = state
+      .get_segment(i as i32)
+      .ok_or_else(|| format!("Segment {} out of range", i))?;
+    let seg_text = seg
+      .to_str_lossy()
+      .map_err(|e| format!("Failed to get segment text: {:?}", e))?;
+    result.push_str(&seg_text);
+    result.push(' ');
+  }
+  Ok(result.trim_end().to_string())
 }

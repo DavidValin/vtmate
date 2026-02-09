@@ -2,18 +2,16 @@
 //  Keyboard handling
 // ------------------------------------------------------------------
 
-
-
 use crossbeam_channel::{Receiver, Sender};
-use std::sync::{
-  Arc,
-  atomic::{AtomicBool, Ordering},
-};
-use std::time::{Duration};
 use crossterm::{
   event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
   terminal,
 };
+use std::sync::{
+  Arc,
+  atomic::{AtomicBool, Ordering},
+};
+use std::time::Duration;
 
 // API
 // ------------------------------------------------------------------

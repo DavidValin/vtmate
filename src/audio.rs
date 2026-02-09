@@ -2,8 +2,6 @@
 //  Audio processing
 // ------------------------------------------------------------------
 
-
-
 use cpal::traits::{DeviceTrait, HostTrait};
 
 // API
@@ -15,7 +13,6 @@ pub struct AudioChunk {
   pub channels: u16,
   pub sample_rate: u32,
 }
-
 
 pub fn pick_input_stream(host: &cpal::Host) -> Result<(cpal::Device, cpal::Stream), String> {
   let err = || {
@@ -29,17 +26,11 @@ pub fn pick_input_stream(host: &cpal::Host) -> Result<(cpal::Device, cpal::Strea
   let cfg = dev.default_input_config().map_err(|_| err())?;
 
   let stream = dev
-    .build_input_stream(
-      &cfg.clone().into(),
-      |_data: &[f32], _| {},
-      |_err| {},
-      None,
-    )
+    .build_input_stream(&cfg.clone().into(), |_data: &[f32], _| {}, |_err| {}, None)
     .map_err(|_| err())?;
 
   Ok((dev, stream))
 }
-
 
 pub fn pick_output_stream(host: &cpal::Host) -> Result<(cpal::Device, cpal::Stream), String> {
   let err = || {
@@ -62,9 +53,13 @@ pub fn pick_output_stream(host: &cpal::Host) -> Result<(cpal::Device, cpal::Stre
   Ok((dev, stream))
 }
 
-
 /// Linear interpolation resample of interleaved audio.
-pub fn resample_interleaved_linear(input: &[f32], channels: u16, in_sr: u32, out_sr: u32) -> Vec<f32> {
+pub fn resample_interleaved_linear(
+  input: &[f32],
+  channels: u16,
+  in_sr: u32,
+  out_sr: u32,
+) -> Vec<f32> {
   if in_sr == out_sr || input.is_empty() {
     return input.to_vec();
   }
@@ -98,7 +93,6 @@ pub fn resample_interleaved_linear(input: &[f32], channels: u16, in_sr: u32, out
   out
 }
 
-
 /// Linear interpolation resample of mono audio.
 pub fn resample_linear(input: &[f32], in_sr: u32, out_sr: u32) -> Vec<f32> {
   if in_sr == out_sr || input.is_empty() {
@@ -119,23 +113,7 @@ pub fn resample_linear(input: &[f32], in_sr: u32, out_sr: u32) -> Vec<f32> {
   out
 }
 
-
-pub fn mix_to_mono(data: &[f32], channels: u16) -> Vec<f32> {
-    let mut mono = Vec::with_capacity(data.len() / channels as usize);
-    for frame in data.chunks_exact(channels as usize) {
-        let sum: f32 = frame.iter().sum();
-        mono.push(sum / channels as f32);
-    }
-    mono
-}
-
-
-pub fn resample_to(
-    input: &[f32],
-    channels: u16,
-    in_sr: u32,
-    out_sr: u32,
-) -> Vec<f32> {
+pub fn resample_to(input: &[f32], channels: u16, in_sr: u32, out_sr: u32) -> Vec<f32> {
   if in_sr == out_sr || input.is_empty() {
     return input.to_vec();
   }

@@ -2,10 +2,8 @@
 //  Configuration
 // ------------------------------------------------------------------
 
-
-
 use clap::Parser;
-use cpal::{Device};
+use cpal::Device;
 use cpal::traits::DeviceTrait;
 
 // API
@@ -35,6 +33,10 @@ pub struct Args {
   #[arg(long, default_value = OLLAMA_MODEL_DEFAULT, env = "OLLAMA_MODEL")]
   pub ollama_model: String,
 
+  /// Whisper model file path
+  #[arg(long, default_value = WHISPER_MODEL_PATH, env = "WHISPER_MODEL_PATH")]
+  pub whisper_model_path: String,
+
   /// OpenTTS base URL (we append &sample_rate=...&text=...)
   #[arg(long, default_value = OPENTTS_BASE_URL_DEFAULT, env = "OPENTTS_BASE_URL")]
   pub opentts_base_url: String,
@@ -52,26 +54,33 @@ pub struct Args {
   pub end_silence_ms: u64,
 }
 
-
 // CLI parameters default values ---------------------------------------------------
 
-// “Sound” threshold for stop-on-speech while playing (peak abs amplitude in [-1,1])
 const SOUND_THRESHOLD_PEAK_DEFAULT: f32 = 0.10;
-
-// After stopping playback, keep mic forwarding silence for this long (ms)
 pub const HANGOVER_MS_DEFAULT: u64 = 0;
-
-// End an utterance after this much continuous silence (peak < threshold)
 const END_SILENCE_MS_DEFAULT: u64 = 850;
 pub const MIN_UTTERANCE_MS_DEFAULT: u64 = 300;
-
-// Ollama + Whisper + TTS configuration
 pub const OLLAMA_URL_DEFAULT: &str = "http://localhost:11434/api/generate";
 pub const OLLAMA_MODEL_DEFAULT: &str = "llama3.2:3b";
+pub const WHISPER_MODEL_PATH: &str = "~/.whisper-models/ggml-medium-q5_0.bin";
 
-// OpenTTS base endpoint (we append sample_rate + text)
+impl Args {
+  /// Resolve the whisper model path, expanding ~ to home directory.
+  pub fn resolved_whisper_model_path(&self) -> String {
+    if self.whisper_model_path.starts_with("~") {
+      let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".to_string());
+      let rel = self.whisper_model_path.trim_start_matches("~");
+      let mut p = std::path::PathBuf::from(home);
+      p.push(&rel[1..]); // remove leading /
+      p.to_string_lossy().into_owned()
+    } else {
+      self.whisper_model_path.clone()
+    }
+  }
+}
 const OPENTTS_BASE_URL_DEFAULT: &str = "http://0.0.0.0:5500/api/tts?&vocoder=high&denoiserStrength=0.005&&speakerId=&ssml=false&ssmlNumbers=true&ssmlDates=true&ssmlCurrency=true&cache=false";
-
 
 /// Pick an input configuration that matches the preferred sample rate as closely as possible.
 ///
@@ -113,6 +122,3 @@ pub fn pick_input_config(
     .next()
     .ok_or_else(|| "no supported input configs".into())
 }
-
-
-

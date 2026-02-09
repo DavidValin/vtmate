@@ -2,11 +2,12 @@
 //  LLM handling
 // ------------------------------------------------------------------
 
-
-
-use crossbeam_channel::{Receiver};
-use std::sync::{Arc, atomic::{AtomicU64, Ordering}};
+use crossbeam_channel::Receiver;
 use std::io::{BufRead, BufReader};
+use std::sync::{
+  Arc,
+  atomic::{AtomicU64, Ordering},
+};
 
 // API
 // ------------------------------------------------------------------

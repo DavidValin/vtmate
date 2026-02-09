@@ -29,9 +29,7 @@ Install dependencies:
 - Download Docker: `https://docs.docker.com/engine/install` (needed for STT)
 - Download Ollama: `https://ollama.com/download` (needed for ai responses)
 - Pull an ollama model: `ollama pull llama3.2:3b` (or the model you want to use)
-- Download Whisper: `https://huggingface.co/Mozilla/whisperfile/resolve/main/whisper-medium.llamafile?download=true` (needed for TTS) this contains whisper.cpp + whisper model.
-- (Only MacOS / Linux): `whisper-medium.llamafile` executable (`chmod +x whisper-medium.llamafile`)
-- (Only Windows): rename `whisper-medium.llamafile` to `whisper-medium.exe`
+- Download Whisper model: `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q5_0.bin?download=true` (needed for TTS).
 - (Only Windows) Install Windows Terminal (which supports emojis): `https://apps.microsoft.com/detail/9n0dx20hk701` (use this terminal to run ai-mate)
 
 ### Option A - Download a built binary for your operating system
@@ -58,7 +56,6 @@ The `ai-mate` program will be under `~/.cargo/bin`. Make sure this directory is 
 
 Run services:
 
-- `./whisper-medium.llamafile`
 - `ollama serve`
 - `docker run --rm --platform=linux/amd64 -p 5500:5500 synesthesiam/opentts:all` (it will pull the image the first time). Adjust the platform as needed depending on your hardware. This container contains within all the voices for all languages.
 
@@ -71,8 +68,9 @@ ai-mate \
   --language en \
   --sound-threshold-peak 0.10 \
   --end-silence-ms 850 \
-  --ollama-url "http://localhost:11434/api/generate" \
+  --whisper-model-path ~/.whisper-models/ggml-medium-q5_0.bin \
   --ollama-model "llama3.2:3b" \
+  --ollama-url "http://localhost:11434/api/generate" \
   --opentts-base-url "http://0.0.0.0:5500/api/tts?vocoder=high&denoiserStrength=0.005&&speakerId=&ssml=false&ssmlNumbers=true&ssmlDates=true&ssmlCurrency=true&cache=false"
 ```
 

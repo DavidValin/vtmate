@@ -2,12 +2,15 @@
 //  UI (single renderer thread)
 // ------------------------------------------------------------------
 
-use crossbeam_channel::{Receiver};
-use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
+use crossbeam_channel::Receiver;
+use crossterm::terminal;
+use std::io::Write;
+use std::sync::{
+  Arc, Mutex,
+  atomic::{AtomicBool, Ordering},
+};
 use std::thread;
-use std::io::{Write};
-use crossterm::{terminal};
-use std::time::{Duration};
+use std::time::Duration;
 
 // API
 // ------------------------------------------------------------------
@@ -17,7 +20,7 @@ pub struct UiState {
   pub thinking: Arc<AtomicBool>,
   pub playing: Arc<AtomicBool>,
   pub speaking: Arc<AtomicBool>, // voice activity flag
-  pub peak: Arc<Mutex<f32>>,   // current audio peak
+  pub peak: Arc<Mutex<f32>>,     // current audio peak
 }
 
 // ANSI label styling
@@ -99,7 +102,6 @@ pub fn spawn_ui_thread(
     let _ = std::io::stdout().flush();
   })
 }
-
 
 /// Print a content line while a spinner/status line is being repainted.
 ///

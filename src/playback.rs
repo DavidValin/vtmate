@@ -2,22 +2,23 @@
 //  Playback
 // ------------------------------------------------------------------
 
-
-
-use crossbeam_channel::{Receiver, select};
-use std::sync::{Arc, Mutex, atomic::{AtomicBool, AtomicU64, Ordering}};
-use std::collections::VecDeque;
-use std::time::{Duration};
-use std::thread;
-use std::sync::{OnceLock};
-use std::time::{Instant};
 use cpal::traits::{DeviceTrait, StreamTrait};
+use crossbeam_channel::{Receiver, select};
+use std::collections::VecDeque;
+use std::sync::OnceLock;
+use std::sync::{
+  Arc, Mutex,
+  atomic::{AtomicBool, AtomicU64, Ordering},
+};
+use std::thread;
+use std::time::Duration;
+use std::time::Instant;
 
 // API
 // ------------------------------------------------------------------
 
 pub fn playback_thread(
-  start_instant:OnceLock<Instant>,
+  start_instant: OnceLock<Instant>,
   device: cpal::Device,
   supported: cpal::SupportedStreamConfig,
   config: cpal::StreamConfig,
@@ -32,7 +33,7 @@ pub fn playback_thread(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let start_instant_ref = start_instant.clone();
 
-  // start_instant_ref removed 
+  // start_instant_ref removed
   use cpal::SampleFormat;
 
   let queue: Arc<Mutex<VecDeque<f32>>> = Arc::new(Mutex::new(VecDeque::new()));
@@ -88,8 +89,10 @@ pub fn playback_thread(
             if n >= 3 {
               playback_active.store(false, Ordering::Relaxed);
               ui.playing.store(false, Ordering::Relaxed);
-              gate_until_ms
-                .store(crate::util::now_ms(&start_instant).saturating_add(hangover_ms), Ordering::Relaxed);
+              gate_until_ms.store(
+                crate::util::now_ms(&start_instant).saturating_add(hangover_ms),
+                Ordering::Relaxed,
+              );
             }
           }
         }
@@ -139,8 +142,10 @@ pub fn playback_thread(
             if n >= 3 {
               playback_active.store(false, Ordering::Relaxed);
               ui.playing.store(false, Ordering::Relaxed);
-              gate_until_ms
-                .store(crate::util::now_ms(&start_instant).saturating_add(hangover_ms), Ordering::Relaxed);
+              gate_until_ms.store(
+                crate::util::now_ms(&start_instant).saturating_add(hangover_ms),
+                Ordering::Relaxed,
+              );
             }
           }
         }
@@ -191,8 +196,10 @@ pub fn playback_thread(
             if n >= 3 {
               playback_active.store(false, Ordering::Relaxed);
               ui.playing.store(false, Ordering::Relaxed);
-              gate_until_ms
-                .store(crate::util::now_ms(&start_instant).saturating_add(hangover_ms), Ordering::Relaxed);
+              gate_until_ms.store(
+                crate::util::now_ms(&start_instant).saturating_add(hangover_ms),
+                Ordering::Relaxed,
+              );
             }
           }
         }
@@ -233,7 +240,7 @@ pub fn playback_thread(
         let Ok(chunk) = msg else { break };
 
         // Sanity: must match playback SR
-        
+
 
         let channels = out_channels as usize;
         let max_samples = crate::tts::QUEUE_CAP_FRAMES * channels;

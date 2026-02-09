@@ -2,10 +2,10 @@
 //  Conversation
 // ------------------------------------------------------------------
 
-use crossbeam_channel::{select, Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, select};
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc, Mutex,
+  Arc, Mutex,
+  atomic::{AtomicU64, Ordering},
 };
 
 // API
@@ -32,7 +32,7 @@ pub fn conversation_thread(
       recv(rx_utt) -> msg => {
         let Ok(utt) = msg else { break };
         let pcm: Vec<i16> = utt.data.iter().map(|s| ((*s).clamp(-1.0, 1.0) * (i16::MAX as f32)) as i16).collect();
-        let user_text = crate::stt::whisper_transcribe(&pcm, utt.sample_rate, utt.channels, "")?;
+        let user_text = crate::stt::whisper_transcribe(&pcm, utt.sample_rate, &args.resolved_whisper_model_path())?;
         let prompt = format!("{}\n{}: {}", conversation_history, crate::ui::USER_LABEL, user_text);
         let user_text = user_text.trim().to_string();
         if user_text.is_empty() {
@@ -103,13 +103,12 @@ pub fn conversation_thread(
               my_interrupt,
             ) {
               Ok(o) => o,
-              Err(e) => {
-                crate::ui::ui_println(&print_lock, &status_line, &format!("TTS error: {e}"));
+              Err(_e) => {
+                crate::log::log("error", "error communicating with TTS, please make sure the service is up; start OpenTTS using: \x1b[90mdocker run --rm -p 5500:5500 synesthesiam/opentts:all\x1b[0m");
                 interrupted = true;
                 return;
               }
             };
-
 
             if outcome == crate::tts::SpeakOutcome::Interrupted
               || (interrupt_counter.load(Ordering::SeqCst) != my_interrupt && ui.playing.load(Ordering::Relaxed))
@@ -192,20 +191,12 @@ impl PhraseSpeaker {
       || self.buf.ends_with('!')
       || self.buf.ends_with('?')
       || self.buf.len() >= 140;
-    if trigger {
-      self.flush()
-    } else {
-      None
-    }
+    if trigger { self.flush() } else { None }
   }
   fn flush(&mut self) -> Option<String> {
     let out = self.buf.trim().to_string();
     self.buf.clear();
-    if out.is_empty() {
-      None
-    } else {
-      Some(out)
-    }
+    if out.is_empty() { None } else { Some(out) }
   }
 }
 

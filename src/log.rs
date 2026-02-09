@@ -2,8 +2,6 @@
 //  Log
 // ------------------------------------------------------------------
 
-
-
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -15,7 +13,6 @@ static VERBOSE: AtomicBool = AtomicBool::new(false);
 pub fn set_verbose(v: bool) {
   VERBOSE.store(v, Ordering::Relaxed);
 }
-
 
 pub fn log(msg_type: &str, msg: &str) {
   if !VERBOSE.load(Ordering::Relaxed) && msg_type != "error" {
