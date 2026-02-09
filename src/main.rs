@@ -11,8 +11,8 @@ use cpal::traits::DeviceTrait;
 use crossbeam_channel::bounded;
 use std::process;
 use std::sync::{
-  atomic::{AtomicBool, AtomicU64},
   Arc, Mutex, OnceLock,
+  atomic::{AtomicBool, AtomicU64},
 };
 use std::thread;
 use std::time::Instant;
@@ -169,7 +169,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   log::log("info", &format!("TTS voice: {}", voice_selected));
   log::log("info", &format!("LLM engine: ollama"));
   log::log("info", &format!("ollama base url: {}", args.ollama_url));
-  
 
   // ---- Thread: UI Thread ----
   let ui_handle = ui::spawn_ui_thread(

@@ -2,9 +2,9 @@
 //  Configuration
 // ------------------------------------------------------------------
 
-use clap::{value_parser, Parser};
-use cpal::traits::DeviceTrait;
+use clap::{Parser, value_parser};
 use cpal::Device;
+use cpal::traits::DeviceTrait;
 
 // API
 // ------------------------------------------------------------------
@@ -37,7 +37,7 @@ pub struct Args {
   #[arg(long, default_value = WHISPER_MODEL_PATH, env = "WHISPER_MODEL_PATH")]
   pub whisper_model_path: String,
 
-  /// OpenTTS base URL (we append &sample_rate=...&text=...)
+  /// OpenTTS base URL (we append &text=...)
   #[arg(long, default_value = OPENTTS_BASE_URL_DEFAULT, env = "OPENTTS_BASE_URL")]
   pub opentts_base_url: String,
 
@@ -66,7 +66,7 @@ pub struct Args {
 // CLI parameters default values ---------------------------------------------------
 
 const SOUND_THRESHOLD_PEAK_DEFAULT: f32 = 0.10;
-pub const HANGOVER_MS_DEFAULT: u64 = 0;
+pub const HANGOVER_MS_DEFAULT: u64 = 100;
 const END_SILENCE_MS_DEFAULT: u64 = 850;
 pub const MIN_UTTERANCE_MS_DEFAULT: u64 = 300;
 pub const OLLAMA_URL_DEFAULT: &str = "http://localhost:11434/api/generate";

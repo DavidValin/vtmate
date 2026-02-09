@@ -13,12 +13,13 @@ use std::sync::{
 use urlencoding;
 
 // API
+use crate::log;
 // ------------------------------------------------------------------
 
 // TUNABLES
 // ------------------------------------------------------------------
 
-pub const CHUNK_FRAMES: usize = 512; // Frames per chunk (per-channel interleaved)
+pub const CHUNK_FRAMES: usize = 1024; // Frames per chunk (per-channel interleaved)
 pub const QUEUE_CAP_FRAMES: usize = 48_000 * 15; // Playback queue capacity in frames at output SR; 15 seconds worth (scaled by channels)
 
 /// Result of attempting to synthesize/stream a TTS phrase.
@@ -56,7 +57,7 @@ pub fn speak(
       expected_interrupt,
     )
   } else {
-    crate::tts::speak_via_kokoro(text, language, voice, tx)
+    crate::tts::speak_via_kokoro(text, language, voice, tx, out_sample_rate)
   }?;
   Ok(outcome)
 }
@@ -188,7 +189,7 @@ pub const KOKORO_VOICES_PER_LANGUAGE: &[(&str, &[&str])] = &[
 ];
 
 pub const DEFAULT_KOKORO_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
-  ("en", "af_sarah"),
+  ("en", "bm_fable"),
   ("es", "em_santa"),
   ("zh", "zm_yunjian"),
   ("ja", "jm_kumo"),
@@ -203,6 +204,7 @@ pub fn speak_via_kokoro(
   language: &str,
   voice: &str,
   tx: Sender<crate::audio::AudioChunk>,
+  target_sr: u32,
 ) -> Result<SpeakOutcome, Box<dyn std::error::Error + Send + Sync>> {
   if text.is_empty() {
     return Ok(SpeakOutcome::Completed);
@@ -218,13 +220,17 @@ pub fn speak_via_kokoro(
     .synthesize(text, Some(voice), Some(language))
     .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?;
 
-  // Kokoro always returns 24 kHz PCM. No resampling needed here.
-  let chunk = crate::audio::AudioChunk {
-    data: samples,
-    channels: 1,
-    sample_rate: 24_000, // kokoro-tiny output
+  // Kokoro always returns 24 kHz PCM. Resample if needed.
+  let data = if 24000 != target_sr {
+    crate::audio::resample_to(&samples, 1, 24000, target_sr)
+  } else {
+    samples
   };
-
+  let chunk = crate::audio::AudioChunk {
+    data,
+    channels: 1,
+    sample_rate: target_sr,
+  };
   tx.send(chunk)?;
   Ok(SpeakOutcome::Completed)
 }
@@ -403,39 +409,67 @@ fn stream_wav16le_over_http(
       }
 
       let want = remaining.min(buf.len());
-      reader.read_exact(&mut buf[..want])?;
+      let mut read_bytes = 0usize;
+      while read_bytes < want {
+        let n = reader.read(&mut buf[read_bytes..want])?;
+        if n == 0 {
+          break;
+        }
+        read_bytes += n;
+      }
+      if read_bytes < want {
+        return Err(
+          format!(
+            "failed to fill whole buffer: expected {} bytes, got {}",
+            want, read_bytes
+          )
+          .into(),
+        );
+      }
       remaining -= want;
 
-      // Decode PCM16LE -> f32 (interleaved)
-      let mut i = 0usize;
-      while i + 1 < want {
-        let s = i16::from_le_bytes([buf[i], buf[i + 1]]);
-        pending.push(s as f32 / 32768.0);
-        i += 2;
+      // Read all PCM data first
+      let mut pcm = Vec::new();
+      reader.read_to_end(&mut pcm)?;
+      if stop_all_rx.try_recv().is_ok() {
+        return Ok(SpeakOutcome::Interrupted);
       }
-
-      // Flush full chunks to playback.
-      while pending.len() >= samples_per_chunk {
+      if interrupt_counter.load(Ordering::SeqCst) != expected_interrupt {
+        return Ok(SpeakOutcome::Interrupted);
+      }
+      // Decode PCM16LE -> f32
+      let mut decoded: Vec<f32> = Vec::with_capacity(pcm.len() / 2);
+      for i in (0..pcm.len()).step_by(2) {
+        let s = i16::from_le_bytes([pcm[i], pcm[i + 1]]);
+        decoded.push(s as f32 / 32768.0);
+      }
+      // Resample once
+      let resampled = crate::audio::resample_to(&decoded, channels, sample_rate, target_sr);
+      // Normalize to avoid volume drift
+      let max_val = resampled.iter().map(|v| v.abs()).fold(0.0, f32::max);
+      let factor = if max_val > 1.0 { 1.0 / max_val } else { 1.0 };
+      let resampled: Vec<f32> = resampled.into_iter().map(|v| v * factor).collect();
+      let mut offset = 0usize;
+      while offset < resampled.len() {
         if stop_all_rx.try_recv().is_ok() {
           return Ok(SpeakOutcome::Interrupted);
         }
         if interrupt_counter.load(Ordering::SeqCst) != expected_interrupt {
           return Ok(SpeakOutcome::Interrupted);
         }
-
-        let mut data = pending.drain(..samples_per_chunk).collect::<Vec<f32>>();
-        // frame-align
+        let end = (offset + samples_per_chunk).min(resampled.len());
+        let mut data = resampled[offset..end].to_vec();
         let aligned = data.len() - (data.len() % channels as usize);
         if aligned == 0 {
           break;
         }
         data.truncate(aligned);
-
         tx.send(crate::audio::AudioChunk {
           data,
           channels,
           sample_rate: target_sr,
         })?;
+        offset = end;
       }
     }
 
@@ -456,42 +490,59 @@ fn stream_wav16le_over_http(
     }
   } else {
     let mut pcm = vec![0u8; data_len as usize];
-    reader.read_exact(&mut pcm)?;
+    let mut read_bytes = 0usize;
+    while read_bytes < pcm.len() {
+      let n = reader.read(&mut pcm[read_bytes..])?;
+      if n == 0 {
+        break;
+      }
+      read_bytes += n;
+    }
+    if read_bytes < pcm.len() {
+      return Err(
+        format!(
+          "failed to read PCM data: expected {} bytes, got {}",
+          pcm.len(),
+          read_bytes
+        )
+        .into(),
+      );
+    }
     if stop_all_rx.try_recv().is_ok() {
       return Ok(SpeakOutcome::Interrupted);
     }
     if interrupt_counter.load(Ordering::SeqCst) != expected_interrupt {
       return Ok(SpeakOutcome::Interrupted);
     }
-    let mut decoded = Vec::with_capacity(pcm.len() / 2);
+
+    let mut decoded: Vec<f32> = Vec::with_capacity(pcm.len() / 2);
     for i in (0..pcm.len()).step_by(2) {
       let s = i16::from_le_bytes([pcm[i], pcm[i + 1]]);
       decoded.push(s as f32 / 32768.0);
     }
-    let decoded =
-      crate::audio::resample_interleaved_linear(&decoded, channels, sample_rate, target_sr);
-    let mut offset = 0usize;
-    while offset < decoded.len() {
-      if stop_all_rx.try_recv().is_ok() {
-        return Ok(SpeakOutcome::Interrupted);
-      }
-      if interrupt_counter.load(Ordering::SeqCst) != expected_interrupt {
-        return Ok(SpeakOutcome::Interrupted);
-      }
-      let end = (offset + samples_per_chunk).min(decoded.len());
-      let mut data = decoded[offset..end].to_vec();
-      let aligned = data.len() - (data.len() % channels as usize);
-      if aligned == 0 {
-        break;
-      }
-      data.truncate(aligned);
-      tx.send(crate::audio::AudioChunk {
-        data,
-        channels,
-        sample_rate: target_sr,
-      })?;
-      offset = end;
-    }
+    let mut resampled = crate::audio::resample_to(&decoded, channels, sample_rate, target_sr);
+    // normalize to fixed peak level
+    let max_val = resampled.iter().map(|v| v.abs()).fold(0.0, f32::max);
+    let target_peak = 0.95_f32;
+    let factor = if max_val > 0.0 {
+      target_peak / max_val
+    } else {
+      1.0
+    };
+    resampled = resampled.into_iter().map(|v| v * factor).collect();
+    // log::log("debug", &format!("Resampled length: {}", resampled.len()));
+    // send entire resampled audio as one chunk
+    let aligned_len = resampled.len() - (resampled.len() % channels as usize);
+    let data = if aligned_len > 0 {
+      resampled[..aligned_len].to_vec()
+    } else {
+      Vec::new()
+    };
+    tx.send(crate::audio::AudioChunk {
+      data,
+      channels,
+      sample_rate: target_sr,
+    })?;
   }
 
   Ok(SpeakOutcome::Completed)

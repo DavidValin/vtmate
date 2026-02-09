@@ -2,9 +2,10 @@
 //  Router
 // ------------------------------------------------------------------
 
-use crossbeam_channel::{select, Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, select};
 
 // API
+use crate::log;
 // ------------------------------------------------------------------
 
 pub fn router_thread(
@@ -18,7 +19,9 @@ pub fn router_thread(
       recv(stop_all_rx) -> _ => break,
       recv(rx) -> msg => {
         let Ok(chunk) = msg else { break };
+        // log::log("debug", &format!("Router received chunk: {} ch @ {}Hz, {} samples", chunk.channels, chunk.sample_rate, chunk.data.len()));
         let converted = convert_channels(&chunk.data, chunk.channels, out_channels);
+        // log::log("debug", &format!("Router sending chunk: {} ch @ {}Hz, {} samples", out_channels, chunk.sample_rate, converted.len()));
         let out_chunk = crate::audio::AudioChunk {
           data: converted,
           channels: out_channels,

@@ -86,7 +86,7 @@ pub fn playback_thread(
             empty_callbacks.store(0, Ordering::Relaxed);
           } else {
             let n = empty_callbacks.fetch_add(1, Ordering::Relaxed) + 1;
-            if n >= 3 {
+            if n >= 1 {
               playback_active.store(false, Ordering::Relaxed);
               ui.playing.store(false, Ordering::Relaxed);
               gate_until_ms.store(
@@ -139,7 +139,7 @@ pub fn playback_thread(
             empty_callbacks.store(0, Ordering::Relaxed);
           } else {
             let n = empty_callbacks.fetch_add(1, Ordering::Relaxed) + 1;
-            if n >= 3 {
+            if n >= 1 {
               playback_active.store(false, Ordering::Relaxed);
               ui.playing.store(false, Ordering::Relaxed);
               gate_until_ms.store(
@@ -193,7 +193,7 @@ pub fn playback_thread(
             empty_callbacks.store(0, Ordering::Relaxed);
           } else {
             let n = empty_callbacks.fetch_add(1, Ordering::Relaxed) + 1;
-            if n >= 3 {
+            if n >= 1 {
               playback_active.store(false, Ordering::Relaxed);
               ui.playing.store(false, Ordering::Relaxed);
               gate_until_ms.store(

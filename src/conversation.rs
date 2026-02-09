@@ -2,10 +2,10 @@
 //  Conversation
 // ------------------------------------------------------------------
 
-use crossbeam_channel::{select, Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, select};
 use std::sync::{
-  atomic::{AtomicU64, Ordering},
   Arc, Mutex,
+  atomic::{AtomicU64, Ordering},
 };
 
 // API
@@ -207,20 +207,12 @@ impl PhraseSpeaker {
       || self.buf.ends_with('!')
       || self.buf.ends_with('?')
       || self.buf.len() >= 140;
-    if trigger {
-      self.flush()
-    } else {
-      None
-    }
+    if trigger { self.flush() } else { None }
   }
   fn flush(&mut self) -> Option<String> {
     let out = self.buf.trim().to_string();
     self.buf.clear();
-    if out.is_empty() {
-      None
-    } else {
-      Some(out)
-    }
+    if out.is_empty() { None } else { Some(out) }
   }
 }
 
