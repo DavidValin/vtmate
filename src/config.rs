@@ -2,7 +2,7 @@
 //  Configuration
 // ------------------------------------------------------------------
 
-use clap::Parser;
+use clap::{value_parser, Parser};
 use cpal::traits::DeviceTrait;
 use cpal::Device;
 
@@ -45,8 +45,13 @@ pub struct Args {
   #[arg(long, default_value = "en", env = "LANGUAGE")]
   pub language: String,
 
-  /// Text-to-speech backend (e.g., kokoro, other)
-  #[arg(long, default_value = "kokoro", env = "TTS")]
+  /// Text-to-speech backend (e.g., kokoro, opentts)
+  #[arg(
+      long,
+      default_value = "kokoro",
+      env = "TTS",
+      value_parser = clap::builder::PossibleValuesParser::new(&["kokoro", "opentts"])
+  )]
   pub tts: String,
 
   /// Peak threshold for detecting user speech while assistant is speaking (0..1)
@@ -67,6 +72,7 @@ pub const MIN_UTTERANCE_MS_DEFAULT: u64 = 300;
 pub const OLLAMA_URL_DEFAULT: &str = "http://localhost:11434/api/generate";
 pub const OLLAMA_MODEL_DEFAULT: &str = "llama3.2:3b";
 pub const WHISPER_MODEL_PATH: &str = "~/.whisper-models/ggml-medium-q5_0.bin";
+const OPENTTS_BASE_URL_DEFAULT: &str = "http://0.0.0.0:5500/api/tts?&vocoder=high&denoiserStrength=0.005&&speakerId=&ssml=false&ssmlNumbers=true&ssmlDates=true&ssmlCurrency=true&cache=false";
 
 impl Args {
   /// Resolve the whisper model path, expanding ~ to home directory.
@@ -84,7 +90,6 @@ impl Args {
     }
   }
 }
-const OPENTTS_BASE_URL_DEFAULT: &str = "http://0.0.0.0:5500/api/tts?&vocoder=high&denoiserStrength=0.005&&speakerId=&ssml=false&ssmlNumbers=true&ssmlDates=true&ssmlCurrency=true&cache=false";
 
 /// Pick an input configuration that matches the preferred sample rate as closely as possible.
 ///

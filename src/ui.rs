@@ -6,8 +6,8 @@ use crossbeam_channel::Receiver;
 use crossterm::terminal;
 use std::io::Write;
 use std::sync::{
-  Arc, Mutex,
   atomic::{AtomicBool, Ordering},
+  Arc, Mutex,
 };
 use std::thread;
 use std::time::Duration;

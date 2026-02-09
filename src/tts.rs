@@ -31,14 +31,45 @@ pub enum SpeakOutcome {
   Interrupted,
 }
 
+pub fn speak(
+  text: &str,
+  tts: &str,
+  opentts_base_url: &str,
+  language: &str,
+  voice: &str,
+  out_sample_rate: u32, // MUST match CPAL playback SR
+  tx: Sender<crate::audio::AudioChunk>,
+  stop_all_rx: Receiver<()>,
+  interrupt_counter: Arc<AtomicU64>,
+  expected_interrupt: u64,
+) -> Result<SpeakOutcome, Box<dyn std::error::Error + Send + Sync>> {
+  let outcome = if tts == "opentts" {
+    crate::tts::speak_via_opentts(
+      text,
+      opentts_base_url,
+      language,
+      voice,
+      out_sample_rate,
+      tx,
+      stop_all_rx,
+      interrupt_counter,
+      expected_interrupt,
+    )
+  } else {
+    crate::tts::speak_via_kokoro(text, language, voice, tx)
+  }?;
+  Ok(outcome)
+}
+
 //  Kokoro Tiny TTS integration -------------------------------------
 // +++++++++++++++++++++++++++++
 
 pub const KOKORO_VOICES_PER_LANGUAGE: &[(&str, &[&str])] = &[
-
-    // English language
-    // ----------------------------------------
-    ("en", &[
+  // English language
+  // ----------------------------------------
+  (
+    "en",
+    &[
       // American english - female
       "af_alloy",
       "af_aoede",
@@ -70,22 +101,24 @@ pub const KOKORO_VOICES_PER_LANGUAGE: &[(&str, &[&str])] = &[
       "bm_daniel",
       "bm_fable",
       "bm_george",
-      "bm_lewis"
-    ]),
-
-    // Spanish language
-    // ----------------------------------------
-    ("es", &[
+      "bm_lewis",
+    ],
+  ),
+  // Spanish language
+  // ----------------------------------------
+  (
+    "es",
+    &[
       // Spanish - female
-      "ef_dora",
-      // Spanish - male
-      "em_alex",
-      "em_santa"
-    ]),
-
-    // Mandarin chinese language
-    // ----------------------------------------
-    ("zh", &[
+      "ef_dora", // Spanish - male
+      "em_alex", "em_santa",
+    ],
+  ),
+  // Mandarin chinese language
+  // ----------------------------------------
+  (
+    "zh",
+    &[
       // Mandarin chinese - female
       "zf_xiaobei",
       "zf_xiaoni",
@@ -95,57 +128,63 @@ pub const KOKORO_VOICES_PER_LANGUAGE: &[(&str, &[&str])] = &[
       "zm_yunjian",
       "zm_yunxi",
       "zm_yunxia",
-      "zm_yunyang"
-    ]),
-
-    // Japanese language
-    // ----------------------------------------
-    ("ja", &[
+      "zm_yunyang",
+    ],
+  ),
+  // Japanese language
+  // ----------------------------------------
+  (
+    "ja",
+    &[
       // Japanese - female
       "jf_alpha",
       "jf_gongitsune",
       "jf_nezumi",
       "jf_tebukuro",
       // Japanese - male
-      "jm_kumo"
-    ]),
-
-    // Portuguese / Brazil language
-    // ----------------------------------------
-    ("pt", &[
+      "jm_kumo",
+    ],
+  ),
+  // Portuguese / Brazil language
+  // ----------------------------------------
+  (
+    "pt",
+    &[
       // Portuguese - female
-      "pf_dora",
-      // Portuguese - male
-      "pm_alex",
-      "pm_santa"
-    ]),
-
-    // Italian language
-    // ----------------------------------------
-    ("it", &[
+      "pf_dora", // Portuguese - male
+      "pm_alex", "pm_santa",
+    ],
+  ),
+  // Italian language
+  // ----------------------------------------
+  (
+    "it",
+    &[
       // Italian - female
       "if_sara",
       // Italian - male
-      "im_nicola"
-    ]),
-
-    // Hindi language
-    // ----------------------------------------
-    ("hi", &[
+      "im_nicola",
+    ],
+  ),
+  // Hindi language
+  // ----------------------------------------
+  (
+    "hi",
+    &[
       // Hindi - female
-      "hf_alpha",
-      "hf_beta",
-      // Hindi - male
-      "hm_omega",
-      "hm_psi"
-    ]),
-
-    // French language
-    // ----------------------------------------
-    ("fr", &[
+      "hf_alpha", "hf_beta", // Hindi - male
+      "hm_omega", "hm_psi",
+    ],
+  ),
+  // French language
+  // ----------------------------------------
+  (
+    "fr",
+    &[
       // French - female
-      "ff_siwis"
-    ])
+      "ff_siwis",
+    ],
+  ),
 ];
 
 pub const DEFAULT_KOKORO_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
@@ -161,12 +200,9 @@ pub const DEFAULT_KOKORO_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
 
 pub fn speak_via_kokoro(
   text: &str,
-  language: &str, // "en", "es", "fr", "it", "pt", "ja", "zh", ...
+  language: &str,
   voice: &str,
   tx: Sender<crate::audio::AudioChunk>,
-  stop_all_rx: Receiver<()>,
-  interrupt_counter: Arc<AtomicU64>,
-  expected_interrupt: u64,
 ) -> Result<SpeakOutcome, Box<dyn std::error::Error + Send + Sync>> {
   if text.is_empty() {
     return Ok(SpeakOutcome::Completed);
@@ -249,6 +285,8 @@ pub fn speak_via_opentts(
     out_sample_rate,
     urlencoding::encode(text)
   );
+
+  crate::log::log("debug", &format!("OpenTTS URL: {}", url));
 
   stream_wav16le_over_http(
     &url,

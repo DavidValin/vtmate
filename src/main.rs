@@ -11,8 +11,8 @@ use cpal::traits::DeviceTrait;
 use crossbeam_channel::bounded;
 use std::process;
 use std::sync::{
-  Arc, Mutex, OnceLock,
   atomic::{AtomicBool, AtomicU64},
+  Arc, Mutex, OnceLock,
 };
 use std::thread;
 use std::time::Instant;
@@ -155,13 +155,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   let status_line = Arc::new(Mutex::new(String::new())); // Shared status-line text + a single print lock so UI repaint and content prints never interleave.
   let print_lock = Arc::new(Mutex::new(()));
 
-  let voice_selected = tts::DEFAULT_KOKORO_VOICES_PER_LANGUAGE
-    .iter()
-    .find(|(lang, _)| *lang == args.language.as_str())
-    .map(|(_, voice)| *voice)
-    .unwrap_or("af_sky");
+  let voice_selected = if args.tts == "opentts" {
+    tts::DEFAULT_OPENTTS_VOICES_PER_LANGUAGE
+  } else {
+    tts::DEFAULT_KOKORO_VOICES_PER_LANGUAGE
+  }
+  .iter()
+  .find(|(lang, _)| *lang == args.language.as_str())
+  .map(|(_, voice)| *voice)
+  .unwrap();
+  log::log("info", &format!("TTS system: {}", args.tts));
   log::log("info", &format!("Language: {}", args.language));
   log::log("info", &format!("TTS voice: {}", voice_selected));
+  log::log("info", &format!("LLM engine: ollama"));
+  log::log("info", &format!("ollama base url: {}", args.ollama_url));
+  
 
   // ---- Thread: UI Thread ----
   let ui_handle = ui::spawn_ui_thread(
@@ -288,7 +296,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   log::log(
     "info",
     &format!(
-      "VAD threshold_peak={:.3} end_silence_ms={} hangover_ms={}",
+      "sound_threshold_peak={:.3}  end_silence_ms={}  hangover_ms={}",
       vad_thresh, end_silence_ms, hangover_ms
     ),
   );
