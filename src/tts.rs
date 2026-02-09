@@ -34,142 +34,129 @@ pub enum SpeakOutcome {
 //  Kokoro Tiny TTS integration -------------------------------------
 // +++++++++++++++++++++++++++++
 
-// ALL voices available per language
-// ----------------------------------
-// AMERICAN ENGLISH (a)
-// -----------------
-// Female
-//   af_alloy
-//   af_aoede
-//   af_bella
-//   af_heart
-//   af_jessica
-//   af_kore
-//   af_nicole
-//   af_nova
-//   af_river
-//   af_sarah
-//   af_sky
+pub const KOKORO_VOICES_PER_LANGUAGE: &[(&str, &[&str])] = &[
 
-// Male
-//   am_adam
-//   am_echo
-//   am_eric
-//   am_fenrir
-//   am_liam
-//   am_michael
-//   am_onyx
-//   am_puck
-//   am_santa
+    // English language
+    // ----------------------------------------
+    ("en", &[
+      // American english - female
+      "af_alloy",
+      "af_aoede",
+      "af_bella",
+      "af_heart",
+      "af_jessica",
+      "af_kore",
+      "af_nicole",
+      "af_nova",
+      "af_river",
+      "af_sarah",
+      "af_sky",
+      // American english - male
+      "am_adam",
+      "am_echo",
+      "am_eric",
+      "am_fenrir",
+      "am_liam",
+      "am_michael",
+      "am_onyx",
+      "am_puck",
+      "am_santa",
+      // British english - female
+      "bf_alice",
+      "bf_emma",
+      "bf_isabella",
+      "bf_lily",
+      // British english - male
+      "bm_daniel",
+      "bm_fable",
+      "bm_george",
+      "bm_lewis"
+    ]),
 
-// BRITISH ENGLISH (b)
-// -----------------
-// Female
-//   bf_alice
-//   bf_emma
-//   bf_isabella
-//   bf_lily
+    // Spanish language
+    // ----------------------------------------
+    ("es", &[
+      // Spanish - female
+      "ef_dora",
+      // Spanish - male
+      "em_alex",
+      "em_santa"
+    ]),
 
-// Male
-//   bm_daniel
-//   bm_fable
-//   bm_george
-//   bm_lewis
+    // Mandarin chinese language
+    // ----------------------------------------
+    ("zh", &[
+      // Mandarin chinese - female
+      "zf_xiaobei",
+      "zf_xiaoni",
+      "zf_xiaoxiao",
+      "zf_xiaoyi",
+      // Mandarin chinese - male
+      "zm_yunjian",
+      "zm_yunxi",
+      "zm_yunxia",
+      "zm_yunyang"
+    ]),
 
-// SPANISH (e)
-// -----------------
-// Female
-//   ef_dora
+    // Japanese language
+    // ----------------------------------------
+    ("ja", &[
+      // Japanese - female
+      "jf_alpha",
+      "jf_gongitsune",
+      "jf_nezumi",
+      "jf_tebukuro",
+      // Japanese - male
+      "jm_kumo"
+    ]),
 
-// Male
-//   em_alex
-//   em_santa
+    // Portuguese / Brazil language
+    // ----------------------------------------
+    ("pt", &[
+      // Portuguese - female
+      "pf_dora",
+      // Portuguese - male
+      "pm_alex",
+      "pm_santa"
+    ]),
 
-// FRENCH (f)
+    // Italian language
+    // ----------------------------------------
+    ("it", &[
+      // Italian - female
+      "if_sara",
+      // Italian - male
+      "im_nicola"
+    ]),
 
-// Female
-//   ff_siwis
+    // Hindi language
+    // ----------------------------------------
+    ("hi", &[
+      // Hindi - female
+      "hf_alpha",
+      "hf_beta",
+      // Hindi - male
+      "hm_omega",
+      "hm_psi"
+    ]),
 
-// HINDI (h)
-// -----------------
-// Female
-//   hf_alpha
-//   hf_beta
-
-// Male
-//   hm_omega
-//   hm_psi
-
-// ITALIAN (i)
-// -----------------
-// Female
-//   if_sara
-
-// Male
-//   im_nicola
-
-// PORTUGUESE – BRAZIL (p)
-// -----------------
-// Female
-//   pf_dora
-
-// Male
-//   pm_alex
-//   pm_santa
-
-// JAPANESE (j)
-// -----------------
-// Female
-//   jf_alpha
-//   jf_gongitsune
-//   jf_nezumi
-//   jf_tebukuro
-
-// Male
-//   jm_kumo
-
-// MANDARIN CHINESE (z)
-// -----------------
-// Female
-//   zf_xiaobei
-//   zf_xiaoni
-//   zf_xiaoxiao
-//   zf_xiaoyi
-
-// Male
-//   zm_yunjian
-//   zm_yunxi
-//   zm_yunxia
-//   zm_yunyang
+    // French language
+    // ----------------------------------------
+    ("fr", &[
+      // French - female
+      "ff_siwis"
+    ])
+];
 
 pub const DEFAULT_KOKORO_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
-  ("ar", ""),
-  ("bn", ""),
-  ("ca", ""),
-  ("cs", ""),
-  ("de", ""),
-  ("el", ""),
-  ("en", "af_sky"),
-  ("es", "em_alex"),
-  ("fi", ""),
-  ("fr", ""),
-  ("gu", ""),
-  ("hi", ""),
-  ("hu", ""),
-  ("it", ""),
-  ("ja", ""),
-  ("kn", ""),
-  ("ko", ""),
-  ("mr", ""),
-  ("nl", ""),
-  ("pa", ""),
-  ("ru", ""),
-  ("sv", ""),
-  ("sw", ""),
-  ("ta", ""),
-  ("te", ""),
-  ("tr", ""),
-  ("zh", ""),
+  ("en", "af_sarah"),
+  ("es", "em_santa"),
+  ("zh", "zm_yunjian"),
+  ("ja", "jm_kumo"),
+  ("pt", "pf_dora"),
+  ("it", "if_sara"),
+  ("hi", "hf_alpha"),
+  ("fr", "ff_siwis"),
 ];
 
 pub fn speak_via_kokoro(
