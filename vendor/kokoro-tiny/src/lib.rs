@@ -120,17 +120,19 @@ impl TtsEngine {
     }
 
     /// Synthesize speech from text
-    pub fn synthesize(&mut self, text: &str, voice: Option<&str>) -> Result<Vec<f32>, String> {
+    pub fn synthesize(&mut self, text: &str, voice: Option<&str>, lang: Option<&str>) -> Result<Vec<f32>, String> {
         let voice = voice.unwrap_or(DEFAULT_VOICE);
+        let lang = lang.unwrap_or("en");
 
         // Get voice style
-        let style = self.voices.get(voice)
+        let style = self.voices
+            .get(voice)
             .ok_or_else(|| format!("Voice '{}' not found", voice))?
             .clone();
 
         // Convert text to phonemes
         // Parameters: text, language, voice variant (None for default), preserve punctuation, with_stress
-        let phonemes = text_to_phonemes(text, "en", None, true, false)
+        let phonemes = espeak_rs::text_to_phonemes(text, lang, None, true, false)
             .map_err(|e| format!("Failed to convert text to phonemes: {:?}", e))?;
 
         // Join phonemes into a single string
