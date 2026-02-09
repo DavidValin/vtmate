@@ -48,7 +48,7 @@ pub struct Args {
   /// Text-to-speech backend (e.g., kokoro, opentts)
   #[arg(
       long,
-      default_value = "kokoro",
+      default_value = "opentts",
       env = "TTS",
       value_parser = clap::builder::PossibleValuesParser::new(&["kokoro", "opentts"])
   )]
