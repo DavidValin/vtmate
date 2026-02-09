@@ -4,7 +4,6 @@
 
 use crossbeam_channel::{Receiver, Sender};
 use kokoro_tiny::TtsEngine;
-use espeak_rs::text_to_phonemes;
 use reqwest;
 use std::io::{BufReader, Read};
 use std::sync::{
@@ -12,7 +11,6 @@ use std::sync::{
   Arc,
 };
 use urlencoding;
-
 
 // API
 // ------------------------------------------------------------------
@@ -64,7 +62,6 @@ pub enum SpeakOutcome {
 //   am_puck
 //   am_santa
 
-
 // BRITISH ENGLISH (b)
 // -----------------
 // Female
@@ -79,7 +76,6 @@ pub enum SpeakOutcome {
 //   bm_george
 //   bm_lewis
 
-
 // SPANISH (e)
 // -----------------
 // Female
@@ -89,12 +85,10 @@ pub enum SpeakOutcome {
 //   em_alex
 //   em_santa
 
-
 // FRENCH (f)
 
 // Female
 //   ff_siwis
-
 
 // HINDI (h)
 // -----------------
@@ -106,7 +100,6 @@ pub enum SpeakOutcome {
 //   hm_omega
 //   hm_psi
 
-
 // ITALIAN (i)
 // -----------------
 // Female
@@ -114,7 +107,6 @@ pub enum SpeakOutcome {
 
 // Male
 //   im_nicola
-
 
 // PORTUGUESE – BRAZIL (p)
 // -----------------
@@ -124,7 +116,6 @@ pub enum SpeakOutcome {
 // Male
 //   pm_alex
 //   pm_santa
-
 
 // JAPANESE (j)
 // -----------------
@@ -136,7 +127,6 @@ pub enum SpeakOutcome {
 
 // Male
 //   jm_kumo
-
 
 // MANDARIN CHINESE (z)
 // -----------------
@@ -151,7 +141,6 @@ pub enum SpeakOutcome {
 //   zm_yunxi
 //   zm_yunxia
 //   zm_yunyang
-
 
 pub const DEFAULT_KOKORO_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
   ("ar", ""),
@@ -203,11 +192,9 @@ pub fn speak_via_kokoro(
 
   let mut engine = rt.block_on(TtsEngine::new())?;
 
-  let samples: Vec<f32> = engine.synthesize_with_lang(
-    text,
-    Some(voice),
-    language, // ← THIS is the fix ("es" for ef_dora)
-  ).map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?;
+  let samples: Vec<f32> = engine
+    .synthesize(text, Some(voice), Some(language))
+    .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?;
 
   // Kokoro always returns 24 kHz PCM. No resampling needed here.
   let chunk = crate::audio::AudioChunk {
