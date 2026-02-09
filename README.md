@@ -88,39 +88,36 @@ ai-mate --help
 
 ## Language support
 
-By default everything run in english (speech recognition and audio playback). The next languages are supported:
-
-```
-ID         LANGUAGE              DEFAULT VOICE
-____________________________________________________________
-ar         arabic                festival:ara_norm_ziad_hts                 
-bn         bengali               flite:cmu_indic_ben_rm
-ca         catalan               festival:upc_ca_ona_hts
-cs         czech                 festival:czech_machac
-de         german                glow-speak:de_thorsten
-el         greek                 glow-speak:el_rapunzelina
-en         english               larynx:cmu_fem-glow_tts
-es         spanish               larynx:karen_savage-glow_tts
-fi         finnish               glow-speak:fi_harri_tapani_ylilammi
-fr         french                larynx:gilles_le_blanc-glow_tts
-gu         gujarati              flite:cmu_indic_guj_ad
-hi         hindi                 flite:cmu_indic_hin_ab
-hu         hungarian             glow-speak:hu_diana_majlinger
-it         italian               larynx:riccardo_fasol-glow_tts
-ja         japanese              coqui-tts:ja_kokoro
-kn         kannada               flite:cmu_indic_kan_plv
-ko         korean                glow-speak:ko_kss
-mr         marathi               flite:cmu_indic_mar_aup
-nl         dutch                 glow-speak:nl_rdh
-pa         punjabi               flite:cmu_indic_pan_amp
-ru         russian               glow-speak:ru_nikolaev
-sv         swedish               glow-speak:sv_talesyntese
-sw         swahili               glow-speak:sw_biblia_takatifu
-ta         tamil                 flite:cmu_indic_tam_sdr
-te         telugu                marytts:cmu-nk-hsmm
-tr         turkish               marytts:dfki-ot-hsmm
-zh         mandarin chinese      coqui-tts:zh_baker
-```
+| ID |           Language           |      Support       |        TTS supported          |
+|----|------------------------------|--------------------|-------------------------------|
+| en |        🇺🇸 English            |  🏆 Best support   |    ✅ Kokoro · ✅ OpenTTS     |
+| es |         🇪🇸 Spanish           |  🏆 Best support   |    ✅ Kokoro · ✅ OpenTTS     |
+| zh |     🇨🇳 Mandarin Chinese      |  🏆 Best support   |    ✅ Kokoro · ✅ OpenTTS     |
+| ja |        🇯🇵 Japanese           |  🏆 Best support   |    ✅ Kokoro · ✅ OpenTTS     |
+| pt |       🇵🇹 Portuguese          |  🏆 Best support   |    ✅ Kokoro · ❌ OpenTTS     |
+| it |         🇮🇹 Italian           |  🏆 Best support   |    ✅ Kokoro · ✅ OpenTTS     |
+| hi |          🇮🇳 Hindi            |  🏆 Best support   |    ✅ Kokoro · ✅ OpenTTS     |
+| fr |         🇫🇷 French            |  🏆 Best support   |    ✅ Kokoro · ✅ OpenTTS     |
+| ar |          🇸🇦 Arabic           |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
+| bn |         🇧🇩 Bengali           |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
+| ca |         🇪🇸 Catalan           |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
+| cs |          🇨🇿 Czech            |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
+| de |          🇩🇪 German           |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
+| el |          🇬🇷 Greek            |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
+| fi |         🇫🇮 Finnish           |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
+| gu |         🇮🇳 Gujarati          |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
+| hu |        🇭🇺 Hungarian          |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
+| kn |         🇮🇳 Kannada           |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
+| ko |          🇰🇷 Korean           |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
+| mr |         🇮🇳 Marathi           |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
+| nl |          🇳🇱 Dutch            |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
+| pa |         🇮🇳 Punjabi           |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
+| ru |         🇷🇺 Russian           |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
+| sv |         🇸🇪 Swedish           |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
+| sw |        🇰🇪 Swahili            |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
+| ta |          🇮🇳 Tamil            |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
+| te |         🇮🇳 Telugu            |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
+| tr |         🇹🇷 Turkish           |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
 
 ## Tricks
 
