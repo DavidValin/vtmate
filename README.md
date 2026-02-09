@@ -54,17 +54,15 @@ The `ai-mate` program will be under `~/.cargo/bin`. Make sure this directory is 
 
 ## How to use it
 
-Run services:
-
 - `ollama serve`
-- `docker run --rm --platform=linux/amd64 -p 5500:5500 synesthesiam/opentts:all` (it will pull the image the first time). Adjust the platform as needed depending on your hardware. This container contains within all the voices for all languages.
-
-To start the conversation follow this instructions:
+- If you are using opentts: `docker run --rm --platform=linux/amd64 -p 5500:5500 synesthesiam/opentts:all` (it will pull the image the first time). Adjust the platform as needed depending on your hardware. This container contains within all the voices for all languages.
+- `ai-mate`
 
 Below are the default parameters, which you can override, example:
 
 ```
 ai-mate \
+  --tts opentts \
   --language en \
   --sound-threshold-peak 0.10 \
   --end-silence-ms 850 \
@@ -77,7 +75,7 @@ ai-mate \
 You can just override a specific variable, for example:
 
 ```
-ai-mate --ollama-model "llama3.2:3b" --language es 
+ai-mate --tts kokoro --ollama-model "llama3.2:3b" --language es
 ```
 
 If you need help:
