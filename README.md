@@ -57,28 +57,29 @@ The built binaries will be placed under `./dist`
 ## How to use it
 
 - start ollama: `ollama serve`
-- If you are using opentts start it: `docker run --rm --platform=linux/amd64 -p 5500:5500 synesthesiam/opentts:all` (it will pull the image the first time). Adjust the platform as needed depending on your hardware. This container contains within all the voices for all languages.
 - run ai mate: `ai-mate`
 
 Below are the default parameters, which you can override, example:
 
 ```
 ai-mate \
-  --tts opentts \
+  --tts kokoro \
   --language en \
   --sound-threshold-peak 0.10 \
   --end-silence-ms 850 \
   --whisper-model-path ~/.whisper-models/ggml-medium-q5_0.bin \
   --ollama-model "llama3.2:3b" \
-  --ollama-url "http://localhost:11434/api/generate" \
-  --opentts-base-url "http://0.0.0.0:5500/api/tts?vocoder=high&denoiserStrength=0.005&&speakerId=&ssml=false&ssmlNumbers=true&ssmlDates=true&ssmlCurrency=true&cache=false"
+  --ollama-url "http://localhost:11434/api/generate"
 ```
 
 You can just override a specific variable, for example:
 
 ```
-ai-mate --tts kokoro --ollama-model "llama3.2:3b" --language es
+ai-mate --tts opentts --ollama-model "llama3.2:3b" --language ru
+ai-mate --ollama-model "llama3.2:3b" --language zh
 ```
+
+If you want to use OpenTTS, start the docker service first: `docker run --rm --platform=linux/amd64 -p 5500:5500 synesthesiam/opentts:all` (it will pull the image the first time). Adjust the platform as needed depending on your hardware. This container contains within all the voices for all languages.
 
 If you need help:
 
