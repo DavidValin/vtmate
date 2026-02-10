@@ -18,7 +18,7 @@ use std::time::Instant;
 // ------------------------------------------------------------------
 
 pub fn playback_thread(
-  start_instant: OnceLock<Instant>,
+  start_instant: &'static OnceLock<Instant>,
   device: cpal::Device,
   supported: cpal::SupportedStreamConfig,
   config: cpal::StreamConfig,
@@ -30,13 +30,14 @@ pub fn playback_thread(
   paused: Arc<AtomicBool>,
   out_channels: u16,
   ui: crate::ui::UiState,
+  volume: Arc<Mutex<f32>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-  let start_instant_ref = start_instant.clone();
-
-  // start_instant_ref removed
+  // inst removed
+  // let inst_ptr = &start_instant;
   use cpal::SampleFormat;
 
   let queue: Arc<Mutex<VecDeque<f32>>> = Arc::new(Mutex::new(VecDeque::new()));
+  let volume_for_stream = volume.clone();
   let sample_format = supported.sample_format();
   let hangover_ms = crate::util::env_u64("HANGOVER_MS", crate::config::HANGOVER_MS_DEFAULT);
 
@@ -56,6 +57,17 @@ pub fn playback_thread(
         let ui = ui.clone();
         let empty_callbacks = empty_callbacks.clone();
         move |out: &mut [f32], _| {
+          let vol = *volume_for_stream.lock().unwrap();
+          if vol == 0.0 {
+            queue.lock().unwrap().clear();
+            playback_active.store(false, Ordering::Relaxed);
+            ui.playing.store(false, Ordering::Relaxed);
+            gate_until_ms.store(
+              crate::util::now_ms(start_instant).saturating_add(hangover_ms),
+              Ordering::Relaxed,
+            );
+            return;
+          }
           let mut q = queue.lock().unwrap();
 
           // Spacebar pause: output silence but do NOT consume queued samples.
@@ -75,7 +87,7 @@ pub fn playback_thread(
           let mut any_real = false;
           for s in out.iter_mut() {
             if let Some(v) = q.pop_front() {
-              *s = v;
+              *s = v * vol;
               any_real = true;
             } else {
               *s = 0.0;
@@ -90,7 +102,7 @@ pub fn playback_thread(
               playback_active.store(false, Ordering::Relaxed);
               ui.playing.store(false, Ordering::Relaxed);
               gate_until_ms.store(
-                crate::util::now_ms(&start_instant).saturating_add(hangover_ms),
+                crate::util::now_ms(start_instant).saturating_add(hangover_ms),
                 Ordering::Relaxed,
               );
             }
@@ -110,6 +122,17 @@ pub fn playback_thread(
         let ui = ui.clone();
         let empty_callbacks = empty_callbacks.clone();
         move |out: &mut [i16], _| {
+          let vol = *volume_for_stream.lock().unwrap();
+          if vol == 0.0 {
+            queue.lock().unwrap().clear();
+            playback_active.store(false, Ordering::Relaxed);
+            ui.playing.store(false, Ordering::Relaxed);
+            gate_until_ms.store(
+              crate::util::now_ms(start_instant).saturating_add(hangover_ms),
+              Ordering::Relaxed,
+            );
+            return;
+          }
           let mut q = queue.lock().unwrap();
 
           if paused.load(Ordering::Relaxed) {
@@ -129,7 +152,7 @@ pub fn playback_thread(
             if let Some(v) = q.pop_front() {
               any_real = true;
               let v = v.clamp(-1.0, 1.0);
-              *s = (v * i16::MAX as f32) as i16;
+              *s = ((v * vol).clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
             } else {
               *s = 0;
             }
@@ -143,7 +166,7 @@ pub fn playback_thread(
               playback_active.store(false, Ordering::Relaxed);
               ui.playing.store(false, Ordering::Relaxed);
               gate_until_ms.store(
-                crate::util::now_ms(&start_instant).saturating_add(hangover_ms),
+                crate::util::now_ms(start_instant).saturating_add(hangover_ms),
                 Ordering::Relaxed,
               );
             }
@@ -163,6 +186,17 @@ pub fn playback_thread(
         let ui = ui.clone();
         let empty_callbacks = empty_callbacks.clone();
         move |out: &mut [u16], _| {
+          let vol = *volume_for_stream.lock().unwrap();
+          if vol == 0.0 {
+            queue.lock().unwrap().clear();
+            playback_active.store(false, Ordering::Relaxed);
+            ui.playing.store(false, Ordering::Relaxed);
+            gate_until_ms.store(
+              crate::util::now_ms(start_instant).saturating_add(hangover_ms),
+              Ordering::Relaxed,
+            );
+            return;
+          }
           let mut q = queue.lock().unwrap();
 
           if paused.load(Ordering::Relaxed) {
@@ -183,7 +217,7 @@ pub fn playback_thread(
               any_real = true;
               let v = v.clamp(-1.0, 1.0);
               let norm = (v + 1.0) * 0.5;
-              *s = (norm * u16::MAX as f32) as u16;
+              *s = ((norm * vol).clamp(-1.0, 1.0) * u16::MAX as f32) as u16;
             } else {
               *s = u16::MAX / 2;
             }
@@ -197,7 +231,7 @@ pub fn playback_thread(
               playback_active.store(false, Ordering::Relaxed);
               ui.playing.store(false, Ordering::Relaxed);
               gate_until_ms.store(
-                crate::util::now_ms(&start_instant).saturating_add(hangover_ms),
+                crate::util::now_ms(start_instant).saturating_add(hangover_ms),
                 Ordering::Relaxed,
               );
             }
@@ -219,6 +253,8 @@ pub fn playback_thread(
     select! {
       recv(stop_all_rx) -> _ => {
         queue.lock().unwrap().clear();
+        // Drain any queued audio chunks to stop lingering playback
+        while rx_audio.try_recv().is_ok() {}
         playback_active.store(false, Ordering::Relaxed);
         ui.playing.store(false, Ordering::Relaxed);
         break;
@@ -228,7 +264,10 @@ pub fn playback_thread(
         playback_active.store(false, Ordering::Relaxed);
         ui.playing.store(false, Ordering::Relaxed);
         empty_callbacks.store(0, Ordering::Relaxed);
-        gate_until_ms.store(crate::util::now_ms(&start_instant_ref).saturating_add(hangover_ms), Ordering::Relaxed);
+        gate_until_ms.store(crate::util::now_ms(start_instant).saturating_add(hangover_ms), Ordering::Relaxed);
+        // mute volume immediately when stopping playback
+        let mut vol = volume.lock().unwrap();
+        *vol = 0.0;
 
         // IMPORTANT: also drain any already-enqueued audio chunks.
         // Without this, multi-phrase TTS may have queued extra chunks
@@ -254,12 +293,15 @@ pub fn playback_thread(
           thread::sleep(Duration::from_millis(5));
         }
         {
+          // restore volume when receiving new audio
+          let mut vol = volume.lock().unwrap();
+          *vol = 1.0;
           let mut q = queue.lock().unwrap();
           // resample if needed
           if chunk.sample_rate != config.sample_rate.0 {
             let resampled = crate::audio::resample_to(&chunk.data, chunk.channels, chunk.sample_rate, config.sample_rate.0);
             for s in resampled {
-                q.push_back(s);
+              q.push_back(s);
             }
           } else {
             for s in chunk.data {
@@ -267,7 +309,6 @@ pub fn playback_thread(
             }
           }
         }
-
         empty_callbacks.store(0, Ordering::Relaxed);
         playback_active.store(true, Ordering::Relaxed);
         ui.playing.store(true, Ordering::Relaxed);

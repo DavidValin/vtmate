@@ -2,10 +2,10 @@
 //  Conversation
 // ------------------------------------------------------------------
 
-use crossbeam_channel::{Receiver, Sender, select};
+use crossbeam_channel::{select, Receiver, Sender};
 use std::sync::{
-  Arc, Mutex,
   atomic::{AtomicU64, Ordering},
+  Arc, Mutex,
 };
 
 // API
@@ -16,6 +16,7 @@ pub fn conversation_thread(
   rx_utt: Receiver<crate::audio::AudioChunk>,
   tx_audio_into_router: Sender<crate::audio::AudioChunk>,
   stop_all_rx: Receiver<()>,
+  stop_all_tx: Sender<()>,
   out_sample_rate: u32, // MUST match playback SR
   interrupt_counter: Arc<AtomicU64>,
   args: crate::config::Args,
@@ -40,13 +41,20 @@ pub fn conversation_thread(
         }
 
         // Print user line (keep spinner/emojis only on the latest bottom line).
+        let my_interrupt = interrupt_counter.load(Ordering::SeqCst);
+        if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
+          // signal playback to stop queued audio
+          let _ = stop_all_tx.try_send(());
+          conversation_history.clear();
+          continue;
+        }
         crate::ui::ui_println(&print_lock, &status_line, "");
         crate::ui::ui_println(&print_lock, &status_line, &format!("{} {user_text}", crate::ui::USER_LABEL));
         conversation_history.push_str(&format!("{}: {}\n", crate::ui::USER_LABEL, user_text));
         ui.thinking.store(true, Ordering::Relaxed);
 
         // Snapshot interruption counter for this assistant turn.
-        let my_interrupt = interrupt_counter.load(Ordering::SeqCst);
+
         let mut speaker = PhraseSpeaker::new();
         let mut got_any_token = false;
 
@@ -67,18 +75,23 @@ pub fn conversation_thread(
           crate::ui::ui_println(&print_lock, &status_line, "");
         };
 
+        let stop_all_tx_clone = stop_all_tx.clone();
         let mut on_piece = |piece: &str| {
           if interrupted {
+            let _ = stop_all_tx_clone.try_send(());
             return;
           }
 
           if stop_all_rx.try_recv().is_ok() {
             interrupted = true;
+            speaker.buf.clear();
             return;
           }
 
+          // Abort if user interrupted before this token
           if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
             interrupted = true;
+            speaker.buf.clear();
             return;
           }
 
@@ -116,12 +129,17 @@ pub fn conversation_thread(
             {
               interrupted = true;
               print_user_interrupted();
+              // crate::ui::ui_clear_last_line(&print_lock);
               std::thread::sleep(std::time::Duration::from_millis(500));
               *status_line.lock().unwrap() = "".to_string();
               return;
             }
           }
         };
+
+        if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
+          continue;
+        }
 
         match crate::llm::ollama_stream_response_into(
           &prompt,
@@ -207,12 +225,20 @@ impl PhraseSpeaker {
       || self.buf.ends_with('!')
       || self.buf.ends_with('?')
       || self.buf.len() >= 140;
-    if trigger { self.flush() } else { None }
+    if trigger {
+      self.flush()
+    } else {
+      None
+    }
   }
   fn flush(&mut self) -> Option<String> {
     let out = self.buf.trim().to_string();
     self.buf.clear();
-    if out.is_empty() { None } else { Some(out) }
+    if out.is_empty() {
+      None
+    } else {
+      Some(out)
+    }
   }
 }
 

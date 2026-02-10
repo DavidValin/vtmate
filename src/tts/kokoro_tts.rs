@@ -93,6 +93,9 @@ impl StreamingTts {
               channels: 1,
               sample_rate: 24000,
             };
+            if interrupt_flag_thread.load(Ordering::Relaxed) {
+              break;
+            }
             if tx.send(audio).is_err() {
               break;
             }

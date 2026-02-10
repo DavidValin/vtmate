@@ -151,6 +151,9 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     speaking: Arc::new(AtomicBool::new(false)),
     peak: Arc::new(Mutex::new(0.0)),
   };
+  let volume = Arc::new(Mutex::new(1.0_f32));
+  let volume_play = volume.clone();
+  let volume_rec = volume.clone();
   let status_line = Arc::new(Mutex::new(String::new())); // Shared status-line text + a single print lock so UI repaint and content prints never interleave.
   let print_lock = Arc::new(Mutex::new(()));
 
@@ -197,7 +200,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let ui = ui.clone();
     move || {
       playback::playback_thread(
-        START_INSTANT.clone(),
+        &START_INSTANT,
         out_dev,
         out_cfg_supported_thread,
         out_cfg_thread,
@@ -209,6 +212,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         paused,
         out_channels,
         ui,
+        volume_play.clone(),
       )
     }
   });
@@ -229,7 +233,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
   // ---- Thread: record ----
   let rec_handle = thread::spawn({
-    let start_instant = START_INSTANT.clone();
+    let start_instant = &START_INSTANT;
     let device = in_dev.clone();
     let supported = in_cfg_supported;
     let config = in_cfg;
@@ -261,23 +265,26 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         stop_all_rx,
         peak,
         ui,
+        volume_rec.clone(),
       )
     }
   });
 
-  let conv_handle = thread::spawn({
+let conv_handle = thread::spawn({
     let out_sample_rate = out_sample_rate;
     let interrupt_counter = interrupt_counter.clone();
     let args = args.clone();
     let ui = ui.clone();
     let status_line = status_line.clone();
     let print_lock = print_lock.clone();
+    let stop_all_tx_conv = stop_all_tx.clone();
     move || {
       conversation::conversation_thread(
         voice_selected,
         rx_utt,
         tx_audio_into_router.clone(),
         stop_all_rx.clone(),
+        stop_all_tx_conv,
         out_sample_rate,
         interrupt_counter,
         args,

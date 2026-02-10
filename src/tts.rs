@@ -7,7 +7,10 @@ use kokoro_tiny::TtsEngine;
 use reqwest;
 use std::io::{BufReader, Read};
 use std::sync::OnceLock;
-use std::sync::{Arc, Mutex, atomic::{AtomicU64, Ordering}};
+use std::sync::{
+  Arc, Mutex,
+  atomic::{AtomicU64, Ordering},
+};
 use urlencoding;
 
 // API

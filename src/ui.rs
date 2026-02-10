@@ -6,8 +6,8 @@ use crossbeam_channel::Receiver;
 use crossterm::terminal;
 use std::io::Write;
 use std::sync::{
-  Arc, Mutex,
   atomic::{AtomicBool, Ordering},
+  Arc, Mutex,
 };
 use std::thread;
 use std::time::Duration;
@@ -117,6 +117,14 @@ pub fn ui_println(print_lock: &Arc<Mutex<()>>, status_line: &Arc<Mutex<String>>,
   if let Ok(st) = status_line.lock() {
     print!("{}", *st);
   }
+  let _ = std::io::stdout().flush();
+}
+
+// Clear the previous line (used when interrupting).
+pub fn ui_clear_last_line(print_lock: &Arc<Mutex<()>>) {
+  let _g = print_lock.lock().unwrap();
+  // Move cursor up one line and clear it.
+  print!("\x1b[1A\x1b[2K");
   let _ = std::io::stdout().flush();
 }
 
