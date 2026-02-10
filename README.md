@@ -40,10 +40,8 @@ Use cross_build.sh script, get help on how to use it:
 ./cross_build.sh -h
 ```
 
-IMPORT:
-
-- Mac build only works from native MacOS
-- Windows build only works from native Windows (requires https://visualstudio.microsoft.com/visual-cpp-build-tools)
+- * Mac build only works from native MacOS
+- * Windows build only works from native Windows (requires https://visualstudio.microsoft.com/visual-cpp-build-tools)
 
 Examples:
 ```
