@@ -51,45 +51,48 @@ pub fn spawn_ui_thread(
       let think = ui.thinking.load(Ordering::Relaxed);
       let play = ui.playing.load(Ordering::Relaxed);
 
-      // Priority: playing > thinking > idle/speaking.
-      // This ensures we show the speaking emoji any time audio isn't playing,
-      // even if a stale thinking flag is briefly set.
-      let status = if think {
-        format!("🤔. {}", spinner[i % spinner.len()])
-      } else if speak {
-        format!("🎙  {}", spinner[i % spinner.len()])
-      } else if play {
-        format!("🔊  {}", spinner[i % spinner.len()])
+      // Skip status repaint if no activity
+      if !think && !speak && !play {
+        // nothing active, skip drawing status
       } else {
-        format!("🎙  {}", spinner[i % spinner.len()])
-      };
-      // draw amplitude bar
-      let (cols, _) = terminal::size().unwrap_or((80, 24));
-      let peak_val = match peak.lock() {
-        Ok(v) => *v,
-        Err(_) => 0.0,
-      };
-      let bar_len = (peak_val * (cols as f32)).round() as usize;
-      let bar_color = if ui.speaking.load(Ordering::Relaxed) {
-        "\x1b[31m"
-      } else {
-        "\x1b[37m"
-      };
-      let bar = format!("{}{}\x1b[0m", bar_color, "█".repeat(bar_len));
-      let status_with_bar = format!("{}  {}", status, bar);
-
-      // Remember current status and repaint it on the bottom line.
-      {
-        if let Ok(mut st) = status_line.lock() {
-          *st = status.clone();
+        // Priority: playing > thinking > idle/speaking.
+        // This ensures we show the speaking emoji any time audio isn't playing,
+        // even if a stale thinking flag is briefly set.
+        let status = if think {
+          format!("🤔. {}", spinner[i % spinner.len()])
+        } else if speak {
+          format!("🎙  {}", spinner[i % spinner.len()])
+        } else if play {
+          format!("🔊  {}", spinner[i % spinner.len()])
+        } else {
+          format!("🎙  {}", spinner[i % spinner.len()])
+        };
+        // draw amplitude bar
+        let (cols, _) = terminal::size().unwrap_or((80, 24));
+        let peak_val = match peak.lock() {
+          Ok(v) => *v,
+          Err(_) => 0.0,
+        };
+        let bar_len = (peak_val * (cols as f32)).round() as usize;
+        let bar_color = if ui.speaking.load(Ordering::Relaxed) {
+          "\x1b[31m"
+        } else {
+          "\x1b[37m"
+        };
+        let bar = format!("{}{}\x1b[0m", bar_color, "█".repeat(bar_len));
+        let status_with_bar = format!("{}  {}", status, bar);
+        // Remember current status and repaint it on the bottom line.
+        {
+          if let Ok(mut st) = status_line.lock() {
+            *st = status.clone();
+          }
         }
+        // one-line repaint (stdout)
+        let _g = print_lock.lock().unwrap();
+        clear_line_cr();
+        print!("{}", status_with_bar);
+        let _ = std::io::stdout().flush();
       }
-
-      // one-line repaint (stdout)
-      let _g = print_lock.lock().unwrap();
-      clear_line_cr();
-      print!("{}", status_with_bar);
-      let _ = std::io::stdout().flush();
 
       i = i.wrapping_add(1);
       thread::sleep(Duration::from_millis(100));

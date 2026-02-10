@@ -131,7 +131,7 @@ pub fn conversation_thread(
               print_user_interrupted();
               // crate::ui::ui_clear_last_line(&print_lock);
               std::thread::sleep(std::time::Duration::from_millis(500));
-              *status_line.lock().unwrap() = "".to_string();
+              // *status_line.lock().unwrap() = "".to_string();
               return;
             }
           }
