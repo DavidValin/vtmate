@@ -22,6 +22,6 @@ whisper-rs = "0.15.1"
 hound = "3"
 crossterm = "0.27"
 tokio = { version = "1", features = ["rt", "macros"] }
-kokoro-tiny = { git = "https://github.com/DavidValin/kokoro-tiny.git", rev = "9f6a047" }
+kokoro-tiny = { version = "0.2.0", git = "https://github.com/DavidValin/kokoro-tiny.git", rev = "9f6a047" }
 espeak-rs = "0.1.9"
 
