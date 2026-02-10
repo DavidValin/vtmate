@@ -242,8 +242,31 @@ impl PhraseSpeaker {
   }
 }
 
+use std::cell::Cell;
+
+thread_local! {
+  static IN_CODE_BLOCK: Cell<bool> = Cell::new(false);
+}
+
 fn strip_special_chars(s: &str) -> String {
-  s.chars()
-    .filter(|c| !['.', '\n', '~', '\r', '\t', '*', '&'].contains(c))
-    .collect()
+  let mut result = String::new();
+  let parts: Vec<&str> = s.split("```").collect();
+  let mut inside = IN_CODE_BLOCK.with(|c| c.get());
+  for (i, part) in parts.iter().enumerate() {
+    if !inside {
+      result.extend(part.chars().filter(|c| {
+        ![
+          '.', '~', '*', '&', '-', ',', ';', ':', '(', ')', '[', ']', '{', '}', '"',
+          '\'',
+        ]
+        .contains(c)
+      }));
+    }
+    // toggle after each fence except after last part
+    if i < parts.len() - 1 {
+      inside = !inside;
+    }
+  }
+  IN_CODE_BLOCK.with(|c| c.set(inside));
+  result
 }
