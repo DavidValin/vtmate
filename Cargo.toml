@@ -22,5 +22,9 @@ whisper-rs = "0.15.1"
 hound = "3"
 crossterm = "0.27"
 tokio = { version = "1", features = ["rt", "macros"] }
-kokoro-tiny = { version = "0.1.0", path = "vendor/kokoro-tiny" }
+kokoro-tiny = "0.1.0"
 espeak-rs = "0.1.9"
+
+[patch.crates-io]
+kokoro-tiny = { path = "vendor/kokoro-tiny" }
+
