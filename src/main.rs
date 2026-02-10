@@ -1,10 +1,11 @@
+use std::ffi::{c_char, c_void};
+
 // avoiding printing external whisper logs
 extern "C" fn noop_whisper_log(
-  _: u32,
-  _: *const std::os::raw::c_char,
-  _: *mut std::os::raw::c_void,
-) {
-}
+    _level: i32,
+    _message: *const c_char,
+    _user_data: *mut c_void,
+) { } // intentionally do nothing
 
 use clap::Parser;
 use cpal::traits::DeviceTrait;
@@ -52,6 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   let _ = START_INSTANT.get_or_init(Instant::now);
 
   let args = crate::config::Args::parse();
+
   // silence external whisper logs
   unsafe {
     whisper_rs::set_log_callback(Some(noop_whisper_log), std::ptr::null_mut());
