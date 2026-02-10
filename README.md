@@ -132,4 +132,9 @@ alias ai-mate_es_qwen='ai-mate --ollama-model "qwen3:30b" --language es'
 alias ai-mate_es_llama='ai-mate --ollama-model "llama3:8b" --language es'
 ```
 
+## Useful to know
+
+- ai-mate unzips `espeak-ng-data.tar.gz` in ~/.ai-mate directory
+- kokoro-tiny autodownloads the models if not found locally under `~/.cache/k`
+
 Have fun o:)

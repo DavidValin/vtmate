@@ -18,6 +18,7 @@ use std::thread;
 use std::time::Instant;
 use whisper_rs;
 
+mod assets;
 mod audio;
 mod config;
 mod conversation;
@@ -35,6 +36,8 @@ mod util;
 static START_INSTANT: OnceLock<Instant> = OnceLock::new();
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+  tts::ensure_piper_espeak_env();;
+
   println!(
     r#"
    █████╗ ██╗      ███╗   ███╗ █████╗ ████████╗███████╗
