@@ -2,7 +2,7 @@
 //  Configuration
 // ------------------------------------------------------------------
 
-use clap::{Parser, value_parser};
+use clap::Parser;
 use cpal::Device;
 use cpal::traits::DeviceTrait;
 
@@ -99,7 +99,7 @@ impl Args {
 pub fn pick_input_config(
   device: &Device,
   preferred_sr: u32,
-) -> Result<cpal::SupportedStreamConfig, Box<dyn std::error::Error>> {
+) -> Result<cpal::SupportedStreamConfig, Box<dyn std::error::Error + Send + Sync>> {
   use cpal::SampleFormat;
 
   let mut candidates: Vec<cpal::SupportedStreamConfig> = Vec::new();

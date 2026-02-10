@@ -43,6 +43,7 @@ pub fn ollama_stream_response_into(
     return Err(format!("ollama HTTP {}", resp.status()).into());
   }
 
+  crate::log::log("info", "Got response from ollama (LLM system)");
   let mut reader = BufReader::new(resp);
   let mut line = String::new();
 
