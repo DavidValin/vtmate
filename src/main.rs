@@ -1,11 +1,10 @@
-use std::ffi::{c_char, c_void};
-
 // avoiding printing external whisper logs
 extern "C" fn noop_whisper_log(
   _: u32,
   _: *const std::os::raw::c_char,
   _: *mut std::os::raw::c_void,
-) { } // intentionally do nothing
+) {
+} // intentionally do nothing
 
 use clap::Parser;
 use cpal::traits::DeviceTrait;
@@ -36,8 +35,8 @@ mod util;
 
 static START_INSTANT: OnceLock<Instant> = OnceLock::new();
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-  tts::ensure_piper_espeak_env();;
+fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  assets::ensure_piper_espeak_env();
 
   println!(
     r#"
@@ -129,23 +128,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   );
 
   let (stop_all_tx, stop_all_rx) = bounded::<()>(1);
-  let (tx_rec, rx_rec) = bounded::<audio::AudioChunk>(32);
+  let (tx_rec, _rx_rec) = bounded::<audio::AudioChunk>(32);
   let (tx_play, rx_play) = bounded::<audio::AudioChunk>(32);
   let (tx_utt, rx_utt) = bounded::<audio::AudioChunk>(4);
 
   // Clones for threads
   let tx_play_for_router = tx_play.clone();
   let rx_play_for_router = rx_play.clone();
-  let tx_play_for_playback = tx_play.clone();
   let rx_play_for_playback = rx_play.clone();
-  let tx_audio_into_router = tx_play.clone();
-  let rx_audio_into_router = rx_play.clone();
   let stop_all_rx_for_playback = stop_all_rx.clone();
   let stop_all_rx_for_router = stop_all_rx.clone();
   let stop_all_rx_for_record = stop_all_rx.clone();
-  let stop_all_rx_for_conversation = stop_all_rx.clone();
   let stop_all_rx_for_keyboard = stop_all_rx.clone();
-  let tx_utt_rec = tx_utt.clone();
   let (stop_play_tx, stop_play_rx) = bounded::<()>(2); // stop playback signal
   let interrupt_counter = Arc::new(AtomicU64::new(0)); // Conversation interruption counter (increment when user speaks over TTS)
   let paused = Arc::new(AtomicBool::new(false)); // Pause flag (space toggles while playing)
@@ -162,14 +156,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
   let voice_selected = if args.tts == "opentts" {
     tts::DEFAULT_OPENTTS_VOICES_PER_LANGUAGE
+      .iter()
+      .find(|(lang, _)| *lang == args.language.as_str())
+      .map(|(_, voice)| *voice)
+      .unwrap()
   } else {
     tts::DEFAULT_KOKORO_VOICES_PER_LANGUAGE
-  }
-  .iter()
-  .find(|(lang, _)| *lang == args.language.as_str())
-  .map(|(_, voice)| *voice)
-  .unwrap();
+      .iter()
+      .find(|(lang, _)| *lang == args.language.as_str())
+      .map(|(_, voice)| *voice)
+      .unwrap()
+  };
   log::log("info", &format!("TTS system: {}", args.tts));
+  if args.tts == "kokoro" {
+    tts::start_kokoro_engine()?;
+  }
   log::log("info", &format!("Language: {}", args.language));
   log::log("info", &format!("TTS voice: {}", voice_selected));
   log::log("info", &format!("LLM engine: ollama"));
@@ -224,7 +225,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
   });
 
-  let (tx_audio_into_router, rx_audio_into_router) = (tx_play.clone(), rx_play.clone());
+  let (tx_audio_into_router, _rx_audio_into_router) = (tx_play.clone(), rx_play.clone());
 
   // ---- Thread: record ----
   let rec_handle = thread::spawn({
