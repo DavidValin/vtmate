@@ -1,16 +1,11 @@
 ![ai mate screenshot](https://github.com/DavidValin/ai-mate/raw/main/preview.png)
 
-ai mate is a terminal based audio conversation system between a user and an AI model that runs locally in your machine.
-
-- llm system: ollama
-- speech to text (stt): whisper
-- text to speech (tts): OpenTTS
-
+voice chat with your local ai models from your terminal simply!
 See it in action: [Demo](https://www.youtube.com/watch?v=x0RAX3-PLnE)
 
 ## How it works
 
-`RECORD -> STT -> LLM -> REPLY -> TTS -> PLAYBACK`
+`RECORD -> STT -> LLM -> TTS -> PLAYBACK`
 
 ```
 - You start the program and start talking.
@@ -37,26 +32,33 @@ Install dependencies:
 Download from `https://github.com/DavidValin/ai-mate/releases`
 Move the binary to a folder in your $PATH so you can use `ai-mate` command anywhere
 
-### Option B - Build ai-mate from source
+### Option B - Build ai-mate from source code
 
-If you have the ai-mate source code locally:
-
-- (Only MacOS / Linux) Install `pkg-config` and alsa development libraries (called `libasound2-dev` or `alsa-lib-devel` or `alsa-lib`)
-
-The compile from source code:
+Use cross_build.sh script, get help on how to use it:
 
 ```
-cargo build --release
-cargo install --path .
+./cross_build.sh -h
 ```
 
-The `ai-mate` program will be under `~/.cargo/bin`. Make sure this directory is added to your $PATH, otherwise add it.
+IMPORT:
+
+- Mac build only works from native MacOS
+- Windows build only works from native Windows (requires https://visualstudio.microsoft.com/visual-cpp-build-tools)
+
+Examples:
+```
+./cross_build.sh --os linux --arch amd64,arm64
+./cross_build.sh --os windows --arch amd64
+./cross_build.sh --os macos --arch arm64,amd64
+```
+
+The built binaries will be placed under `./dist`
 
 ## How to use it
 
-- `ollama serve`
-- If you are using opentts: `docker run --rm --platform=linux/amd64 -p 5500:5500 synesthesiam/opentts:all` (it will pull the image the first time). Adjust the platform as needed depending on your hardware. This container contains within all the voices for all languages.
-- `ai-mate`
+- start ollama: `ollama serve`
+- If you are using opentts start it: `docker run --rm --platform=linux/amd64 -p 5500:5500 synesthesiam/opentts:all` (it will pull the image the first time). Adjust the platform as needed depending on your hardware. This container contains within all the voices for all languages.
+- run ai mate: `ai-mate`
 
 Below are the default parameters, which you can override, example:
 
@@ -132,5 +134,3 @@ alias ai-mate_es_llama='ai-mate --ollama-model "llama3:8b" --language es'
 ```
 
 Have fun o:)
-
-

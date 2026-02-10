@@ -1,244 +1,330 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-########################################
-# Configuration
-########################################
 BIN_NAME="ai-mate"
-PROJECT_ROOT="$(pwd)"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DIST_DIR="${PROJECT_ROOT}/dist"
 PKG_DIR="${DIST_DIR}/packages"
 
+DO_PACKAGE=1
+DOCKER_NO_CACHE=1
+
+SEL_OS="all"     # macos,linux,windows,all
+SEL_ARCH="all"   # amd64,arm64,all
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  ./cross_build.sh [--os <list>] [--arch <list>] [--skip-package] [--cache|--no-cache]
+
+--os   comma-separated: macos,linux,windows,all
+--arch comma-separated: amd64,arm64,all
+
+Notes:
+- Windows build is MSVC and runs only on Windows (requires cl.exe). On macOS/Linux it is skipped.
+- macOS build is native and runs only on macOS. On Windows/Linux it is skipped.
+- Linux builds use Docker:
+  - linux/amd64 uses Ubuntu 24.04 (noble) to satisfy newer glibc requirements (ort-sys / ORT)
+  - linux/arm64 uses Ubuntu 24.04 (noble) on linux/arm64 (native on Apple Silicon)
+- Docker builds write to target-cross/ to avoid cache/glibc conflicts.
+USAGE
+}
+
+lower() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
+
+normalize_list() {
+  local s="${1-}"
+  s="$(lower "$s")"
+  s="${s//[[:space:]]/}"
+  while [[ "$s" == *",,"* ]]; do s="${s//,,/,}"; done
+  s="${s#,}"; s="${s%,}"
+  echo "$s"
+}
+
+list_has() {
+  local list="${1-}" tok="${2-}"
+  [[ -n "$list" && -n "$tok" && ",${list}," == *",${tok},"* ]]
+}
+
+want_os() {
+  [[ "${SEL_OS}" == "all" ]] && return 0
+  list_has "${SEL_OS}" "$1"
+}
+
+want_arch() {
+  [[ "${SEL_ARCH}" == "all" ]] && return 0
+  list_has "${SEL_ARCH}" "$1"
+}
+
+host_os() {
+  local u; u="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  case "$u" in
+    darwin*) echo "macos" ;;
+    linux*) echo "linux" ;;
+    mingw*|msys*|cygwin*) echo "windows" ;;
+    *) echo "unknown" ;;
+  esac
+}
+
+HOST_OS="$(host_os)"
+
+# Args
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --os) SEL_OS="$(normalize_list "${2-}")"; shift 2 ;;
+    --arch) SEL_ARCH="$(normalize_list "${2-}")"; shift 2 ;;
+    --skip-package) DO_PACKAGE=0; shift ;;
+    --cache) DOCKER_NO_CACHE=0; shift ;;
+    --no-cache) DOCKER_NO_CACHE=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown arg: $1"; usage; exit 1 ;;
+  esac
+done
+
+# Version
 VERSION="$(
   awk -F\" '
     $1 ~ /^[[:space:]]*version[[:space:]]*=[[:space:]]*/ { print $2; exit }
-  ' Cargo.toml
+  ' "${PROJECT_ROOT}/Cargo.toml"
 )"
-if [[ -z "${VERSION}" ]]; then
-  echo "Failed to read version from Cargo.toml"
+[[ -n "${VERSION}" ]] || { echo "Failed to read version from Cargo.toml"; exit 1; }
+
+mkdir -p "${DIST_DIR}" "${PKG_DIR}" "${PROJECT_ROOT}/target-cross"
+
+echo "cross_build.sh started: $(date) args: --os ${SEL_OS} --arch ${SEL_ARCH}"
+echo "Host OS: ${HOST_OS}"
+echo "Project: ${PROJECT_ROOT}"
+echo "Version: ${VERSION}"
+
+########################################
+# Packaging helpers
+########################################
+sha256_file() {
+  local file="$1" out="$2"
+  if command -v shasum >/dev/null 2>&1; then
+    (cd "$(dirname "$file")" && shasum -a 256 "$(basename "$file")") > "$out"
+    return 0
+  fi
+  if command -v openssl >/dev/null 2>&1; then
+    local line hash
+    line="$(openssl dgst -sha256 "$file")"
+    hash="${line##* }"
+    echo "${hash}  $(basename "$file")" > "$out"
+    return 0
+  fi
+  echo "ERROR: No SHA256 tool found."
   exit 1
-fi
-
-########################################
-# Temp workspace (repo stays clean)
-########################################
-TMPDIR="$(mktemp -d)"
-DF_LINUX="${TMPDIR}/Dockerfile.linux"
-
-IMG_LINUX="local/${BIN_NAME}-linux-build:${VERSION}-$$"
-
-cleanup() {
-  set +e
-  echo ""
-  echo "== Cleanup =="
-  docker image rm -f "${IMG_LINUX}" >/dev/null 2>&1 || true
-  rm -rf "${TMPDIR}" >/dev/null 2>&1 || true
-  echo "✔ Removed temporary Docker image + temp files"
 }
-trap cleanup EXIT
+
+make_tgz() {
+  local src="$1" tgz="$2"
+  command -v tar >/dev/null 2>&1 || { echo "ERROR: tar not found"; exit 1; }
+  tar -C "$(dirname "$src")" -czf "$tgz" "$(basename "$src")"
+}
+
+package_one() {
+  local src="$1"
+  [[ -f "$src" ]] || return 0
+  local base tgz sha
+  base="$(basename "$src")"
+  tgz="${PKG_DIR}/${base}.tar.gz"
+  sha="${PKG_DIR}/${base}.tar.gz.sha256"
+  make_tgz "$src" "$tgz"
+  sha256_file "$tgz" "$sha"
+}
 
 ########################################
-# Preflight
+# Docker helpers
 ########################################
-command -v docker >/dev/null || { echo "Docker required"; exit 1; }
-command -v cargo  >/dev/null || { echo "cargo required"; exit 1; }
-command -v shasum >/dev/null || { echo "shasum required"; exit 1; }
-command -v tar    >/dev/null || { echo "tar required"; exit 1; }
+docker_ok=0
+if command -v docker >/dev/null 2>&1; then docker_ok=1; fi
 
-mkdir -p "${DIST_DIR}" "${PKG_DIR}"
-
-HOST_ARCH="$(uname -m)"
-DOCKER_SERVER_ARCH="$(docker version --format '{{.Server.Arch}}' 2>/dev/null || true)"
-DOCKER_SERVER_OS="$(docker version --format '{{.Server.Os}}' 2>/dev/null || true)"
-
-echo "== Platform preflight =="
-echo "Host arch:   ${HOST_ARCH}"
-echo "Docker srv:  ${DOCKER_SERVER_OS}/${DOCKER_SERVER_ARCH}"
-
-# Helper: can we run linux/amd64 containers?
 can_run_amd64() {
   docker run --rm --platform=linux/amd64 alpine:3.19 uname -m >/dev/null 2>&1
 }
 
-# If we're on ARM Linux, attempt to enable amd64 emulation (best-effort).
-# On macOS Apple Silicon, user must enable Rosetta in Docker Desktop manually.
-if [[ "${HOST_ARCH}" =~ ^(arm64|aarch64)$ ]]; then
-  echo "ARM host detected."
-  if [[ "${DOCKER_SERVER_OS}" == "linux" ]]; then
-    if ! can_run_amd64; then
-      echo "amd64 containers currently FAIL to run. Attempting to install binfmt for amd64 (requires privileged Docker)..."
-      docker run --rm --privileged tonistiigi/binfmt --install amd64 >/dev/null 2>&1 || true
-    fi
-  fi
-fi
-
 FORCE_AMD64_DOCKER=0
-if can_run_amd64; then
-  FORCE_AMD64_DOCKER=1
-  echo "amd64 containers: ✅ runnable"
-else
-  echo "amd64 containers: ❌ NOT runnable"
-  echo "If you need amd64 containers on ARM:"
-  echo "  - Linux: run 'docker run --rm --privileged tonistiigi/binfmt --install amd64'"
-  echo "  - macOS (Apple Silicon): enable Rosetta/x86_64 emulation in Docker Desktop settings"
-fi
+if [[ "$docker_ok" -eq 1 ]] && can_run_amd64; then FORCE_AMD64_DOCKER=1; fi
 
-# Helper: append --platform=linux/amd64 only when supported
-platform_amd64_args() {
-  if [[ "${FORCE_AMD64_DOCKER}" -eq 1 ]]; then
-    echo "--platform=linux/amd64"
-  else
-    echo ""
+ARTIFACTS=()
+
+########################################
+# macOS native build
+########################################
+build_macos_native() {
+  if [[ "${HOST_OS}" != "macos" ]]; then
+    echo "Skipping macOS build: host is ${HOST_OS} (macOS native build requires macOS)."
+    return 0
   fi
+  echo "== macOS build (native) =="
+  command -v cargo >/dev/null 2>&1 || { echo "ERROR: cargo not found"; exit 1; }
+  cargo build --release
+
+  local arch; arch="$(uname -m)"
+  local out="${DIST_DIR}/${BIN_NAME}-${VERSION}-macos-${arch}"
+  cp "${PROJECT_ROOT}/target/release/${BIN_NAME}" "$out"
+  chmod +x "$out" || true
+  ARTIFACTS+=("$out")
+  echo "✔ Built: $out"
 }
 
 ########################################
-# macOS build (native)
+# Windows MSVC build (skipped on macOS/Linux)
 ########################################
-echo "== macOS build =="
-cargo build --release
-MAC_BIN="${DIST_DIR}/${BIN_NAME}-${VERSION}-macos-arm64"
-cp "target/release/${BIN_NAME}" "${MAC_BIN}"
-chmod +x "${MAC_BIN}" || true
+build_windows_msvc_amd64() {
+  if [[ "${HOST_OS}" != "windows" ]]; then
+    echo "Skipping Windows MSVC build: host is ${HOST_OS} (requires Windows + MSVC toolchain)."
+    return 0
+  fi
+  echo "== Windows x86_64 MSVC build (local) =="
+  if ! command -v cl.exe >/dev/null 2>&1; then
+    echo "Skipping Windows build: cl.exe not found (run from VS x64 Native Tools prompt)."
+    return 0
+  fi
+  rustup target add x86_64-pc-windows-msvc >/dev/null
+  cargo build --release --target x86_64-pc-windows-msvc
+  local out="${DIST_DIR}/${BIN_NAME}-${VERSION}-windows-msvc-amd64.exe"
+  cp "${PROJECT_ROOT}/target/x86_64-pc-windows-msvc/release/${BIN_NAME}.exe" "$out"
+  ARTIFACTS+=("$out")
+  echo "✔ Built: $out"
+}
 
 ########################################
-# Debian bookworm Linux builder (stable mirrors + multiarch + MinGW)
-# - Builds x86_64-unknown-linux-gnu (when amd64 containers runnable)
-# - Builds aarch64-unknown-linux-gnu using aarch64 cross toolchain + arm64 ALSA libs
-# - Builds i686-pc-windows-gnu using mingw-w64 toolchain (no cross-rs images)
+# Linux amd64 build (Docker, Ubuntu noble for newer glibc)
 ########################################
-cat > "${DF_LINUX}" <<'DOCKERFILE'
-FROM debian:bookworm
+build_linux_amd64_docker() {
+  if [[ "$docker_ok" -ne 1 ]]; then
+    echo "Skipping linux-amd64: docker not found."
+    return 0
+  fi
+  if [[ "${FORCE_AMD64_DOCKER}" -ne 1 ]]; then
+    echo "Skipping linux-amd64: linux/amd64 containers not runnable (enable Rosetta/QEMU)."
+    return 0
+  fi
+
+  local tmp; tmp="$(mktemp -d)"
+  local df="${tmp}/Dockerfile.linux.amd64"
+  local img="local/${BIN_NAME}-linux-amd64:${VERSION}-$$"
+
+  cat > "$df" <<'DOCKERFILE'
+FROM ubuntu:noble
 ENV DEBIAN_FRONTEND=noninteractive
-
-# Multiarch must be added BEFORE the update/install that includes :arm64 packages
-RUN dpkg --add-architecture arm64 \
- && apt-get update \
- && apt-get install -y --no-install-recommends \
-      ca-certificates curl git xz-utils \
-      build-essential pkg-config \
-      # ALSA dev for native (amd64) build
-      libasound2-dev \
-      # Cross toolchain for aarch64
-      gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
-      # ARM64 ALSA runtime+dev so -lasound resolves for aarch64 link
-      libasound2:arm64 libasound2-dev:arm64 \
-      # Common cross runtime/dev pieces (Debian names)
-      libc6-dev-arm64-cross \
-      # Windows cross toolchains (GNU)
-      mingw-w64 \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl git xz-utils \
+    build-essential pkg-config \
+    cmake ninja-build \
+    clang libclang-dev llvm-dev \
+    perl \
+    libssl-dev \
+    libasound2-dev \
  && rm -rf /var/lib/apt/lists/*
-
-# Install Rust via rustup
 RUN curl -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
-
-# Pre-install targets (cached in the image)
-RUN rustup target add \
-      x86_64-unknown-linux-gnu \
-      aarch64-unknown-linux-gnu \
-      i686-pc-windows-gnu
-
+RUN rustup target add x86_64-unknown-linux-gnu
 WORKDIR /work
 DOCKERFILE
 
-########################################
-# Build Linux builder image
-########################################
-echo "== Build Linux builder image (Debian bookworm) =="
+  local build_args=(--pull)
+  [[ "${DOCKER_NO_CACHE}" -eq 1 ]] && build_args+=(--no-cache)
 
-# If we can run amd64 containers, build amd64 builder (original design).
-# Otherwise, build native builder for current platform.
-BUILD_PLATFORM_ARGS=()
-if [[ "${FORCE_AMD64_DOCKER}" -eq 1 ]]; then
-  BUILD_PLATFORM_ARGS+=(--platform=linux/amd64)
-fi
+  echo "== Linux amd64 build (Docker) =="
+  docker build "${build_args[@]}" --platform=linux/amd64 -f "$df" -t "$img" "$tmp"
 
-docker build --pull --no-cache "${BUILD_PLATFORM_ARGS[@]}" \
-  -f "${DF_LINUX}" -t "${IMG_LINUX}" "${TMPDIR}"
-
-########################################
-# Linux amd64 build (Docker)
-########################################
-echo "== Linux amd64 build (Docker) =="
-
-if [[ "${FORCE_AMD64_DOCKER}" -ne 1 ]]; then
-  echo "Skipping Linux amd64 build because amd64 containers are not runnable on this host."
-  echo "Enable amd64 emulation (Rosetta/binfmt) to build this target here, or run on an amd64 machine."
-else
   docker run --rm --platform=linux/amd64 \
-    -v "${PROJECT_ROOT}:/work" \
-    -w /work \
-    "${IMG_LINUX}" \
+    -v "${PROJECT_ROOT}:/work" -w /work \
+    -e CARGO_TARGET_DIR=/work/target-cross/linux-amd64 \
+    "$img" \
     bash -lc "cargo build --release --target x86_64-unknown-linux-gnu"
 
-  LINUX_AMD64_BIN="${DIST_DIR}/${BIN_NAME}-${VERSION}-linux-amd64"
-  cp "target/x86_64-unknown-linux-gnu/release/${BIN_NAME}" "${LINUX_AMD64_BIN}"
-  chmod +x "${LINUX_AMD64_BIN}" || true
-fi
+  local out="${DIST_DIR}/${BIN_NAME}-${VERSION}-linux-amd64"
+  cp "${PROJECT_ROOT}/target-cross/linux-amd64/x86_64-unknown-linux-gnu/release/${BIN_NAME}" "$out"
+  chmod +x "$out" || true
+  ARTIFACTS+=("$out")
 
-########################################
-# Linux arm64 build (Docker, cross toolchain)
-########################################
-echo "== Linux arm64 build (Docker) =="
-
-docker run --rm $(platform_amd64_args) \
-  -v "${PROJECT_ROOT}:/work" \
-  -w /work \
-  -e CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
-  -e CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
-  -e CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++ \
-  -e PKG_CONFIG_ALLOW_CROSS=1 \
-  -e PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig:/usr/lib/pkgconfig \
-  "${IMG_LINUX}" \
-  bash -lc "cargo build --release --target aarch64-unknown-linux-gnu"
-
-LINUX_ARM64_BIN="${DIST_DIR}/${BIN_NAME}-${VERSION}-linux-arm64"
-cp "target/aarch64-unknown-linux-gnu/release/${BIN_NAME}" "${LINUX_ARM64_BIN}"
-chmod +x "${LINUX_ARM64_BIN}" || true
-
-########################################
-# Windows x86 (32-bit) build (MinGW in Docker)
-########################################
-echo "== Windows x86 (32-bit) build (MinGW in Docker) =="
-
-docker run --rm $(platform_amd64_args) \
-  -v "${PROJECT_ROOT}:/work" \
-  -w /work \
-  -e CARGO_TARGET_I686_PC_WINDOWS_GNU_LINKER=i686-w64-mingw32-gcc \
-  -e CC_i686_pc_windows_gnu=i686-w64-mingw32-gcc \
-  -e CXX_i686_pc_windows_gnu=i686-w64-mingw32-g++ \
-  "${IMG_LINUX}" \
-  bash -lc "rustup target add i686-pc-windows-gnu && cargo build --release --target i686-pc-windows-gnu"
-
-WIN_X86_BIN="${DIST_DIR}/${BIN_NAME}-${VERSION}-windows-x86.exe"
-cp "target/i686-pc-windows-gnu/release/${BIN_NAME}.exe" "${WIN_X86_BIN}"
-
-########################################
-# Packaging: tar.gz + SHA256
-########################################
-echo "== Packaging tar.gz + SHA256 =="
-
-package_one() {
-  local src="$1"
-  local base
-  base="$(basename "$src")"
-  local tgz="${PKG_DIR}/${base}.tar.gz"
-  tar -C "$(dirname "$src")" -czf "${tgz}" "${base}"
-  (cd "${PKG_DIR}" && shasum -a 256 "$(basename "${tgz}")" > "$(basename "${tgz}").sha256")
+  docker image rm -f "$img" >/dev/null 2>&1 || true
+  rm -rf "$tmp" >/dev/null 2>&1 || true
+  echo "✔ Built: $out"
 }
 
-package_one "${MAC_BIN}"
-if [[ "${FORCE_AMD64_DOCKER}" -eq 1 ]]; then
-  package_one "${LINUX_AMD64_BIN}"
+########################################
+# Linux arm64 build (Docker, native linux/arm64 on Apple Silicon)
+########################################
+build_linux_arm64_docker() {
+  if [[ "$docker_ok" -ne 1 ]]; then
+    echo "Skipping linux-arm64: docker not found."
+    return 0
+  fi
+
+  local tmp; tmp="$(mktemp -d)"
+  local df="${tmp}/Dockerfile.linux.arm64"
+  local img="local/${BIN_NAME}-linux-arm64:${VERSION}-$$"
+
+  cat > "$df" <<'DOCKERFILE'
+FROM ubuntu:noble
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl git xz-utils \
+    build-essential pkg-config \
+    cmake ninja-build \
+    clang libclang-dev llvm-dev \
+    perl \
+    libssl-dev \
+    libasound2-dev \
+ && rm -rf /var/lib/apt/lists/*
+RUN curl -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+RUN rustup target add aarch64-unknown-linux-gnu
+WORKDIR /work
+DOCKERFILE
+
+  local build_args=(--pull)
+  [[ "${DOCKER_NO_CACHE}" -eq 1 ]] && build_args+=(--no-cache)
+
+  echo "== Linux arm64 build (Docker, native arm64) =="
+  docker build "${build_args[@]}" --platform=linux/arm64 -f "$df" -t "$img" "$tmp"
+
+  docker run --rm --platform=linux/arm64 \
+    -v "${PROJECT_ROOT}:/work" -w /work \
+    -e CARGO_TARGET_DIR=/work/target-cross/linux-arm64 \
+    "$img" \
+    bash -lc "cargo build --release --target aarch64-unknown-linux-gnu"
+
+  local out="${DIST_DIR}/${BIN_NAME}-${VERSION}-linux-arm64"
+  cp "${PROJECT_ROOT}/target-cross/linux-arm64/aarch64-unknown-linux-gnu/release/${BIN_NAME}" "$out"
+  chmod +x "$out" || true
+  ARTIFACTS+=("$out")
+
+  docker image rm -f "$img" >/dev/null 2>&1 || true
+  rm -rf "$tmp" >/dev/null 2>&1 || true
+  echo "✔ Built: $out"
+}
+
+########################################
+# Run selected builds
+########################################
+if want_os macos; then build_macos_native; fi
+if want_os windows && want_arch amd64; then build_windows_msvc_amd64; fi
+if want_os linux; then
+  if want_arch amd64; then build_linux_amd64_docker; fi
+  if want_arch arm64; then build_linux_arm64_docker; fi
 fi
-package_one "${LINUX_ARM64_BIN}"
-package_one "${WIN_X86_BIN}"
+
+########################################
+# Packaging
+########################################
+if [[ "${DO_PACKAGE}" -eq 1 ]]; then
+  echo "== Packaging tar.gz + SHA256 =="
+  for f in "${ARTIFACTS[@]}"; do
+    package_one "$f"
+  done
+else
+  echo "Skipping packaging (--skip-package)"
+fi
 
 echo ""
 echo "✔ Build complete"
 echo "Artifacts (raw): ${DIST_DIR}"
-ls -lh "${DIST_DIR}" | sed 's/^/  /'
+ls -lh "${DIST_DIR}" | sed 's/^/  /' || true
 echo ""
 echo "Packages: ${PKG_DIR}"
-ls -lh "${PKG_DIR}" | sed 's/^/  /'
+ls -lh "${PKG_DIR}" | sed 's/^/  /' || true
