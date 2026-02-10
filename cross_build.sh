@@ -5,6 +5,8 @@ BIN_NAME="ai-mate"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DIST_DIR="${PROJECT_ROOT}/dist"
 PKG_DIR="${DIST_DIR}/packages"
+ASSETS_DIR="${PROJECT_ROOT}/assets"
+ESPEAK_ARCHIVE="${ASSETS_DIR}/espeak-ng-data.tar.gz"
 
 DO_PACKAGE=1
 DOCKER_NO_CACHE=1
@@ -27,6 +29,11 @@ Notes:
   - linux/amd64 uses Ubuntu 24.04 (noble) to satisfy newer glibc requirements (ort-sys / ORT)
   - linux/arm64 uses Ubuntu 24.04 (noble) on linux/arm64 (native on Apple Silicon)
 - Docker builds write to target-cross/ to avoid cache/glibc conflicts.
+
+Embedded eSpeak-ng data:
+- This script generates assets/espeak-ng-data.tar.gz (if missing) from Ubuntu's espeak-ng-data package.
+- It strips espeak-ng-data/voices to reduce size (phonemization still works for typical Piper usage).
+- Your Rust code should embed this archive via include_bytes! and extract at runtime.
 USAGE
 }
 
@@ -89,7 +96,7 @@ VERSION="$(
 )"
 [[ -n "${VERSION}" ]] || { echo "Failed to read version from Cargo.toml"; exit 1; }
 
-mkdir -p "${DIST_DIR}" "${PKG_DIR}" "${PROJECT_ROOT}/target-cross"
+mkdir -p "${DIST_DIR}" "${PKG_DIR}" "${PROJECT_ROOT}/target-cross" "${ASSETS_DIR}"
 
 echo "cross_build.sh started: $(date) args: --os ${SEL_OS} --arch ${SEL_ARCH}"
 echo "Host OS: ${HOST_OS}"
@@ -145,6 +152,66 @@ can_run_amd64() {
 
 FORCE_AMD64_DOCKER=0
 if [[ "$docker_ok" -eq 1 ]] && can_run_amd64; then FORCE_AMD64_DOCKER=1; fi
+
+########################################
+# Ensure embedded eSpeak-ng data archive exists
+########################################
+ensure_espeak_data_archive() {
+  if [[ -f "${ESPEAK_ARCHIVE}" ]]; then
+    echo "✔ Found embedded asset: ${ESPEAK_ARCHIVE}"
+    return 0
+  fi
+
+  echo "== Generating embedded asset: ${ESPEAK_ARCHIVE} (voices removed) =="
+
+  if [[ "$docker_ok" -ne 1 ]]; then
+    echo "ERROR: Docker not found and ${ESPEAK_ARCHIVE} is missing."
+    echo "Install Docker OR generate ${ESPEAK_ARCHIVE} on another machine/CI and commit it."
+    exit 1
+  fi
+
+  local tmp; tmp="$(mktemp -d)"
+  local df="${tmp}/Dockerfile.espeak.asset"
+  local img="local/${BIN_NAME}-espeak-asset:${VERSION}-$$"
+
+  cat > "$df" <<'DOCKERFILE'
+FROM ubuntu:noble
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates tar gzip \
+    espeak-ng-data \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /out
+DOCKERFILE
+
+  local build_args=(--pull)
+  [[ "${DOCKER_NO_CACHE}" -eq 1 ]] && build_args+=(--no-cache)
+
+  docker build "${build_args[@]}" --platform=linux/amd64 -f "$df" -t "$img" "$tmp"
+
+  rm -f "${ESPEAK_ARCHIVE}"
+  docker run --rm --platform=linux/amd64 \
+    -v "${ASSETS_DIR}:/out" -w /out \
+    "$img" \
+    bash -lc '
+      set -euo pipefail
+      rm -f espeak-ng-data.tar.gz
+      cp -a /usr/share/espeak-ng-data ./espeak-ng-data
+      # Strip voices to reduce size (Piper doesn’t need eSpeak voices)
+      rm -rf ./espeak-ng-data/voices
+      tar -czf espeak-ng-data.tar.gz espeak-ng-data
+      rm -rf ./espeak-ng-data
+    '
+
+  docker image rm -f "$img" >/dev/null 2>&1 || true
+  rm -rf "$tmp" >/dev/null 2>&1 || true
+
+  [[ -f "${ESPEAK_ARCHIVE}" ]] || { echo "ERROR: failed to generate ${ESPEAK_ARCHIVE}"; exit 1; }
+
+  echo "✔ Generated: ${ESPEAK_ARCHIVE}"
+  echo "  (Tip) Embed in Rust via:"
+  echo "    include_bytes!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/assets/espeak-ng-data.tar.gz\"))"
+}
 
 ARTIFACTS=()
 
@@ -306,6 +373,9 @@ DOCKERFILE
 ########################################
 # Run selected builds
 ########################################
+# Ensure the embedded asset exists BEFORE compiling anything that includes it.
+ensure_espeak_data_archive
+
 if want_os macos; then build_macos_native; fi
 if want_os windows && want_arch amd64; then build_windows_msvc_amd64; fi
 if want_os linux; then
@@ -327,6 +397,7 @@ fi
 
 echo ""
 echo "✔ Build complete"
+echo "Embedded asset: ${ESPEAK_ARCHIVE}"
 echo "Artifacts (raw): ${DIST_DIR}"
 ls -lh "${DIST_DIR}" | sed 's/^/  /' || true
 echo ""
