@@ -3,6 +3,7 @@
 // ------------------------------------------------------------------
 
 use crossbeam_channel::{Receiver, Sender};
+use flate2::read::GzDecoder;
 use kokoro_tiny::TtsEngine;
 use reqwest;
 use std::io::{BufReader, Read};
@@ -10,10 +11,9 @@ use std::sync::{
   atomic::{AtomicU64, Ordering},
   Arc,
 };
-use urlencoding;
 use std::{fs, io::Cursor, path::PathBuf};
-use flate2::read::GzDecoder;
 use tar::Archive;
+use urlencoding;
 
 // API
 
@@ -66,38 +66,35 @@ pub fn speak(
 }
 
 pub fn ensure_piper_espeak_env() {
-    // Respect user override
-    if std::env::var_os("PIPER_ESPEAKNG_DATA_DIRECTORY").is_some() {
-        return;
+  // Respect user override
+  if std::env::var_os("PIPER_ESPEAKNG_DATA_DIRECTORY").is_some() {
+    return;
+  }
+
+  let home = match std::env::var("HOME") {
+    Ok(h) => PathBuf::from(h),
+    Err(_) => return,
+  };
+
+  let base = home.join(".ai-mate");
+  let espeak_dir = base.join("espeak-ng-data");
+  let marker = base.join(".espeak_extracted");
+
+  if !(marker.exists() && espeak_dir.is_dir()) {
+    let _ = fs::remove_dir_all(&base);
+    if fs::create_dir_all(&base).is_ok() {
+      let gz = GzDecoder::new(Cursor::new(embedded_espeak_archive()));
+      let mut ar = Archive::new(gz);
+      if ar.unpack(&base).is_ok() {
+        let _ = fs::write(&marker, b"ok");
+      }
     }
+  }
 
-    let home = match std::env::var("HOME") {
-        Ok(h) => PathBuf::from(h),
-        Err(_) => return,
-    };
-
-    let base = home.join(".ai-mate");
-    let espeak_dir = base.join("espeak-ng-data");
-    let marker = base.join(".espeak_extracted");
-
-    if !(marker.exists() && espeak_dir.is_dir()) {
-        let _ = fs::remove_dir_all(&base);
-        if fs::create_dir_all(&base).is_ok() {
-            let gz = GzDecoder::new(Cursor::new(embedded_espeak_archive()));
-            let mut ar = Archive::new(gz);
-            if ar.unpack(&base).is_ok() {
-                let _ = fs::write(&marker, b"ok");
-            }
-        }
-    }
-
-    // SAFETY: called once at program startup before any threads exist
-    unsafe {
-        std::env::set_var(
-            "PIPER_ESPEAKNG_DATA_DIRECTORY",
-            base.as_os_str(),
-        );
-    }
+  // SAFETY: called once at program startup before any threads exist
+  unsafe {
+    std::env::set_var("PIPER_ESPEAKNG_DATA_DIRECTORY", base.as_os_str());
+  }
 }
 
 /// Returns the embedded espeak-ng data archive (tar.gz) as raw bytes.
@@ -106,13 +103,12 @@ pub fn ensure_piper_espeak_env() {
 /// Make sure this path exists when compiling:
 ///   <crate>/assets/espeak-ng-data.tar.gz
 fn embedded_espeak_archive() -> &'static [u8] {
-    static ESPEAK_TGZ: &[u8] = include_bytes!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/assets/espeak-ng-data.tar.gz"
-    ));
-    ESPEAK_TGZ
+  static ESPEAK_TGZ: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/assets/espeak-ng-data.tar.gz"
+  ));
+  ESPEAK_TGZ
 }
-
 
 //  Kokoro Tiny TTS integration -------------------------------------
 // +++++++++++++++++++++++++++++
@@ -242,7 +238,7 @@ pub const KOKORO_VOICES_PER_LANGUAGE: &[(&str, &[&str])] = &[
 
 pub const DEFAULT_KOKORO_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
   ("en", "bm_fable"),
-  ("es", "em_santa"),
+  ("es", "ef_dora"),
   ("zh", "zm_yunjian"),
   ("ja", "jm_kumo"),
   ("pt", "pf_dora"),
@@ -278,6 +274,15 @@ pub fn speak_via_kokoro(
   } else {
     samples
   };
+  crate::log::log(
+    "info",
+    &format!(
+      "koko chunk: {} samples @ {}Hz (target {})",
+      data.len(),
+      24000,
+      target_sr
+    ),
+  );
   let chunk = crate::audio::AudioChunk {
     data,
     channels: 1,

@@ -2,9 +2,9 @@ use std::ffi::{c_char, c_void};
 
 // avoiding printing external whisper logs
 extern "C" fn noop_whisper_log(
-    _level: i32,
-    _message: *const c_char,
-    _user_data: *mut c_void,
+  _: u32,
+  _: *const std::os::raw::c_char,
+  _: *mut std::os::raw::c_void,
 ) { } // intentionally do nothing
 
 use clap::Parser;
