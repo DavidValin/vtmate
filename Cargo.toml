@@ -22,9 +22,6 @@ whisper-rs = "0.15.1"
 hound = "3"
 crossterm = "0.27"
 tokio = { version = "1", features = ["rt", "macros"] }
-kokoro-tiny = "0.1.0"
+kokoro-tiny = { git = "https://github.com/DavidValin/kokoro-tiny.git", rev = "9f6a047" }
 espeak-rs = "0.1.9"
-
-[patch.crates-io]
-kokoro-tiny = { path = "vendor/kokoro-tiny" }
 

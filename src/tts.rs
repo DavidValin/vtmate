@@ -217,7 +217,7 @@ pub fn speak_via_kokoro(
   let mut engine = rt.block_on(TtsEngine::new())?;
 
   let samples: Vec<f32> = engine
-    .synthesize(text, Some(voice), Some(language))
+    .synthesize(text, Some(voice), Some(1.2), Some(language))
     .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?;
 
   // Kokoro always returns 24 kHz PCM. Resample if needed.
