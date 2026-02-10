@@ -104,8 +104,8 @@ pub fn conversation_thread(
               my_interrupt,
             ) {
               Ok(o) => o,
-              Err(e) => {
-                crate::log::log("error", &format!("TTS error: {}", e));
+              Err(_e) => {
+                crate::log::log("error", &format!("TTS error. Can't play audio speech. Make sure OpenTTS is running: docker run --rm -p 5500:5500 synesthesiam/opentts:all"));
                 interrupted = true;
                 return;
               }
