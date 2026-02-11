@@ -2,12 +2,12 @@
 //  UI (single renderer thread)
 // ------------------------------------------------------------------
 
-use crate::state::{get_speed, GLOBAL_STATE};
+use crate::state::{GLOBAL_STATE, get_speed};
 
 use crossbeam_channel::Receiver;
 use crossterm::terminal;
 use std::io::Write;
-use std::sync::{atomic::Ordering, Arc, Mutex};
+use std::sync::{Arc, Mutex, atomic::Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 

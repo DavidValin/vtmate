@@ -221,11 +221,9 @@ impl PhraseSpeaker {
   }
   fn push_text(&mut self, s: &str) -> Option<String> {
     self.buf.push_str(s);
-    let trigger = self.buf.contains('\n')
-      || self.buf.ends_with('.')
-      || self.buf.ends_with('!')
-      || self.buf.ends_with('?')
-      || self.buf.len() >= 140;
+
+    // cap phrases by new lines or dots
+    let trigger = self.buf.contains('\n') || self.buf.ends_with('.');
     if trigger { self.flush() } else { None }
   }
   fn flush(&mut self) -> Option<String> {
