@@ -29,7 +29,7 @@ pub fn playback_thread(
   gate_until_ms: Arc<AtomicU64>,
   paused: Arc<AtomicBool>,
   out_channels: u16,
-  ui: crate::ui::UiState,
+  ui: crate::state::UiState,
   volume: Arc<Mutex<f32>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   // inst removed

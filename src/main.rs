@@ -7,13 +7,11 @@ extern "C" fn noop_whisper_log(
 } // intentionally do nothing
 
 use clap::Parser;
+use crossterm::terminal::{Clear, ClearType};
 use cpal::traits::DeviceTrait;
 use crossbeam_channel::bounded;
 use std::process;
-use std::sync::{
-  Arc, Mutex, OnceLock,
-  atomic::{AtomicBool, AtomicU64},
-};
+use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::Instant;
 use whisper_rs;
@@ -28,6 +26,7 @@ mod log;
 mod playback;
 mod record;
 mod router;
+mod state;
 mod stt;
 mod tts;
 mod ui;
@@ -38,7 +37,8 @@ static START_INSTANT: OnceLock<Instant> = OnceLock::new();
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   assets::ensure_piper_espeak_env();
 
-  println!(
+  crossterm::execute!(std::io::stdout(), crossterm::terminal::Clear(crossterm::terminal::ClearType::All)).unwrap();
+println!(
     r#"
    █████╗ ██╗      ███╗   ███╗ █████╗ ████████╗███████╗
   ██╔══██╗██║      ████╗ ████║██╔══██╗╚══██╔══╝██╔════╝
@@ -127,9 +127,21 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     &format!("Playback stream SR (truth): {}", out_sample_rate),
   );
 
+  // application
+  let state = Arc::new(state::AppState::new());
+  let recording_paused = state.recording_paused.clone();
+  let recording_paused_for_record = recording_paused.clone();
+
+  // set global state for speed functions
+  state::GLOBAL_STATE.set(state.clone()).unwrap();
+
+  // broadcast stop signal to all threads
   let (stop_all_tx, stop_all_rx) = bounded::<()>(1);
+  // channel for recording audio chunks
   let (tx_rec, _rx_rec) = bounded::<audio::AudioChunk>(32);
-  let (tx_play, rx_play) = bounded::<audio::AudioChunk>(32);
+  // channel for playback audio chunks
+  let (tx_play, rx_play) = bounded::<audio::AudioChunk>(1);
+  // channel for utterance audio chunks
   let (tx_utt, rx_utt) = bounded::<audio::AudioChunk>(4);
 
   // Clones for threads
@@ -141,21 +153,18 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let stop_all_rx_for_record = stop_all_rx.clone();
   let stop_all_rx_for_keyboard = stop_all_rx.clone();
   let (stop_play_tx, stop_play_rx) = bounded::<()>(2); // stop playback signal
-  let interrupt_counter = Arc::new(AtomicU64::new(0)); // Conversation interruption counter (increment when user speaks over TTS)
-  let paused = Arc::new(AtomicBool::new(false)); // Pause flag (space toggles while playing)
-  let playback_active = Arc::new(AtomicBool::new(false));
-  let gate_until_ms = Arc::new(AtomicU64::new(0));
-  let ui = ui::UiState {
-    thinking: Arc::new(AtomicBool::new(false)),
-    playing: Arc::new(AtomicBool::new(false)),
-    speaking: Arc::new(AtomicBool::new(false)),
-    peak: Arc::new(Mutex::new(0.0)),
-  };
-  let volume = Arc::new(Mutex::new(1.0_f32));
+  let interrupt_counter = state.interrupt_counter.clone();
+  let paused = state.playback.paused.clone();
+  let playback_active = state.playback.playback_active.clone();
+  let gate_until_ms = state.playback.gate_until_ms.clone();
+
+  let ui = state.ui.clone();
+  let volume = state.playback.volume.clone();
+  let conversation_history = state.conversation_history.clone();
   let volume_play = volume.clone();
   let volume_rec = volume.clone();
-  let status_line = Arc::new(Mutex::new(String::new())); // Shared status-line text + a single print lock so UI repaint and content prints never interleave.
-  let print_lock = Arc::new(Mutex::new(()));
+  let status_line = state.status_line.clone();
+  let print_lock = state.print_lock.clone();
 
   let voice_selected = if args.tts == "opentts" {
     tts::DEFAULT_OPENTTS_VOICES_PER_LANGUAGE
@@ -266,11 +275,13 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         peak,
         ui,
         volume_rec.clone(),
+        recording_paused_for_record.clone(),
       )
     }
   });
 
-let conv_handle = thread::spawn({
+  // ---- Thread: conversation ----
+  let conv_handle = thread::spawn({
     let out_sample_rate = out_sample_rate;
     let interrupt_counter = interrupt_counter.clone();
     let args = args.clone();
@@ -278,6 +289,7 @@ let conv_handle = thread::spawn({
     let status_line = status_line.clone();
     let print_lock = print_lock.clone();
     let stop_all_tx_conv = stop_all_tx.clone();
+    let conversation_history = conversation_history.clone();
     move || {
       conversation::conversation_thread(
         voice_selected,
@@ -291,16 +303,26 @@ let conv_handle = thread::spawn({
         ui,
         status_line,
         print_lock,
+        conversation_history,
       )
     }
   });
 
+  // ---- Thread: keyboard ----
   let key_handle = thread::spawn({
     let stop_all_tx = stop_all_tx.clone();
     let stop_all_rx = stop_all_rx_for_keyboard.clone();
     let paused = paused.clone();
     let playback_active = playback_active.clone();
-    move || keyboard::keyboard_thread(stop_all_tx, stop_all_rx, paused, playback_active)
+    move || {
+      keyboard::keyboard_thread(
+        stop_all_tx,
+        stop_all_rx,
+        paused,
+        playback_active,
+        recording_paused.clone(),
+      )
+    }
   });
 
   // Print config knobs
