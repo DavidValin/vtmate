@@ -29,3 +29,4 @@ pub fn log(msg_type: &str, msg: &str) {
   write!(out, "\r\x1b[K{}  \x1b[90m{}\x1b[0m\n", emoji, msg).unwrap();
   out.flush().unwrap();
 }
+
