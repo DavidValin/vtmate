@@ -122,8 +122,10 @@ pub const KOKORO_VOICES_PER_LANGUAGE: &[(&str, &[&str])] = &[
     "es",
     &[
       // Spanish - female
-      "ef_dora", // Spanish - male
-      "em_alex", "em_santa",
+      "ef_dora",
+      // Spanish - male
+      "em_alex",
+      "em_santa",
     ],
   ),
   // Mandarin chinese language
@@ -201,7 +203,7 @@ pub const KOKORO_VOICES_PER_LANGUAGE: &[(&str, &[&str])] = &[
 
 pub const DEFAULTKOKORO_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
   ("en", "bm_fable"),
-  ("es", "ef_dora"),
+  ("es", "em_santa"),
   ("zh", "zf_xiaoni"),
   ("ja", "jm_kumo"),
   ("pt", "pf_dora"),
