@@ -50,15 +50,15 @@ You can run the models locally (by default) or remotely by configuring the base 
 
 ## Installation
 
-### 1. **Download ai-mate**
+### 📌 1. **Download ai-mate**
 - `https://github.com/DavidValin/ai-mate/releases`
 - Move the binary to a folder in your $PATH so you can use `ai-mate` command anywhere
 
-### 2. **Download whisper model**
+### 📌 2. **Download whisper model**
 - Download model, example: `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q5_0.bin?download=true`
 - Place the model under  `~/.whisper-models/ggml-medium-q5_0.bin`
 
-### 3. **Install llm engine (needed for ai responses)**
+### 📌 3. **Install llm engine (needed for ai responses)**
 
 Option A- ollama (the default)
 - Install `https://ollama.com/download`.
@@ -72,7 +72,7 @@ Option C- llama-server support.
 - Install llama.cpp: `https://github.com/ggml-org/llama.cpp`.
 - Download a gguf model: `https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q8_0.gguf?download=true`.
 
-### 4. **(Windows only) Install supported terminal**
+### 📌 4. **(Windows only) Install supported terminal**
 
 - Install Windows Terminal (which supports emojis): `https://apps.microsoft.com/detail/9n0dx20hk701` (use this terminal to run ai-mate)
 
