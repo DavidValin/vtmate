@@ -57,19 +57,21 @@ pub fn speak(
       expected_interrupt,
     )
   } else {
+    // NOTE: make espeak find phonemes for chinese mandarin
+    let lang = if language == "zh" { "cmn" } else { language };
     crate::tts::speak_via_kokoro_stream(
       text,
-      language,
+      lang,
       voice,
       tx,
       stop_all_rx,
       interrupt_counter,
       expected_interrupt,
-    )
-  }?;
-  Ok(outcome)
+    )}?;
+    Ok(outcome)
 }
 
+  
 //  Kokoro Tiny TTS integration -------------------------------------
 static KOKORO_ENGINE: OnceLock<Arc<Mutex<TtsEngine>>> = OnceLock::new();
 // +++++++++++++++++++++++++++++
@@ -200,7 +202,7 @@ pub const _KOKORO_VOICES_PER_LANGUAGE: &[(&str, &[&str])] = &[
 pub const DEFAULT_KOKORO_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
   ("en", "bm_fable"),
   ("es", "ef_dora"),
-  ("zh", "zm_yunjian"),
+  ("zh", "zf_xiaoni"),
   ("ja", "jm_kumo"),
   ("pt", "pf_dora"),
   ("it", "if_sara"),
