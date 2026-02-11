@@ -2,10 +2,10 @@
 //  Conversation
 // ------------------------------------------------------------------
 
-use crossbeam_channel::{select, Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, select};
 use std::sync::{
-  atomic::{AtomicU64, Ordering},
   Arc, Mutex,
+  atomic::{AtomicU64, Ordering},
 };
 
 // API
@@ -20,12 +20,12 @@ pub fn conversation_thread(
   out_sample_rate: u32, // MUST match playback SR
   interrupt_counter: Arc<AtomicU64>,
   args: crate::config::Args,
-  ui: crate::ui::UiState,
+  ui: crate::state::UiState,
   status_line: Arc<Mutex<String>>,
   print_lock: Arc<Mutex<()>>,
+  conversation_history: std::sync::Arc<std::sync::Mutex<String>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   crate::log::log("info", &format!("Ollama model: {}", args.ollama_model));
-  let mut conversation_history = String::new();
 
   loop {
     select! {
@@ -34,7 +34,8 @@ pub fn conversation_thread(
         let Ok(utt) = msg else { break };
         let pcm: Vec<i16> = utt.data.iter().map(|s| ((*s).clamp(-1.0, 1.0) * (i16::MAX as f32)) as i16).collect();
         let user_text = crate::stt::whisper_transcribe(&pcm, utt.sample_rate, &args.resolved_whisper_model_path())?;
-        let prompt = format!("{}\n{}: {}", conversation_history, crate::ui::USER_LABEL, user_text);
+        let prompt = format!("{}\n{}: {}", conversation_history.lock().unwrap(), crate::ui::USER_LABEL, user_text);
+        let cleaned_prompt = crate::util::strip_ansi(&prompt);
         let user_text = user_text.trim().to_string();
         if user_text.is_empty() {
           continue;
@@ -45,12 +46,12 @@ pub fn conversation_thread(
         if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
           // signal playback to stop queued audio
           let _ = stop_all_tx.try_send(());
-          conversation_history.clear();
+          conversation_history.lock().unwrap().clear();
           continue;
         }
         crate::ui::ui_println(&print_lock, &status_line, "");
         crate::ui::ui_println(&print_lock, &status_line, &format!("{} {user_text}", crate::ui::USER_LABEL));
-        conversation_history.push_str(&format!("{}: {}\n", crate::ui::USER_LABEL, user_text));
+        conversation_history.lock().unwrap().push_str(&format!("{}: {}\n", crate::ui::USER_LABEL, user_text));
         ui.thinking.store(true, Ordering::Relaxed);
 
         // Snapshot interruption counter for this assistant turn.
@@ -102,7 +103,7 @@ pub fn conversation_thread(
 
           if let Some(phrase) = speaker.push_text(piece) {
             crate::ui::ui_println(&print_lock, &status_line, &phrase);
-            conversation_history.push_str(&format!("{}: {}\n", crate::ui::ASSIST_LABEL, phrase));
+            conversation_history.lock().unwrap().push_str(&format!("{}: {}\n", crate::ui::ASSIST_LABEL, phrase));
 
             let outcome = match crate::tts::speak(
               &strip_special_chars(&phrase),
@@ -142,7 +143,7 @@ pub fn conversation_thread(
         }
 
         match crate::llm::ollama_stream_response_into(
-          &prompt,
+          &cleaned_prompt,
           args.ollama_url.as_str(),
           args.ollama_model.as_str(),
           stop_all_rx.clone(),
@@ -173,7 +174,7 @@ pub fn conversation_thread(
 
         if let Some(phrase) = speaker.flush() {
           crate::ui::ui_println(&print_lock, &status_line, &phrase);
-          conversation_history.push_str(&format!("{}: {}\n", crate::ui::ASSIST_LABEL, phrase));
+          conversation_history.lock().unwrap().push_str(&format!("{}: {}\n", crate::ui::ASSIST_LABEL, phrase));
           let outcome = match crate::tts::speak(
             &strip_special_chars(&phrase),
             args.tts.as_str(),
@@ -225,20 +226,12 @@ impl PhraseSpeaker {
       || self.buf.ends_with('!')
       || self.buf.ends_with('?')
       || self.buf.len() >= 140;
-    if trigger {
-      self.flush()
-    } else {
-      None
-    }
+    if trigger { self.flush() } else { None }
   }
   fn flush(&mut self) -> Option<String> {
     let out = self.buf.trim().to_string();
     self.buf.clear();
-    if out.is_empty() {
-      None
-    } else {
-      Some(out)
-    }
+    if out.is_empty() { None } else { Some(out) }
   }
 }
 
@@ -256,8 +249,7 @@ fn strip_special_chars(s: &str) -> String {
     if !inside {
       result.extend(part.chars().filter(|c| {
         ![
-          '.', '~', '*', '&', '-', ',', ';', ':', '(', ')', '[', ']', '{', '}', '"',
-          '\'',
+          '.', '~', '*', '&', '-', ',', ';', ':', '(', ')', '[', ']', '{', '}', '"', '\'',
         ]
         .contains(c)
       }));

@@ -18,7 +18,6 @@ pub struct StreamingTts {
   pub is_speaking: Arc<AtomicBool>,
   pub interrupt_flag: Arc<AtomicBool>,
   voice: String,
-  speed: f32,
   gain: f32,
 }
 
@@ -29,7 +28,6 @@ impl StreamingTts {
       is_speaking: Arc::new(AtomicBool::new(false)),
       interrupt_flag: Arc::new(AtomicBool::new(false)),
       voice: "".to_string(),
-      speed: 1.5,
       gain: 1.5,
     }
   }
@@ -73,7 +71,6 @@ impl StreamingTts {
     let chunks = Self::split_into_chunks(text);
     let engine = self.engine.clone();
     let voice = self.voice.clone();
-    let speed = self.speed;
     let gain = self.gain;
     let interrupt_flag_main = self.interrupt_flag.clone();
     let interrupt_flag_thread = interrupt_flag_main.clone();
@@ -85,9 +82,13 @@ impl StreamingTts {
           break;
         }
         if let Ok(mut e) = engine.lock() {
-          if let Ok(samples) =
-            e.synthesize_with_options(&chunk, Some(&voice), speed, gain, Some(&language))
-          {
+          if let Ok(samples) = e.synthesize_with_options(
+            &chunk,
+            Some(&voice),
+            crate::state::get_speed(),
+            gain,
+            Some(&language),
+          ) {
             let audio = AudioChunk {
               data: samples,
               channels: 1,
@@ -113,10 +114,6 @@ impl StreamingTts {
     } else {
       Ok(())
     }
-  }
-
-  pub fn interrupt(&self) {
-    self.interrupt_flag.store(true, Ordering::Relaxed);
   }
 }
 

@@ -30,8 +30,9 @@ pub fn record_thread(
   interrupt_counter: Arc<AtomicU64>,
   stop_all_rx: Receiver<()>,
   peak: Arc<Mutex<f32>>,
-  ui: crate::ui::UiState,
+  ui: crate::state::UiState,
   volume: Arc<Mutex<f32>>,
+  recording_paused: Arc<AtomicBool>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   use cpal::SampleFormat;
 
@@ -84,6 +85,7 @@ pub fn record_thread(
       peak.clone(),
       ui,
       volume.clone(),
+      recording_paused.clone(),
       err_fn,
     )?,
     SampleFormat::I16 => build_input_i16(
@@ -111,6 +113,7 @@ pub fn record_thread(
       peak.clone(),
       ui,
       volume.clone(),
+      recording_paused.clone(),
       err_fn,
     )?,
     SampleFormat::U16 => build_input_u16(
@@ -138,6 +141,7 @@ pub fn record_thread(
       peak.clone(),
       ui,
       volume.clone(),
+      recording_paused.clone(),
       err_fn,
     )?,
     other => return Err(format!("unsupported input format: {other:?}").into()),
@@ -179,15 +183,20 @@ fn build_input_f32(
   stop_sent: Arc<AtomicBool>,
   stop_all_rx: Receiver<()>,
   peak: Arc<Mutex<f32>>,
-  ui: crate::ui::UiState,
+  ui: crate::state::UiState,
   volume: Arc<Mutex<f32>>,
+  recording_paused: Arc<AtomicBool>,
   mut err_fn: impl FnMut(cpal::StreamError) + Send + 'static,
 ) -> Result<cpal::Stream, cpal::BuildStreamError> {
   device.build_input_stream(
     config,
     move |data: &[f32], _| {
       // record peak for UI and use for threshold
+      if recording_paused.load(Ordering::Relaxed) {
+        return;
+      }
       let local_peak = peak_abs(data);
+
       if let Ok(mut p) = peak.lock() {
         *p = local_peak;
       }
@@ -310,8 +319,9 @@ fn build_input_i16(
   stop_sent: Arc<AtomicBool>,
   stop_all_rx: Receiver<()>,
   peak: Arc<Mutex<f32>>,
-  ui: crate::ui::UiState,
+  ui: crate::state::UiState,
   volume: Arc<Mutex<f32>>,
+  recording_paused: Arc<AtomicBool>,
   mut err_fn: impl FnMut(cpal::StreamError) + Send + 'static,
 ) -> Result<cpal::Stream, cpal::BuildStreamError> {
   device.build_input_stream(
@@ -429,8 +439,9 @@ fn build_input_u16(
   stop_sent: Arc<AtomicBool>,
   stop_all_rx: Receiver<()>,
   peak: Arc<Mutex<f32>>,
-  ui: crate::ui::UiState,
+  ui: crate::state::UiState,
   volume: Arc<Mutex<f32>>,
+  recording_paused: Arc<AtomicBool>,
   mut err_fn: impl FnMut(cpal::StreamError) + Send + 'static,
 ) -> Result<cpal::Stream, cpal::BuildStreamError> {
   device.build_input_stream(
