@@ -114,6 +114,20 @@ pub fn resample_linear(input: &[f32], in_sr: u32, out_sr: u32) -> Vec<f32> {
 }
 
 pub fn resample_to(input: &[f32], channels: u16, in_sr: u32, out_sr: u32) -> Vec<f32> {
+  // DEBUG: log resampling details
+  // Use the custom log module if available
+  #[allow(unused_imports)]
+  use std::fmt::Debug;
+  // crate::log::log(
+  //   "debug",
+  //   &format!(
+  //     "[resample_to] in {} samples@{}Hz, out {}Hz, len {}",
+  //     input.len(),
+  //     in_sr,
+  //     out_sr,
+  //     input.len()
+  //   ),
+  // );
   if in_sr == out_sr || input.is_empty() {
     return input.to_vec();
   }

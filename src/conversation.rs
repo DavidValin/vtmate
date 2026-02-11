@@ -16,15 +16,16 @@ pub fn conversation_thread(
   rx_utt: Receiver<crate::audio::AudioChunk>,
   tx_audio_into_router: Sender<crate::audio::AudioChunk>,
   stop_all_rx: Receiver<()>,
+  stop_all_tx: Sender<()>,
   out_sample_rate: u32, // MUST match playback SR
   interrupt_counter: Arc<AtomicU64>,
   args: crate::config::Args,
-  ui: crate::ui::UiState,
+  ui: crate::state::UiState,
   status_line: Arc<Mutex<String>>,
   print_lock: Arc<Mutex<()>>,
+  conversation_history: std::sync::Arc<std::sync::Mutex<String>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   crate::log::log("info", &format!("Ollama model: {}", args.ollama_model));
-  let mut conversation_history = String::new();
 
   loop {
     select! {
@@ -33,20 +34,28 @@ pub fn conversation_thread(
         let Ok(utt) = msg else { break };
         let pcm: Vec<i16> = utt.data.iter().map(|s| ((*s).clamp(-1.0, 1.0) * (i16::MAX as f32)) as i16).collect();
         let user_text = crate::stt::whisper_transcribe(&pcm, utt.sample_rate, &args.resolved_whisper_model_path())?;
-        let prompt = format!("{}\n{}: {}", conversation_history, crate::ui::USER_LABEL, user_text);
+        let prompt = format!("{}\n{}: {}", conversation_history.lock().unwrap(), crate::ui::USER_LABEL, user_text);
+        let cleaned_prompt = crate::util::strip_ansi(&prompt);
         let user_text = user_text.trim().to_string();
         if user_text.is_empty() {
           continue;
         }
 
         // Print user line (keep spinner/emojis only on the latest bottom line).
+        let my_interrupt = interrupt_counter.load(Ordering::SeqCst);
+        if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
+          // signal playback to stop queued audio
+          let _ = stop_all_tx.try_send(());
+          conversation_history.lock().unwrap().clear();
+          continue;
+        }
         crate::ui::ui_println(&print_lock, &status_line, "");
         crate::ui::ui_println(&print_lock, &status_line, &format!("{} {user_text}", crate::ui::USER_LABEL));
-        conversation_history.push_str(&format!("{}: {}\n", crate::ui::USER_LABEL, user_text));
+        conversation_history.lock().unwrap().push_str(&format!("{}: {}\n", crate::ui::USER_LABEL, user_text));
         ui.thinking.store(true, Ordering::Relaxed);
 
         // Snapshot interruption counter for this assistant turn.
-        let my_interrupt = interrupt_counter.load(Ordering::SeqCst);
+
         let mut speaker = PhraseSpeaker::new();
         let mut got_any_token = false;
 
@@ -67,18 +76,23 @@ pub fn conversation_thread(
           crate::ui::ui_println(&print_lock, &status_line, "");
         };
 
+        let stop_all_tx_clone = stop_all_tx.clone();
         let mut on_piece = |piece: &str| {
           if interrupted {
+            let _ = stop_all_tx_clone.try_send(());
             return;
           }
 
           if stop_all_rx.try_recv().is_ok() {
             interrupted = true;
+            speaker.buf.clear();
             return;
           }
 
+          // Abort if user interrupted before this token
           if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
             interrupted = true;
+            speaker.buf.clear();
             return;
           }
 
@@ -89,7 +103,7 @@ pub fn conversation_thread(
 
           if let Some(phrase) = speaker.push_text(piece) {
             crate::ui::ui_println(&print_lock, &status_line, &phrase);
-            conversation_history.push_str(&format!("{}: {}\n", crate::ui::ASSIST_LABEL, phrase));
+            conversation_history.lock().unwrap().push_str(&format!("{}: {}\n", crate::ui::ASSIST_LABEL, phrase));
 
             let outcome = match crate::tts::speak(
               &strip_special_chars(&phrase),
@@ -104,8 +118,8 @@ pub fn conversation_thread(
               my_interrupt,
             ) {
               Ok(o) => o,
-              Err(e) => {
-                crate::log::log("error", &format!("TTS error: {}", e));
+              Err(_e) => {
+                crate::log::log("error", &format!("TTS error. Can't play audio speech. Make sure OpenTTS is running: docker run --rm -p 5500:5500 synesthesiam/opentts:all"));
                 interrupted = true;
                 return;
               }
@@ -116,15 +130,20 @@ pub fn conversation_thread(
             {
               interrupted = true;
               print_user_interrupted();
+              // crate::ui::ui_clear_last_line(&print_lock);
               std::thread::sleep(std::time::Duration::from_millis(500));
-              *status_line.lock().unwrap() = "".to_string();
+              // *status_line.lock().unwrap() = "".to_string();
               return;
             }
           }
         };
 
+        if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
+          continue;
+        }
+
         match crate::llm::ollama_stream_response_into(
-          &prompt,
+          &cleaned_prompt,
           args.ollama_url.as_str(),
           args.ollama_model.as_str(),
           stop_all_rx.clone(),
@@ -155,7 +174,7 @@ pub fn conversation_thread(
 
         if let Some(phrase) = speaker.flush() {
           crate::ui::ui_println(&print_lock, &status_line, &phrase);
-          conversation_history.push_str(&format!("{}: {}\n", crate::ui::ASSIST_LABEL, phrase));
+          conversation_history.lock().unwrap().push_str(&format!("{}: {}\n", crate::ui::ASSIST_LABEL, phrase));
           let outcome = match crate::tts::speak(
             &strip_special_chars(&phrase),
             args.tts.as_str(),
@@ -202,11 +221,9 @@ impl PhraseSpeaker {
   }
   fn push_text(&mut self, s: &str) -> Option<String> {
     self.buf.push_str(s);
-    let trigger = self.buf.contains('\n')
-      || self.buf.ends_with('.')
-      || self.buf.ends_with('!')
-      || self.buf.ends_with('?')
-      || self.buf.len() >= 140;
+
+    // cap phrases by new lines or dots
+    let trigger = self.buf.contains('\n') || self.buf.ends_with('.');
     if trigger { self.flush() } else { None }
   }
   fn flush(&mut self) -> Option<String> {
@@ -216,8 +233,30 @@ impl PhraseSpeaker {
   }
 }
 
+use std::cell::Cell;
+
+thread_local! {
+  static IN_CODE_BLOCK: Cell<bool> = Cell::new(false);
+}
+
 fn strip_special_chars(s: &str) -> String {
-  s.chars()
-    .filter(|c| !['.', '\n', '~', '\r', '\t', '*', '&'].contains(c))
-    .collect()
+  let mut result = String::new();
+  let parts: Vec<&str> = s.split("```").collect();
+  let mut inside = IN_CODE_BLOCK.with(|c| c.get());
+  for (i, part) in parts.iter().enumerate() {
+    if !inside {
+      result.extend(part.chars().filter(|c| {
+        ![
+          '.', '~', '*', '&', '-', ',', ';', ':', '(', ')', '[', ']', '{', '}', '"', '\'',
+        ]
+        .contains(c)
+      }));
+    }
+    // toggle after each fence except after last part
+    if i < parts.len() - 1 {
+      inside = !inside;
+    }
+  }
+  IN_CODE_BLOCK.with(|c| c.set(inside));
+  result
 }

@@ -1,20 +1,16 @@
-use std::ffi::{c_char, c_void};
-
 // avoiding printing external whisper logs
 extern "C" fn noop_whisper_log(
-    _level: i32,
-    _message: *const c_char,
-    _user_data: *mut c_void,
-) { } // intentionally do nothing
+  _: u32,
+  _: *const std::os::raw::c_char,
+  _: *mut std::os::raw::c_void,
+) {
+} // intentionally do nothing
 
 use clap::Parser;
 use cpal::traits::DeviceTrait;
-use crossbeam_channel::bounded;
+use crossbeam_channel::{bounded, unbounded};
 use std::process;
-use std::sync::{
-  Arc, Mutex, OnceLock,
-  atomic::{AtomicBool, AtomicU64},
-};
+use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::Instant;
 use whisper_rs;
@@ -29,6 +25,7 @@ mod log;
 mod playback;
 mod record;
 mod router;
+mod state;
 mod stt;
 mod tts;
 mod ui;
@@ -36,9 +33,14 @@ mod util;
 
 static START_INSTANT: OnceLock<Instant> = OnceLock::new();
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-  tts::ensure_piper_espeak_env();;
+fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  assets::ensure_piper_espeak_env();
 
+  crossterm::execute!(
+    std::io::stdout(),
+    crossterm::terminal::Clear(crossterm::terminal::ClearType::All)
+  )
+  .unwrap();
   println!(
     r#"
    █████╗ ██╗      ███╗   ███╗ █████╗ ████████╗███████╗
@@ -128,48 +130,68 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     &format!("Playback stream SR (truth): {}", out_sample_rate),
   );
 
+  // application
+  let state = Arc::new(state::AppState::new());
+  let recording_paused = state.recording_paused.clone();
+  let recording_paused_for_record = recording_paused.clone();
+
+  // set global state for speed functions
+  state::GLOBAL_STATE.set(state.clone()).unwrap();
+
+  // broadcast stop signal to all threads
   let (stop_all_tx, stop_all_rx) = bounded::<()>(1);
-  let (tx_rec, rx_rec) = bounded::<audio::AudioChunk>(32);
-  let (tx_play, rx_play) = bounded::<audio::AudioChunk>(32);
-  let (tx_utt, rx_utt) = bounded::<audio::AudioChunk>(4);
+  // channel for recording audio chunks
+  let (tx_rec, _rx_rec) = unbounded::<audio::AudioChunk>();
+  // channel for playback audio chunks
+  let (tx_play, rx_play) = unbounded::<audio::AudioChunk>();
+  // channel for utterance audio chunks
+  let (tx_utt, rx_utt) = unbounded::<audio::AudioChunk>();
 
   // Clones for threads
   let tx_play_for_router = tx_play.clone();
   let rx_play_for_router = rx_play.clone();
-  let tx_play_for_playback = tx_play.clone();
   let rx_play_for_playback = rx_play.clone();
-  let tx_audio_into_router = tx_play.clone();
-  let rx_audio_into_router = rx_play.clone();
   let stop_all_rx_for_playback = stop_all_rx.clone();
   let stop_all_rx_for_router = stop_all_rx.clone();
   let stop_all_rx_for_record = stop_all_rx.clone();
-  let stop_all_rx_for_conversation = stop_all_rx.clone();
   let stop_all_rx_for_keyboard = stop_all_rx.clone();
-  let tx_utt_rec = tx_utt.clone();
   let (stop_play_tx, stop_play_rx) = bounded::<()>(2); // stop playback signal
-  let interrupt_counter = Arc::new(AtomicU64::new(0)); // Conversation interruption counter (increment when user speaks over TTS)
-  let paused = Arc::new(AtomicBool::new(false)); // Pause flag (space toggles while playing)
-  let playback_active = Arc::new(AtomicBool::new(false));
-  let gate_until_ms = Arc::new(AtomicU64::new(0));
-  let ui = ui::UiState {
-    thinking: Arc::new(AtomicBool::new(false)),
-    playing: Arc::new(AtomicBool::new(false)),
-    speaking: Arc::new(AtomicBool::new(false)),
-    peak: Arc::new(Mutex::new(0.0)),
-  };
-  let status_line = Arc::new(Mutex::new(String::new())); // Shared status-line text + a single print lock so UI repaint and content prints never interleave.
-  let print_lock = Arc::new(Mutex::new(()));
+  let interrupt_counter = state.interrupt_counter.clone();
+  let paused = state.playback.paused.clone();
+  let playback_active = state.playback.playback_active.clone();
+  let gate_until_ms = state.playback.gate_until_ms.clone();
 
-  let voice_selected = if args.tts == "opentts" {
+  let ui = state.ui.clone();
+  let volume = state.playback.volume.clone();
+  let conversation_history = state.conversation_history.clone();
+  let volume_play = volume.clone();
+  let volume_rec = volume.clone();
+  let status_line = state.status_line.clone();
+  let print_lock = state.print_lock.clone();
+
+  let available_langs = tts::get_all_available_languages();
+if !available_langs.contains(&args.language.as_str()) {
+    log::log("error", &format!("Unsupported language '{}'. Next languages are supported: {}", args.language, available_langs.join(", ")));
+    process::exit(1);
+}
+
+let voice_selected = if args.tts == "opentts" {
     tts::DEFAULT_OPENTTS_VOICES_PER_LANGUAGE
+      .iter()
+      .find(|(lang, _)| *lang == args.language.as_str())
+      .map(|(_, voice)| *voice)
+      .unwrap()
   } else {
-    tts::DEFAULT_KOKORO_VOICES_PER_LANGUAGE
-  }
-  .iter()
-  .find(|(lang, _)| *lang == args.language.as_str())
-  .map(|(_, voice)| *voice)
-  .unwrap();
+    tts::DEFAULTKOKORO_VOICES_PER_LANGUAGE
+      .iter()
+      .find(|(lang, _)| *lang == args.language.as_str())
+      .map(|(_, voice)| *voice)
+      .unwrap()
+  };
   log::log("info", &format!("TTS system: {}", args.tts));
+  if args.tts == "kokoro" {
+    tts::start_kokoro_engine()?;
+  }
   log::log("info", &format!("Language: {}", args.language));
   log::log("info", &format!("TTS voice: {}", voice_selected));
   log::log("info", &format!("LLM engine: ollama"));
@@ -196,7 +218,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ui = ui.clone();
     move || {
       playback::playback_thread(
-        START_INSTANT.clone(),
+        &START_INSTANT,
         out_dev,
         out_cfg_supported_thread,
         out_cfg_thread,
@@ -208,6 +230,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         paused,
         out_channels,
         ui,
+        volume_play.clone(),
       )
     }
   });
@@ -224,11 +247,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
   });
 
-  let (tx_audio_into_router, rx_audio_into_router) = (tx_play.clone(), rx_play.clone());
+  let (tx_audio_into_router, _rx_audio_into_router) = (tx_play.clone(), rx_play.clone());
 
   // ---- Thread: record ----
   let rec_handle = thread::spawn({
-    let start_instant = START_INSTANT.clone();
+    let start_instant = &START_INSTANT;
     let device = in_dev.clone();
     let supported = in_cfg_supported;
     let config = in_cfg;
@@ -260,10 +283,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         stop_all_rx,
         peak,
         ui,
+        volume_rec.clone(),
+        recording_paused_for_record.clone(),
       )
     }
   });
 
+  // ---- Thread: conversation ----
   let conv_handle = thread::spawn({
     let out_sample_rate = out_sample_rate;
     let interrupt_counter = interrupt_counter.clone();
@@ -271,28 +297,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ui = ui.clone();
     let status_line = status_line.clone();
     let print_lock = print_lock.clone();
+    let stop_all_tx_conv = stop_all_tx.clone();
+    let conversation_history = conversation_history.clone();
     move || {
       conversation::conversation_thread(
         voice_selected,
         rx_utt,
         tx_audio_into_router.clone(),
         stop_all_rx.clone(),
+        stop_all_tx_conv,
         out_sample_rate,
         interrupt_counter,
         args,
         ui,
         status_line,
         print_lock,
+        conversation_history,
       )
     }
   });
 
+  // ---- Thread: keyboard ----
   let key_handle = thread::spawn({
     let stop_all_tx = stop_all_tx.clone();
     let stop_all_rx = stop_all_rx_for_keyboard.clone();
     let paused = paused.clone();
     let playback_active = playback_active.clone();
-    move || keyboard::keyboard_thread(stop_all_tx, stop_all_rx, paused, playback_active)
+    move || {
+      keyboard::keyboard_thread(
+        stop_all_tx,
+        stop_all_rx,
+        paused,
+        playback_active,
+        recording_paused.clone(),
+      )
+    }
   });
 
   // Print config knobs

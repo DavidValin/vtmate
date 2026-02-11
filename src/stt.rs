@@ -62,6 +62,8 @@ pub fn whisper_transcribe(
   params.set_print_special(false);
   params.set_print_timestamps(false);
   params.set_print_realtime(false);
+  params.set_translate(false);
+  params.set_language(Some("auto"));
 
   state
     .full(params, &mono_samples[..])

@@ -6,17 +6,14 @@ use crossbeam_channel::{Receiver, Sender};
 use kokoro_tiny::TtsEngine;
 use reqwest;
 use std::io::{BufReader, Read};
+use std::sync::OnceLock;
 use std::sync::{
+  Arc, Mutex,
   atomic::{AtomicU64, Ordering},
-  Arc,
 };
 use urlencoding;
-use std::{fs, io::Cursor, path::PathBuf};
-use flate2::read::GzDecoder;
-use tar::Archive;
 
 // API
-
 // ------------------------------------------------------------------
 
 // TUNABLES
@@ -48,7 +45,7 @@ pub fn speak(
   expected_interrupt: u64,
 ) -> Result<SpeakOutcome, Box<dyn std::error::Error + Send + Sync>> {
   let outcome = if tts == "opentts" {
-    crate::tts::speak_via_opentts(
+    crate::tts::speak_via_opentts_stream(
       text,
       opentts_base_url,
       language,
@@ -60,61 +57,23 @@ pub fn speak(
       expected_interrupt,
     )
   } else {
-    crate::tts::speak_via_kokoro(text, language, voice, tx, out_sample_rate)
-  }?;
-  Ok(outcome)
+    // NOTE: make espeak find phonemes for chinese mandarin
+    let lang = if language == "zh" { "cmn" } else { language };
+    crate::tts::speak_via_kokoro_stream(
+      text,
+      lang,
+      voice,
+      tx,
+      stop_all_rx,
+      interrupt_counter,
+      expected_interrupt,
+    )}?;
+    Ok(outcome)
 }
 
-pub fn ensure_piper_espeak_env() {
-    // Respect user override
-    if std::env::var_os("PIPER_ESPEAKNG_DATA_DIRECTORY").is_some() {
-        return;
-    }
-
-    let home = match std::env::var("HOME") {
-        Ok(h) => PathBuf::from(h),
-        Err(_) => return,
-    };
-
-    let base = home.join(".ai-mate");
-    let espeak_dir = base.join("espeak-ng-data");
-    let marker = base.join(".espeak_extracted");
-
-    if !(marker.exists() && espeak_dir.is_dir()) {
-        let _ = fs::remove_dir_all(&base);
-        if fs::create_dir_all(&base).is_ok() {
-            let gz = GzDecoder::new(Cursor::new(embedded_espeak_archive()));
-            let mut ar = Archive::new(gz);
-            if ar.unpack(&base).is_ok() {
-                let _ = fs::write(&marker, b"ok");
-            }
-        }
-    }
-
-    // SAFETY: called once at program startup before any threads exist
-    unsafe {
-        std::env::set_var(
-            "PIPER_ESPEAKNG_DATA_DIRECTORY",
-            base.as_os_str(),
-        );
-    }
-}
-
-/// Returns the embedded espeak-ng data archive (tar.gz) as raw bytes.
-///
-/// The archive file is embedded at compile time.
-/// Make sure this path exists when compiling:
-///   <crate>/assets/espeak-ng-data.tar.gz
-fn embedded_espeak_archive() -> &'static [u8] {
-    static ESPEAK_TGZ: &[u8] = include_bytes!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/assets/espeak-ng-data.tar.gz"
-    ));
-    ESPEAK_TGZ
-}
-
-
+  
 //  Kokoro Tiny TTS integration -------------------------------------
+static KOKORO_ENGINE: OnceLock<Arc<Mutex<TtsEngine>>> = OnceLock::new();
 // +++++++++++++++++++++++++++++
 
 pub const KOKORO_VOICES_PER_LANGUAGE: &[(&str, &[&str])] = &[
@@ -240,10 +199,10 @@ pub const KOKORO_VOICES_PER_LANGUAGE: &[(&str, &[&str])] = &[
   ),
 ];
 
-pub const DEFAULT_KOKORO_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
+pub const DEFAULTKOKORO_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
   ("en", "bm_fable"),
-  ("es", "em_santa"),
-  ("zh", "zm_yunjian"),
+  ("es", "ef_dora"),
+  ("zh", "zf_xiaoni"),
   ("ja", "jm_kumo"),
   ("pt", "pf_dora"),
   ("it", "if_sara"),
@@ -251,43 +210,76 @@ pub const DEFAULT_KOKORO_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
   ("fr", "ff_siwis"),
 ];
 
-pub fn speak_via_kokoro(
+
+pub fn get_all_available_languages() -> Vec<&'static str> {
+    let mut langs: Vec<&str> = KOKORO_VOICES_PER_LANGUAGE.iter().map(|(lang, _)| *lang).collect();
+    langs.extend(DEFAULT_OPENTTS_VOICES_PER_LANGUAGE.iter().map(|(lang, _)| *lang));
+    langs.sort();
+    langs.dedup();
+    langs
+}
+
+pub fn speak_via_kokoro_stream(
   text: &str,
   language: &str,
   voice: &str,
   tx: Sender<crate::audio::AudioChunk>,
-  target_sr: u32,
+  stop_all_rx: Receiver<()>,
+  interrupt_counter: Arc<AtomicU64>,
+  expected_interrupt: u64,
 ) -> Result<SpeakOutcome, Box<dyn std::error::Error + Send + Sync>> {
-  if text.is_empty() {
-    return Ok(SpeakOutcome::Completed);
-  }
-
+  let engine = KOKORO_ENGINE.get_or_init(|| {
+    let rt = tokio::runtime::Builder::new_current_thread()
+      .enable_all()
+      .build()
+      .unwrap();
+    let e = rt.block_on(TtsEngine::new()).unwrap();
+    Arc::new(Mutex::new(e))
+  });
+  let mut streaming = kokoro_tts::StreamingTts::new(engine.clone());
+  streaming.set_voice(voice);
+  // interrupt monitoring
+  let interrupt_flag = streaming.interrupt_flag.clone();
+  let stop_rx = stop_all_rx.clone();
+  let int_counter = interrupt_counter.clone();
+  let expected = expected_interrupt;
+  thread::spawn(move || {
+    loop {
+      if stop_rx.try_recv().is_ok() || int_counter.load(Ordering::SeqCst) != expected {
+        interrupt_flag.store(true, Ordering::Relaxed);
+        break;
+      }
+      thread::sleep(Duration::from_millis(10));
+    }
+  });
   let rt = tokio::runtime::Builder::new_current_thread()
     .enable_all()
     .build()?;
+  let res = rt.block_on(streaming.speak_stream(text, tx.clone(), language));
+  match res {
+    Ok(_) => Ok(SpeakOutcome::Completed),
+    Err(_) => Ok(SpeakOutcome::Interrupted),
+  }
+}
 
-  let mut engine = rt.block_on(TtsEngine::new())?;
-
-  let samples: Vec<f32> = engine
-    .synthesize(text, Some(voice), Some(1.2), Some(language))
-    .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?;
-
-  // Kokoro always returns 24 kHz PCM. Resample if needed.
-  let data = if 24000 != target_sr {
-    crate::audio::resample_to(&samples, 1, 24000, target_sr)
-  } else {
-    samples
-  };
-  let chunk = crate::audio::AudioChunk {
-    data,
-    channels: 1,
-    sample_rate: target_sr,
-  };
-  tx.send(chunk)?;
-  Ok(SpeakOutcome::Completed)
+pub fn start_kokoro_engine() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  let rt = tokio::runtime::Builder::new_current_thread()
+    .enable_all()
+    .build()?;
+  let engine = rt.block_on(TtsEngine::new())?;
+  KOKORO_ENGINE.set(Arc::new(Mutex::new(engine))).ok();
+  Ok(())
 }
 
 //  OpenTTS integration ---------------------------------------------
+// +++++++++++++++++++++++++++++
+
+mod kokoro_tts;
+
+// Streaming wrapper for Kokoro
+use std::thread;
+use std::time::Duration;
+
 // +++++++++++++++++++++++++++++
 
 pub const DEFAULT_OPENTTS_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
@@ -320,7 +312,7 @@ pub const DEFAULT_OPENTTS_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
   ("zh", "coqui-tts:zh_baker"),
 ];
 
-pub fn speak_via_opentts(
+pub fn speak_via_opentts_stream(
   text: &str,
   opentts_base_url: &str,
   language: &str,
@@ -344,7 +336,7 @@ pub fn speak_via_opentts(
     urlencoding::encode(text)
   );
 
-  crate::log::log("debug", &format!("OpenTTS URL: {}", url));
+  // crate::log::log("debug", &format!("OpenTTS URL: {}", url));
 
   stream_wav16le_over_http(
     &url,
@@ -436,13 +428,13 @@ fn stream_wav16le_over_http(
   if channels == 0 || sample_rate == 0 {
     return Err("missing WAV fmt info".into());
   }
-  crate::log::log(
-    "info",
-    &format!(
-      "OpenTTS WAV: PCM16LE, {} ch @ {} Hz, data {} bytes (target {} Hz)",
-      channels, sample_rate, data_len, target_sr
-    ),
-  );
+  // crate::log::log(
+  //   "debug",
+  //   &format!(
+  //     "OpenTTS WAV: PCM16LE, {} ch @ {} Hz, data {} bytes (target {} Hz)",
+  //     channels, sample_rate, data_len, target_sr
+  //   ),
+  // );
 
   // IMPORTANT: Don't `read_exact(data_len)` in one shot.
   let samples_per_chunk = CHUNK_FRAMES * channels as usize;

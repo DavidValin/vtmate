@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 // ------------------------------------------------------------------
 
 pub fn record_thread(
-  start_instant: OnceLock<Instant>,
+  start_instant: &'static OnceLock<Instant>,
   device: cpal::Device,
   supported: cpal::SupportedStreamConfig,
   config: cpal::StreamConfig,
@@ -30,7 +30,9 @@ pub fn record_thread(
   interrupt_counter: Arc<AtomicU64>,
   stop_all_rx: Receiver<()>,
   peak: Arc<Mutex<f32>>,
-  ui: crate::ui::UiState,
+  ui: crate::state::UiState,
+  volume: Arc<Mutex<f32>>,
+  recording_paused: Arc<AtomicBool>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   use cpal::SampleFormat;
 
@@ -82,6 +84,8 @@ pub fn record_thread(
       stop_all_rx.clone(),
       peak.clone(),
       ui,
+      volume.clone(),
+      recording_paused.clone(),
       err_fn,
     )?,
     SampleFormat::I16 => build_input_i16(
@@ -108,6 +112,8 @@ pub fn record_thread(
       stop_all_rx.clone(),
       peak.clone(),
       ui,
+      volume.clone(),
+      recording_paused.clone(),
       err_fn,
     )?,
     SampleFormat::U16 => build_input_u16(
@@ -134,6 +140,8 @@ pub fn record_thread(
       stop_all_rx.clone(),
       peak.clone(),
       ui,
+      volume.clone(),
+      recording_paused.clone(),
       err_fn,
     )?,
     other => return Err(format!("unsupported input format: {other:?}").into()),
@@ -153,7 +161,7 @@ pub fn record_thread(
 // ------------------------------------------------------------------
 
 fn build_input_f32(
-  start_instant: OnceLock<Instant>,
+  start_instant: &'static OnceLock<Instant>,
   device: &cpal::Device,
   config: &cpal::StreamConfig,
   channels: u16,
@@ -175,14 +183,19 @@ fn build_input_f32(
   stop_sent: Arc<AtomicBool>,
   stop_all_rx: Receiver<()>,
   peak: Arc<Mutex<f32>>,
-  ui: crate::ui::UiState,
+  ui: crate::state::UiState,
+  volume: Arc<Mutex<f32>>,
+  recording_paused: Arc<AtomicBool>,
   mut err_fn: impl FnMut(cpal::StreamError) + Send + 'static,
 ) -> Result<cpal::Stream, cpal::BuildStreamError> {
   device.build_input_stream(
     config,
     move |data: &[f32], _| {
-      // record peak for UI and use for threshold
+      if recording_paused.load(Ordering::Relaxed) {
+        return;
+      }
       let local_peak = peak_abs(data);
+
       if let Ok(mut p) = peak.lock() {
         *p = local_peak;
       }
@@ -192,7 +205,7 @@ fn build_input_f32(
 
       // use previously computed peak for threshold check
       if local_peak >= vad_thresh {
-        last_voice_ms.store(crate::util::now_ms(&start_instant), Ordering::Relaxed);
+        last_voice_ms.store(crate::util::now_ms(start_instant), Ordering::Relaxed);
         ui.speaking.store(true, Ordering::Relaxed);
 
         if !in_speech.swap(true, Ordering::Relaxed) {
@@ -211,9 +224,14 @@ fn build_input_f32(
           interrupt_counter.fetch_add(1, Ordering::SeqCst);
           stop_sent.store(true, Ordering::Relaxed);
           gate_until_ms.store(
-            crate::util::now_ms(&start_instant).saturating_add(hangover_ms),
+            crate::util::now_ms(start_instant).saturating_add(hangover_ms),
             Ordering::Relaxed,
           );
+          // silence audio
+          let mut vol = volume.lock().unwrap();
+          *vol = 0.0;
+          playback_active.store(false, Ordering::Relaxed);
+          stop_sent.store(false, Ordering::Relaxed);
         }
       } else if in_speech.load(Ordering::Relaxed) {
         {
@@ -221,7 +239,7 @@ fn build_input_f32(
           b.extend_from_slice(data);
         }
         let last = last_voice_ms.load(Ordering::Relaxed);
-        if last > 0 && crate::util::now_ms(&start_instant).saturating_sub(last) >= end_silence_ms {
+        if last > 0 && crate::util::now_ms(start_instant).saturating_sub(last) >= end_silence_ms {
           crate::log::log("info", "Silence detected");
           ui.speaking.store(false, Ordering::Relaxed);
           in_speech.store(false, Ordering::Relaxed);
@@ -250,7 +268,7 @@ fn build_input_f32(
                 "warning",
                 &format!(
                   "[{}ms] utterance too short ({}ms < {}ms), dropped",
-                  crate::util::now_ms(&start_instant),
+                  crate::util::now_ms(start_instant),
                   dur_ms,
                   min_utt_ms
                 ),
@@ -263,7 +281,7 @@ fn build_input_f32(
       }
 
       let gate_active = playback_active.load(Ordering::Relaxed)
-        || crate::util::now_ms(&start_instant) < gate_until_ms.load(Ordering::Relaxed);
+        || crate::util::now_ms(start_instant) < gate_until_ms.load(Ordering::Relaxed);
 
       if gate_active {
         let zeros = vec![0.0f32; data.len()];
@@ -278,7 +296,7 @@ fn build_input_f32(
 }
 
 fn build_input_i16(
-  start_instant: OnceLock<Instant>,
+  start_instant: &'static OnceLock<Instant>,
   device: &cpal::Device,
   config: &cpal::StreamConfig,
   channels: u16,
@@ -300,13 +318,18 @@ fn build_input_i16(
   stop_sent: Arc<AtomicBool>,
   stop_all_rx: Receiver<()>,
   peak: Arc<Mutex<f32>>,
-  ui: crate::ui::UiState,
+  ui: crate::state::UiState,
+  volume: Arc<Mutex<f32>>,
+  recording_paused: Arc<AtomicBool>,
   mut err_fn: impl FnMut(cpal::StreamError) + Send + 'static,
 ) -> Result<cpal::Stream, cpal::BuildStreamError> {
   device.build_input_stream(
     config,
     move |data: &[i16], _| {
       if stop_all_rx.try_recv().is_ok() {
+        return;
+      }
+      if recording_paused.load(Ordering::Relaxed) {
         return;
       }
 
@@ -321,7 +344,7 @@ fn build_input_i16(
       }
 
       if local_peak >= vad_thresh {
-        last_voice_ms.store(crate::util::now_ms(&start_instant), Ordering::Relaxed);
+        last_voice_ms.store(crate::util::now_ms(start_instant), Ordering::Relaxed);
         ui.speaking.store(true, Ordering::Relaxed);
 
         if !in_speech.swap(true, Ordering::Relaxed) {
@@ -339,9 +362,14 @@ fn build_input_i16(
           interrupt_counter.fetch_add(1, Ordering::SeqCst);
           stop_sent.store(true, Ordering::Relaxed);
           gate_until_ms.store(
-            crate::util::now_ms(&start_instant).saturating_add(hangover_ms),
+            crate::util::now_ms(start_instant).saturating_add(hangover_ms),
             Ordering::Relaxed,
           );
+          // silence audio
+          let mut vol = volume.lock().unwrap();
+          *vol = 0.0;
+          playback_active.store(false, Ordering::Relaxed);
+          stop_sent.store(false, Ordering::Relaxed);
         }
       } else if in_speech.load(Ordering::Relaxed) {
         {
@@ -349,7 +377,7 @@ fn build_input_i16(
           b.extend_from_slice(&tmp);
         }
         let last = last_voice_ms.load(Ordering::Relaxed);
-        if last > 0 && crate::util::now_ms(&start_instant).saturating_sub(last) >= end_silence_ms {
+        if last > 0 && crate::util::now_ms(start_instant).saturating_sub(last) >= end_silence_ms {
           crate::log::log("info", "Silence detected");
           ui.speaking.store(false, Ordering::Relaxed);
           in_speech.store(false, Ordering::Relaxed);
@@ -381,7 +409,7 @@ fn build_input_i16(
       }
 
       let gate_active = playback_active.load(Ordering::Relaxed)
-        || crate::util::now_ms(&start_instant) < gate_until_ms.load(Ordering::Relaxed);
+        || crate::util::now_ms(start_instant) < gate_until_ms.load(Ordering::Relaxed);
 
       if gate_active {
         let zeros = vec![0.0f32; tmp.len()];
@@ -396,7 +424,7 @@ fn build_input_i16(
 }
 
 fn build_input_u16(
-  start_instant: OnceLock<Instant>,
+  start_instant: &'static OnceLock<Instant>,
   device: &cpal::Device,
   config: &cpal::StreamConfig,
   channels: u16,
@@ -418,12 +446,17 @@ fn build_input_u16(
   stop_sent: Arc<AtomicBool>,
   stop_all_rx: Receiver<()>,
   peak: Arc<Mutex<f32>>,
-  ui: crate::ui::UiState,
+  ui: crate::state::UiState,
+  volume: Arc<Mutex<f32>>,
+  recording_paused: Arc<AtomicBool>,
   mut err_fn: impl FnMut(cpal::StreamError) + Send + 'static,
 ) -> Result<cpal::Stream, cpal::BuildStreamError> {
   device.build_input_stream(
     config,
     move |data: &[u16], _| {
+      if recording_paused.load(Ordering::Relaxed) {
+        return;
+      }
       let local_peak = peak_abs(
         &data
           .iter()
@@ -444,9 +477,9 @@ fn build_input_u16(
         .collect::<Vec<f32>>();
 
       if local_peak >= vad_thresh {
-        last_voice_ms.store(crate::util::now_ms(&start_instant), Ordering::Relaxed);
+        last_voice_ms.store(crate::util::now_ms(start_instant), Ordering::Relaxed);
         ui.speaking.store(true, Ordering::Relaxed);
-        last_voice_ms.store(crate::util::now_ms(&start_instant), Ordering::Relaxed);
+        last_voice_ms.store(crate::util::now_ms(start_instant), Ordering::Relaxed);
         ui.speaking.store(true, Ordering::Relaxed);
 
         if !in_speech.swap(true, Ordering::Relaxed) {
@@ -464,9 +497,14 @@ fn build_input_u16(
           interrupt_counter.fetch_add(1, Ordering::SeqCst);
           stop_sent.store(true, Ordering::Relaxed);
           gate_until_ms.store(
-            crate::util::now_ms(&start_instant).saturating_add(hangover_ms),
+            crate::util::now_ms(start_instant).saturating_add(hangover_ms),
             Ordering::Relaxed,
           );
+          // silence audio
+          let mut vol = volume.lock().unwrap();
+          *vol = 0.0;
+          playback_active.store(false, Ordering::Relaxed);
+          stop_sent.store(false, Ordering::Relaxed);
         }
       } else if in_speech.load(Ordering::Relaxed) {
         {
@@ -474,7 +512,7 @@ fn build_input_u16(
           b.extend_from_slice(&tmp);
         }
         let last = last_voice_ms.load(Ordering::Relaxed);
-        if last > 0 && crate::util::now_ms(&start_instant).saturating_sub(last) >= end_silence_ms {
+        if last > 0 && crate::util::now_ms(start_instant).saturating_sub(last) >= end_silence_ms {
           crate::log::log("info", "Silence detected");
           in_speech.store(false, Ordering::Relaxed);
           stop_sent.store(false, Ordering::Relaxed);
@@ -506,7 +544,7 @@ fn build_input_u16(
       }
 
       let gate_active = playback_active.load(Ordering::Relaxed)
-        || crate::util::now_ms(&start_instant) < gate_until_ms.load(Ordering::Relaxed);
+        || crate::util::now_ms(start_instant) < gate_until_ms.load(Ordering::Relaxed);
 
       if gate_active {
         let zeros = vec![0.0f32; tmp.len()];

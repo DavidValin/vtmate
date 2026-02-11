@@ -2,7 +2,7 @@
 //  Configuration
 // ------------------------------------------------------------------
 
-use clap::{Parser, value_parser};
+use clap::Parser;
 use cpal::Device;
 use cpal::traits::DeviceTrait;
 
@@ -66,7 +66,7 @@ pub struct Args {
 // CLI parameters default values ---------------------------------------------------
 
 const SOUND_THRESHOLD_PEAK_DEFAULT: f32 = 0.10;
-pub const HANGOVER_MS_DEFAULT: u64 = 100;
+pub const HANGOVER_MS_DEFAULT: u64 = 500;
 const END_SILENCE_MS_DEFAULT: u64 = 850;
 pub const MIN_UTTERANCE_MS_DEFAULT: u64 = 300;
 pub const OLLAMA_URL_DEFAULT: &str = "http://localhost:11434/api/generate";
@@ -99,7 +99,7 @@ impl Args {
 pub fn pick_input_config(
   device: &Device,
   preferred_sr: u32,
-) -> Result<cpal::SupportedStreamConfig, Box<dyn std::error::Error>> {
+) -> Result<cpal::SupportedStreamConfig, Box<dyn std::error::Error + Send + Sync>> {
   use cpal::SampleFormat;
 
   let mut candidates: Vec<cpal::SupportedStreamConfig> = Vec::new();
