@@ -191,7 +191,6 @@ fn build_input_f32(
   device.build_input_stream(
     config,
     move |data: &[f32], _| {
-      // record peak for UI and use for threshold
       if recording_paused.load(Ordering::Relaxed) {
         return;
       }
@@ -330,6 +329,9 @@ fn build_input_i16(
       if stop_all_rx.try_recv().is_ok() {
         return;
       }
+      if recording_paused.load(Ordering::Relaxed) {
+        return;
+      }
 
       let mut tmp = Vec::with_capacity(data.len());
       for &s in data {
@@ -363,6 +365,11 @@ fn build_input_i16(
             crate::util::now_ms(start_instant).saturating_add(hangover_ms),
             Ordering::Relaxed,
           );
+          // silence audio
+          let mut vol = volume.lock().unwrap();
+          *vol = 0.0;
+          playback_active.store(false, Ordering::Relaxed);
+          stop_sent.store(false, Ordering::Relaxed);
         }
       } else if in_speech.load(Ordering::Relaxed) {
         {
@@ -447,6 +454,9 @@ fn build_input_u16(
   device.build_input_stream(
     config,
     move |data: &[u16], _| {
+      if recording_paused.load(Ordering::Relaxed) {
+        return;
+      }
       let local_peak = peak_abs(
         &data
           .iter()
@@ -490,6 +500,11 @@ fn build_input_u16(
             crate::util::now_ms(start_instant).saturating_add(hangover_ms),
             Ordering::Relaxed,
           );
+          // silence audio
+          let mut vol = volume.lock().unwrap();
+          *vol = 0.0;
+          playback_active.store(false, Ordering::Relaxed);
+          stop_sent.store(false, Ordering::Relaxed);
         }
       } else if in_speech.load(Ordering::Relaxed) {
         {

@@ -7,7 +7,6 @@ extern "C" fn noop_whisper_log(
 } // intentionally do nothing
 
 use clap::Parser;
-use crossterm::terminal::{Clear, ClearType};
 use cpal::traits::DeviceTrait;
 use crossbeam_channel::bounded;
 use std::process;

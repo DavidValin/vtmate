@@ -107,12 +107,6 @@ pub fn spawn_ui_thread(
         "\x1b[43m\x1b[30m[listening]\x1b[0m"
       };
       let paused_vis_len = visible_len(paused_str);
-      // reserve space for speed on the right
-      let available_for_bar = if cols > speed_str.len() {
-        cols - speed_str.len()
-      } else {
-        0
-      };
       let max_bar_len = if cols > status.len() + 2 + speed_str.len() {
         cols - status.len() - 2 - speed_str.len()
       } else {
@@ -131,7 +125,7 @@ pub fn spawn_ui_thread(
       let bar = format!("{}{}\x1b[0m", bar_color, "█".repeat(bar_len));
 
       let status_vis_len = visible_len(&status);
-      let status_len = status_vis_len + 2 + bar_len;
+      let _status_len = status_vis_len + 2 + bar_len;
       let spaces = if cols > status.len() + 2 + bar_len + speed_str.len() + paused_str.len() {
         cols - status_vis_len - 2 - bar_len - speed_str.len() - paused_vis_len - 1
       } else {
@@ -182,12 +176,6 @@ pub fn ui_println(print_lock: &Arc<Mutex<()>>, status_line: &Arc<Mutex<String>>,
 }
 
 // Clear the previous line (used when interrupting).
-pub fn ui_clear_last_line(print_lock: &Arc<Mutex<()>>) {
-  let _g = print_lock.lock().unwrap();
-  // Move cursor up one line and clear it.
-  print!("\x1b[1A\x1b[2K");
-  let _ = std::io::stdout().flush();
-}
 
 // PRIVATE
 // ------------------------------------------------------------------
