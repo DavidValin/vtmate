@@ -5,7 +5,6 @@
 use crossbeam_channel::{Receiver, Sender, select};
 
 // API
-use crate::log;
 // ------------------------------------------------------------------
 
 pub fn router_thread(

@@ -2,6 +2,7 @@
 //  Keyboard handling
 // ------------------------------------------------------------------
 
+use crate::state::{decrease_voice_speed, increase_voice_speed};
 use crossbeam_channel::{Receiver, Sender};
 use crossterm::{
   event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
@@ -21,6 +22,7 @@ pub fn keyboard_thread(
   stop_all_rx: Receiver<()>,
   paused: Arc<AtomicBool>,
   playback_active: Arc<AtomicBool>,
+  recording_paused: Arc<AtomicBool>,
 ) {
   // Raw mode lets us capture single key presses (space to pause/resume).
   let _ = terminal::enable_raw_mode();
@@ -53,11 +55,23 @@ pub fn keyboard_thread(
               paused.store(new_val, Ordering::Relaxed);
             }
           }
-          KeyCode::Enter | KeyCode::Esc => {
+          KeyCode::Esc => {
             let _ = stop_all_tx.try_send(());
             break;
           }
+          KeyCode::Up => {
+            increase_voice_speed();
+          }
+          KeyCode::Down => {
+            decrease_voice_speed();
+          }
           _ => {}
+        }
+        if (k.code == KeyCode::Char('p') || k.code == KeyCode::Char('P'))
+          && k.modifiers.contains(KeyModifiers::CONTROL)
+        {
+          let new_val = !recording_paused.load(Ordering::Relaxed);
+          recording_paused.store(new_val, Ordering::Relaxed);
         }
       }
     }
