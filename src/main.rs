@@ -55,6 +55,11 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
   let args = crate::config::Args::parse();
 
+  if args.list_voices {
+    tts::print_voices();
+    process::exit(0);
+  }
+
   // silence external whisper logs
   unsafe {
     whisper_rs::set_log_callback(Some(noop_whisper_log), std::ptr::null_mut());
