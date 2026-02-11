@@ -3,8 +3,8 @@
 // ------------------------------------------------------------------
 
 use clap::Parser;
-use cpal::Device;
 use cpal::traits::DeviceTrait;
+use cpal::Device;
 
 // API
 // ------------------------------------------------------------------
@@ -61,6 +61,9 @@ pub struct Args {
   /// End an utterance after this much continuous silence (ms)
   #[arg(long, default_value_t = END_SILENCE_MS_DEFAULT, env = "END_SILENCE_MS")]
   pub end_silence_ms: u64,
+
+  #[arg(long, action=clap::ArgAction::SetTrue)]
+  pub list_voices: bool,
 }
 
 // CLI parameters default values ---------------------------------------------------
