@@ -94,6 +94,7 @@ impl StreamingTts {
               channels: 1,
               sample_rate: 24000,
             };
+            // crate::log::log("debug", &format!("[kokoro_tts] Generated chunk: len {} samples, sr {}", audio.data.len(), audio.sample_rate));
             if interrupt_flag_thread.load(Ordering::Relaxed) {
               break;
             }
