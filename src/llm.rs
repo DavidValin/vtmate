@@ -5,12 +5,101 @@
 use crossbeam_channel::Receiver;
 use std::io::{BufRead, BufReader};
 use std::sync::{
-  Arc,
   atomic::{AtomicU64, Ordering},
+  Arc,
 };
 
 // API
 // ------------------------------------------------------------------
+
+// llama-server client
+pub fn llama_server_stream_response_into(
+  prompt: &str,
+  llama_url: &str,
+  stop_all_rx: Receiver<()>,
+  interrupt_counter: Arc<AtomicU64>,
+  expected_interrupt: u64,
+  on_piece: &mut dyn FnMut(&str),
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  #[derive(serde::Serialize)]
+  struct Message<'a> {
+    role: &'a str,
+    content: &'a str,
+  }
+  #[derive(serde::Serialize)]
+  struct Req<'a> {
+    model: &'a str,
+    messages: Vec<Message<'a>>,
+    stream: bool,
+  }
+
+  crate::log::log("info", "Calling llama-server (LLM system)");
+  let client = reqwest::blocking::Client::new();
+  let url = format!("{}/v1/chat/completions", llama_url.trim_end_matches('/'));
+  let resp = client
+    .post(&url)
+    .json(&Req {
+      model: "",
+      messages: vec![Message {
+        role: "user",
+        content: prompt,
+      }],
+      stream: true,
+    })
+    .send()?;
+
+  if !resp.status().is_success() {
+    return Err(format!("llama-server HTTP {}", resp.status()).into());
+  }
+
+  crate::log::log("info", "Got response from llama-server (LLM system)");
+  let mut reader = BufReader::new(resp);
+  let mut line = String::new();
+
+  loop {
+    if stop_all_rx.try_recv().is_ok() {
+      return Ok(());
+    }
+    if interrupt_counter.load(Ordering::SeqCst) != expected_interrupt {
+      return Ok(());
+    }
+
+    line.clear();
+    let n = reader.read_line(&mut line)?;
+    if n == 0 {
+      break;
+    }
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+      continue;
+    }
+    // llama-server sends data: { ... }
+    let content_line = if trimmed.starts_with("data: ") {
+      &trimmed[6..]
+    } else {
+      trimmed
+    };
+    let v: serde_json::Value = match serde_json::from_str(content_line) {
+      Ok(v) => v,
+      Err(_) => continue,
+    };
+    if let Some(choices) = v.get("choices").and_then(|c| c.as_array()) {
+      for choice in choices {
+        if let Some(delta) = choice.get("delta").and_then(|d| d.as_object()) {
+          if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
+            if !content.is_empty() {
+              on_piece(content);
+            }
+          }
+        }
+        if choice.get("finish_reason").and_then(|r| r.as_str()) == Some("stop") {
+          return Ok(());
+        }
+      }
+    }
+  }
+  Ok(())
+}
 
 pub fn ollama_stream_response_into(
   prompt: &str,

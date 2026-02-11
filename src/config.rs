@@ -3,8 +3,8 @@
 // ------------------------------------------------------------------
 
 use clap::Parser;
-use cpal::traits::DeviceTrait;
 use cpal::Device;
+use cpal::traits::DeviceTrait;
 
 // API
 // ------------------------------------------------------------------
@@ -25,25 +25,13 @@ pub struct Args {
   #[arg(long, action = clap::ArgAction::SetTrue)]
   pub verbose: bool,
 
-  /// Ollama generate endpoint URL
-  #[arg(long, default_value = OLLAMA_URL_DEFAULT, env = "OLLAMA_URL")]
-  pub ollama_url: String,
-
-  /// Ollama model name
-  #[arg(long, default_value = OLLAMA_MODEL_DEFAULT, env = "OLLAMA_MODEL")]
-  pub ollama_model: String,
-
-  /// Whisper model file path
-  #[arg(long, default_value = WHISPER_MODEL_PATH, env = "WHISPER_MODEL_PATH")]
-  pub whisper_model_path: String,
-
-  /// OpenTTS base URL (we append &text=...)
-  #[arg(long, default_value = OPENTTS_BASE_URL_DEFAULT, env = "OPENTTS_BASE_URL")]
-  pub opentts_base_url: String,
-
-  /// Language code for TTS and Whisper (e.g., en, es, de)
-  #[arg(long, default_value = "en", env = "LANGUAGE")]
-  pub language: String,
+  /// LLM backend (ollama or llama-server)
+  #[arg(
+       long,
+       default_value = "ollama",
+       value_parser = clap::builder::PossibleValuesParser::new(&["ollama", "llama-server"]),
+   )]
+  pub llm: String,
 
   /// Text-to-speech backend (e.g., kokoro, opentts)
   #[arg(
@@ -53,6 +41,14 @@ pub struct Args {
       value_parser = clap::builder::PossibleValuesParser::new(&["kokoro", "opentts"])
   )]
   pub tts: String,
+
+  /// Whisper model file path
+  #[arg(long, default_value = WHISPER_MODEL_PATH, env = "WHISPER_MODEL_PATH")]
+  pub whisper_model_path: String,
+
+  /// Language code for TTS and Whisper (e.g., en, es, de)
+  #[arg(long, default_value = "en", env = "LANGUAGE")]
+  pub language: String,
 
   /// Voice to use for TTS
   #[arg(long, value_name = "VOICE")]
@@ -65,6 +61,26 @@ pub struct Args {
   /// End an utterance after this much continuous silence (ms)
   #[arg(long, default_value_t = END_SILENCE_MS_DEFAULT, env = "END_SILENCE_MS")]
   pub end_silence_ms: u64,
+
+  /// Ollama generate endpoint URL
+  #[arg(long, default_value = OLLAMA_URL_DEFAULT, env = "OLLAMA_URL")]
+  pub ollama_url: String,
+
+  /// Ollama model name
+  #[arg(long, default_value = OLLAMA_MODEL_DEFAULT, env = "OLLAMA_MODEL")]
+  pub ollama_model: String,
+
+  /// Llama‑Server URL (used when --llm=llama-server)
+  #[arg(
+    long,
+    default_value = "http://localhost:8080",
+    env = "LLAMA_SERVER_URL"
+  )]
+  pub llama_server_url: String,
+
+  /// OpenTTS base URL (we append &text=...)
+  #[arg(long, default_value = OPENTTS_BASE_URL_DEFAULT, env = "OPENTTS_BASE_URL")]
+  pub opentts_base_url: String,
 
   #[arg(long, action=clap::ArgAction::SetTrue)]
   pub list_voices: bool,

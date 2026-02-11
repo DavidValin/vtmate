@@ -2,10 +2,10 @@
 //  Conversation
 // ------------------------------------------------------------------
 
-use crossbeam_channel::{select, Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, select};
 use std::sync::{
-  atomic::{AtomicU64, Ordering},
   Arc, Mutex,
+  atomic::{AtomicU64, Ordering},
 };
 
 // API
@@ -29,8 +29,8 @@ pub fn conversation_thread(
 
   loop {
     select! {
-          recv(stop_all_rx) -> _ => break,
-          recv(rx_utt) -> msg => {
+      recv(stop_all_rx) -> _ => break,
+      recv(rx_utt) -> msg => {
             let Ok(utt) = msg else { break };
             let pcm: Vec<i16> = utt.data.iter().map(|s| ((*s).clamp(-1.0, 1.0) * (i16::MAX as f32)) as i16).collect();
             let user_text = crate::stt::whisper_transcribe(&pcm, utt.sample_rate, &args.resolved_whisper_model_path())?;
@@ -112,7 +112,7 @@ pub fn conversation_thread(
                   args.language.as_str(),
                   voice,
                   out_sample_rate,
-    tx_play.clone(),
+                  tx_play.clone(),
                   stop_all_rx.clone(),
                   interrupt_counter.clone(),
                   my_interrupt,
@@ -139,23 +139,42 @@ pub fn conversation_thread(
             };
 
             if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
+              // interruption detected, skip remaining speech
               continue;
             }
 
-            match crate::llm::ollama_stream_response_into(
-              &cleaned_prompt,
-              args.ollama_url.as_str(),
-              args.ollama_model.as_str(),
-              stop_all_rx.clone(),
-              interrupt_counter.clone(),
-              my_interrupt,
-              &mut on_piece,
-            ) {
-              Ok(()) => {},
-              Err(e) => {
-                crate::log::log("error", &format!("Ollama error: {}", e));
-                // skip this turn and continue
-                continue;
+            if args.llm == "llama-server" {
+              match crate::llm::llama_server_stream_response_into(
+                &cleaned_prompt,
+                args.llama_server_url.as_str(),
+                stop_all_rx.clone(),
+                interrupt_counter.clone(),
+                my_interrupt,
+                &mut on_piece,
+              ) {
+                Ok(o) => o,
+                Err(e) => {
+                  crate::log::log("error", &format!("llama server error: {e}. Make sure llama-server / llamafile is running"));
+                  // skip this turn and continue
+                  continue;
+                }
+              }
+            } else {
+              match crate::llm::ollama_stream_response_into(
+                &cleaned_prompt,
+                args.ollama_url.as_str(),
+                args.ollama_model.as_str(),
+                stop_all_rx.clone(),
+                interrupt_counter.clone(),
+                my_interrupt,
+                &mut on_piece
+              ) {
+                Ok(o) => o,
+                Err(e) => {
+                  crate::log::log("error", &format!("ollama error. {e}. Make sure ollama is running"));
+                  // skip this turn and continue
+                  continue;
+                }
               }
             }
 
@@ -188,8 +207,8 @@ pub fn conversation_thread(
                 my_interrupt,
               ) {
                 Ok(o) => o,
-                Err(e) => {
-                  crate::log::log("error", &format!("TTS error: {}", e));
+                Err(_e) => {
+                  crate::log::log("error", &format!("TTS error. Can't play audio speech. Make sure OpenTTS is running: docker run --rm -p 5500:5500 synesthesiam/opentts:all"));
                   // skip this turn and continue
                   continue;
                 }
@@ -202,8 +221,8 @@ pub fn conversation_thread(
                 continue;
               }
             }
-          }
-        }
+         }
+    }
   }
   Ok(())
 }
@@ -224,20 +243,12 @@ impl PhraseSpeaker {
 
     // cap phrases by new lines or dots
     let trigger = self.buf.contains('\n') || self.buf.ends_with('.');
-    if trigger {
-      self.flush()
-    } else {
-      None
-    }
+    if trigger { self.flush() } else { None }
   }
   fn flush(&mut self) -> Option<String> {
     let out = self.buf.trim().to_string();
     self.buf.clear();
-    if out.is_empty() {
-      None
-    } else {
-      Some(out)
-    }
+    if out.is_empty() { None } else { Some(out) }
   }
 }
 
