@@ -36,8 +36,12 @@ static START_INSTANT: OnceLock<Instant> = OnceLock::new();
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   assets::ensure_piper_espeak_env();
 
-  crossterm::execute!(std::io::stdout(), crossterm::terminal::Clear(crossterm::terminal::ClearType::All)).unwrap();
-println!(
+  crossterm::execute!(
+    std::io::stdout(),
+    crossterm::terminal::Clear(crossterm::terminal::ClearType::All)
+  )
+  .unwrap();
+  println!(
     r#"
    █████╗ ██╗      ███╗   ███╗ █████╗ ████████╗███████╗
   ██╔══██╗██║      ████╗ ████║██╔══██╗╚══██╔══╝██╔════╝
