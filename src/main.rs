@@ -8,7 +8,7 @@ extern "C" fn noop_whisper_log(
 
 use clap::Parser;
 use cpal::traits::DeviceTrait;
-use crossbeam_channel::bounded;
+use crossbeam_channel::{bounded, unbounded};
 use std::process;
 use std::sync::{Arc, OnceLock};
 use std::thread;
@@ -141,11 +141,11 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   // broadcast stop signal to all threads
   let (stop_all_tx, stop_all_rx) = bounded::<()>(1);
   // channel for recording audio chunks
-  let (tx_rec, _rx_rec) = bounded::<audio::AudioChunk>(32);
+  let (tx_rec, _rx_rec) = unbounded::<audio::AudioChunk>();
   // channel for playback audio chunks
-  let (tx_play, rx_play) = bounded::<audio::AudioChunk>(1);
+  let (tx_play, rx_play) = unbounded::<audio::AudioChunk>();
   // channel for utterance audio chunks
-  let (tx_utt, rx_utt) = bounded::<audio::AudioChunk>(4);
+  let (tx_utt, rx_utt) = unbounded::<audio::AudioChunk>();
 
   // Clones for threads
   let tx_play_for_router = tx_play.clone();
