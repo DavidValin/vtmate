@@ -5,7 +5,10 @@ See it in action: [Demo](https://www.youtube.com/watch?v=x0RAX3-PLnE)
 
 ### Status
 
-✅ First beta released. Currently under heavy development
+- ✅ First beta released. Currently under heavy development
+- ✅ Tested in MacOS
+- ✅ Tested in Linux
+- ⚠️ Windows version not ready yet
 
 ## How it works
 
