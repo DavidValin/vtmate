@@ -47,7 +47,7 @@ impl AppState {
         speaking: Arc::new(AtomicBool::new(false)),
         peak: Arc::new(Mutex::new(0.0)),
       },
-      speed: AtomicU32::new(15),
+      speed: AtomicU32::new(12),
       conversation_history: std::sync::Arc::new(std::sync::Mutex::new(String::new())),
       playback: PlaybackState {
         paused: Arc::new(AtomicBool::new(false)),

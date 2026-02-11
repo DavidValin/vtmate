@@ -54,6 +54,10 @@ pub struct Args {
   )]
   pub tts: String,
 
+  /// Voice to use for TTS
+  #[arg(long, value_name = "VOICE")]
+  pub voice: Option<String>,
+
   /// Peak threshold for detecting user speech while assistant is speaking (0..1)
   #[arg(long, default_value_t = SOUND_THRESHOLD_PEAK_DEFAULT, env = "SOUND_THRESHOLD_PEAK")]
   pub sound_threshold_peak: f32,

@@ -176,19 +176,33 @@ if !available_langs.contains(&args.language.as_str()) {
     process::exit(1);
 }
 
-let voice_selected = if args.tts == "opentts" {
-    tts::DEFAULT_OPENTTS_VOICES_PER_LANGUAGE
-      .iter()
-      .find(|(lang, _)| *lang == args.language.as_str())
-      .map(|(_, voice)| *voice)
-      .unwrap()
+let voice_selected = if let Some(v) = &args.voice {
+    v.clone()
   } else {
-    tts::DEFAULTKOKORO_VOICES_PER_LANGUAGE
-      .iter()
-      .find(|(lang, _)| *lang == args.language.as_str())
-      .map(|(_, voice)| *voice)
-      .unwrap()
+    if args.tts == "opentts" {
+      tts::DEFAULT_OPENTTS_VOICES_PER_LANGUAGE
+        .iter()
+        .find(|(lang, _)| *lang == args.language.as_str())
+        .map(|(_, voice)| (*voice).to_string())
+        .unwrap()
+    } else {
+      tts::DEFAULTKOKORO_VOICES_PER_LANGUAGE
+        .iter()
+        .find(|(lang, _)| *lang == args.language.as_str())
+        .map(|(_, voice)| (*voice).to_string())
+        .unwrap()
+    }
   };
+
+  let valid_voices: Vec<&str> = tts::get_voices_for(&args.tts, &args.language);
+  if valid_voices.is_empty() {
+      log::log("error", &format!("No available voices for TTS '{}' and language '{}'.", args.tts, args.language));
+      process::exit(1);
+  }
+  if !valid_voices.contains(&voice_selected.as_str()) {
+      log::log("error", &format!("Invalid voice '{}' for TTS '{}' and language '{}'. Available voices: {}", voice_selected, args.tts, args.language, valid_voices.join(", ")));
+      process::exit(1);
+  }
   log::log("info", &format!("TTS system: {}", args.tts));
   if args.tts == "kokoro" {
     tts::start_kokoro_engine()?;
@@ -288,7 +302,7 @@ let voice_selected = if args.tts == "opentts" {
     let conversation_history = conversation_history.clone();
     move || {
       conversation::conversation_thread(
-        voice_selected,
+        &voice_selected,
         rx_utt,
         tx_play.clone(),
         stop_all_rx.clone(),

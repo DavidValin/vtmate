@@ -23,8 +23,10 @@ See it in action: [Demo](https://www.youtube.com/watch?v=x0RAX3-PLnE)
 - Pause / resume: `press "<CONTROL> + <ALT> + p" to pause voice recording / resume. Useful to it running it during the day and active it when needed`
 - Voice speed change: `change the agent voice speed by pressing <ARROW_UP> / <ARROW_DOWN>. Do this before asking anything new`
 - Use any model available in ollama (small models reply faster)
-- Use kokoro or OpenTTS system
-- 28 languages supported
+- Integrated whisper
+- Integrated kokoro TTS system
+- Interface with OpenTTS system
+- 28 languages supported (`ai-mate --list-voices`)
 
 ## Installation
 
