@@ -90,14 +90,14 @@ llamafile example:
 
 ```
 ./Meta-Llama-3-8B-Instruct.Q8_0.llamafile
-ai-mate --tts llama-server
+ai-mate --llm llama-server
 ```
 
 llama-server example:
 
 ```
 llama-server -m Meta-Llama-3-8B-Instruct.Q8_0.gguf --jinja -c 100000
-ai-mate --tts llama-server
+ai-mate --llm llama-server
 ```
 
 Below are the default parameters, which you can override, example:
@@ -119,6 +119,7 @@ You can just override a specific variable, for example:
 ```
 ai-mate --tts opentts --ollama-model "llama3.2:3b" --language ru
 ai-mate --ollama-model "llama3.2:3b" --language zh
+ai-mate --llm llama-server --language it
 ```
 
 If you want to use OpenTTS, start the docker service first: `docker run --rm --platform=linux/amd64 -p 5500:5500 synesthesiam/opentts:all` (it will pull the image the first time). Adjust the platform as needed depending on your hardware. 
