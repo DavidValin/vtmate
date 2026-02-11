@@ -169,14 +169,20 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let status_line = state.status_line.clone();
   let print_lock = state.print_lock.clone();
 
-  let voice_selected = if args.tts == "opentts" {
+  let available_langs = tts::get_all_available_languages();
+if !available_langs.contains(&args.language.as_str()) {
+    log::log("error", &format!("Unsupported language '{}'. Next languages are supported: {}", args.language, available_langs.join(", ")));
+    process::exit(1);
+}
+
+let voice_selected = if args.tts == "opentts" {
     tts::DEFAULT_OPENTTS_VOICES_PER_LANGUAGE
       .iter()
       .find(|(lang, _)| *lang == args.language.as_str())
       .map(|(_, voice)| *voice)
       .unwrap()
   } else {
-    tts::DEFAULT_KOKORO_VOICES_PER_LANGUAGE
+    tts::DEFAULTKOKORO_VOICES_PER_LANGUAGE
       .iter()
       .find(|(lang, _)| *lang == args.language.as_str())
       .map(|(_, voice)| *voice)
