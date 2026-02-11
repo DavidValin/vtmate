@@ -76,7 +76,7 @@ pub fn speak(
 static KOKORO_ENGINE: OnceLock<Arc<Mutex<TtsEngine>>> = OnceLock::new();
 // +++++++++++++++++++++++++++++
 
-pub const _KOKORO_VOICES_PER_LANGUAGE: &[(&str, &[&str])] = &[
+pub const KOKORO_VOICES_PER_LANGUAGE: &[(&str, &[&str])] = &[
   // English language
   // ----------------------------------------
   (
@@ -199,7 +199,7 @@ pub const _KOKORO_VOICES_PER_LANGUAGE: &[(&str, &[&str])] = &[
   ),
 ];
 
-pub const DEFAULT_KOKORO_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
+pub const DEFAULTKOKORO_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
   ("en", "bm_fable"),
   ("es", "ef_dora"),
   ("zh", "zf_xiaoni"),
@@ -209,6 +209,15 @@ pub const DEFAULT_KOKORO_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
   ("hi", "hf_alpha"),
   ("fr", "ff_siwis"),
 ];
+
+
+pub fn get_all_available_languages() -> Vec<&'static str> {
+    let mut langs: Vec<&str> = KOKORO_VOICES_PER_LANGUAGE.iter().map(|(lang, _)| *lang).collect();
+    langs.extend(DEFAULT_OPENTTS_VOICES_PER_LANGUAGE.iter().map(|(lang, _)| *lang));
+    langs.sort();
+    langs.dedup();
+    langs
+}
 
 pub fn speak_via_kokoro_stream(
   text: &str,
