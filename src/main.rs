@@ -24,7 +24,6 @@ mod llm;
 mod log;
 mod playback;
 mod record;
-mod router;
 mod state;
 mod stt;
 mod tts;
@@ -148,11 +147,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let (tx_utt, rx_utt) = unbounded::<audio::AudioChunk>();
 
   // Clones for threads
-  let tx_play_for_router = tx_play.clone();
-  let rx_play_for_router = rx_play.clone();
   let rx_play_for_playback = rx_play.clone();
   let stop_all_rx_for_playback = stop_all_rx.clone();
-  let stop_all_rx_for_router = stop_all_rx.clone();
   let stop_all_rx_for_record = stop_all_rx.clone();
   let stop_all_rx_for_keyboard = stop_all_rx.clone();
   let (stop_play_tx, stop_play_rx) = bounded::<()>(2); // stop playback signal
@@ -235,20 +231,6 @@ let voice_selected = if args.tts == "opentts" {
     }
   });
 
-  // ---- Thread: router ----
-  let router_handle = thread::spawn({
-    move || {
-      router::router_thread(
-        rx_play_for_router,
-        tx_play_for_router,
-        out_channels,
-        stop_all_rx_for_router.clone(),
-      )
-    }
-  });
-
-  let (tx_audio_into_router, _rx_audio_into_router) = (tx_play.clone(), rx_play.clone());
-
   // ---- Thread: record ----
   let rec_handle = thread::spawn({
     let start_instant = &START_INSTANT;
@@ -303,7 +285,7 @@ let voice_selected = if args.tts == "opentts" {
       conversation::conversation_thread(
         voice_selected,
         rx_utt,
-        tx_audio_into_router.clone(),
+        tx_play.clone(),
         stop_all_rx.clone(),
         stop_all_tx_conv,
         out_sample_rate,
@@ -353,7 +335,6 @@ let voice_selected = if args.tts == "opentts" {
 
   // Wait for all threads to finish
   let _ = rec_handle.join().unwrap();
-  let _ = router_handle.join().unwrap();
   let _ = play_handle.join().unwrap();
   let _ = conv_handle.join().unwrap();
   let _ = ui_handle.join().unwrap();
