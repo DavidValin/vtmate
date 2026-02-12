@@ -108,7 +108,7 @@ ai-mate \
   --language en \
   --sound-threshold-peak 0.10 \
   --end-silence-ms 850 \
-  --whisper-model-path ~/.whisper-models/ggml-small.bin \
+  --whisper-model-path ~/.whisper-models/ggml-tiny.bin \
   --ollama-model "llama3.2:3b" \
   --ollama-url "http://localhost:11434/api/generate"
 ```
@@ -144,7 +144,7 @@ Use cross_build.sh script, get help on how to use it:
 
 Examples:
 ```
-./cross_build.sh --os linux --arch amd64,arm64
+WITH_CUDA=1 WITH_ROCM=0 ./cross_build.sh --os linux --arch amd64
 ./cross_build.sh --os windows --arch amd64
 ./cross_build.sh --os macos --arch arm64,amd64
 ```
@@ -167,12 +167,13 @@ alias ai-mate_es_llama='ai-mate --ollama-model "llama3:8b" --language es'
 
 ## Useful to know
 
-ai-mate self contains espeak-ng-data, the whisper small model as well as kokoro model and voices which will be autoextracted when running ai-mate if they are not found in next locations:
+ai-mate self contains espeak-ng-data, the whisper tiny & small models and kokoro model and voices which will be autoextracted when running ai-mate if they are not found in next locations:
 
-- `~/.whisper-models/ggml-small.bin`
-- `~/.cache/k/0.bin`
-- `~/.cache/k/0.onnx`
 - `~/.ai-mate/espeak-ng-data.tar.gz`
+- `~/.whisper-models/ggml-tiny.bin`
+- `~/.whisper-models/ggml-small.bin`
+- `~/.cache/k/0.onnx`
+- `~/.cache/k/0.bin`
 
 ## Language support
 

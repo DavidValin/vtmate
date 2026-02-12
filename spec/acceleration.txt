@@ -1,0 +1,4 @@
+macOS:         metal      (optionally add openblas if you want)
+Linux amd64:   openblas   vulkan   + optional cuda / hipblas
+Linux arm64:   openblas   vulkan
+Windows:       openblas   vulkan              cuda (requires toolchains)

@@ -14,6 +14,13 @@ DOCKER_NO_CACHE=1
 SEL_OS="all"     # macos,linux,windows,all
 SEL_ARCH="all"   # amd64,arm64,all
 
+# Default ON for Linux amd64 as requested
+WITH_CUDA="${WITH_CUDA:-1}"   # 1 => enable whisper-cuda + install CUDA toolkit in container
+WITH_ROCM="${WITH_ROCM:-0}"   # 1 => enable whisper-hipblas + install ROCm packages in container
+
+# macOS optional CPU accel via OpenBLAS (defaults off to avoid brew dependency)
+MAC_WITH_OPENBLAS="${MAC_WITH_OPENBLAS:-0}" # 1 => add whisper-openblas on macOS
+
 usage() {
   cat <<'USAGE'
 Usage:
@@ -22,18 +29,18 @@ Usage:
 --os   comma-separated: macos,linux,windows,all
 --arch comma-separated: amd64,arm64,all
 
-Notes:
-- Windows build is MSVC and runs only on Windows (requires cl.exe). On macOS/Linux it is skipped.
-- macOS build is native and runs only on macOS. On Windows/Linux it is skipped.
-- Linux builds use Docker:
-  - linux/amd64 uses Ubuntu 24.04 (noble) to satisfy newer glibc requirements (ort-sys / ORT)
-  - linux/arm64 uses Ubuntu 24.04 (noble) on linux/arm64 (native on Apple Silicon)
-- Docker builds write to target-cross/ to avoid cache/glibc conflicts.
+Env toggles:
+  WITH_CUDA=0|1         (Linux amd64 Docker) enable/disable whisper-cuda + CUDA toolkit install (default 1)
+  WITH_ROCM=0|1         (Linux amd64 Docker) enable/disable whisper-hipblas + ROCm install (default 1)
+  MAC_WITH_OPENBLAS=0|1 (macOS) add whisper-openblas (requires OpenBLAS installed, e.g. brew) (default 0)
 
-Embedded eSpeak-ng data:
-- This script generates assets/espeak-ng-data.tar.gz (if missing) from Ubuntu's espeak-ng-data package.
-- It strips espeak-ng-data/voices to reduce size (phonemization still works for typical Piper usage).
-- Your Rust code should embed this archive via include_bytes! and extract at runtime.
+Cargo features expected:
+  whisper-openblas, whisper-vulkan, whisper-cuda, whisper-hipblas, whisper-metal, whisper-logs
+
+Notes:
+- Linux amd64 Docker installs OpenBLAS and Vulkan dev packages.
+- CUDA/ROCm installs are STRICT: if requested and not installable, Docker build fails.
+- BLAS_INCLUDE_DIRS is auto-detected in the container to satisfy whisper-rs-sys.
 USAGE
 }
 
@@ -100,8 +107,26 @@ mkdir -p "${DIST_DIR}" "${PKG_DIR}" "${PROJECT_ROOT}/target-cross" "${ASSETS_DIR
 
 echo "cross_build.sh started: $(date) args: --os ${SEL_OS} --arch ${SEL_ARCH}"
 echo "Host OS: ${HOST_OS}"
-echo "Project: ${PROJECT_ROOT}"
 echo "Version: ${VERSION}"
+echo "Linux amd64 extras: WITH_CUDA=${WITH_CUDA} WITH_ROCM=${WITH_ROCM}"
+echo "macOS extras: MAC_WITH_OPENBLAS=${MAC_WITH_OPENBLAS}"
+
+########################################
+# Feature sets (explicit per target)
+########################################
+FEATURES_COMMON="whisper-logs"
+
+FEATURES_LINUX_BASE="${FEATURES_COMMON},whisper-openblas,whisper-vulkan"
+FEATURES_LINUX_AMD64="${FEATURES_LINUX_BASE}"
+if [[ "${WITH_CUDA}" == "1" ]]; then FEATURES_LINUX_AMD64="${FEATURES_LINUX_AMD64},whisper-cuda"; fi
+if [[ "${WITH_ROCM}" == "1" ]]; then FEATURES_LINUX_AMD64="${FEATURES_LINUX_AMD64},whisper-hipblas"; fi
+
+FEATURES_LINUX_ARM64="${FEATURES_LINUX_BASE}"
+
+FEATURES_MACOS="${FEATURES_COMMON},whisper-metal"
+if [[ "${MAC_WITH_OPENBLAS}" == "1" ]]; then FEATURES_MACOS="${FEATURES_MACOS},whisper-openblas"; fi
+
+FEATURES_WINDOWS="${FEATURES_COMMON},whisper-openblas,whisper-vulkan,whisper-cuda"
 
 ########################################
 # Packaging helpers
@@ -166,7 +191,6 @@ ensure_espeak_data_archive() {
 
   if [[ "$docker_ok" -ne 1 ]]; then
     echo "ERROR: Docker not found and ${ESPEAK_ARCHIVE} is missing."
-    echo "Install Docker OR generate ${ESPEAK_ARCHIVE} on another machine/CI and commit it."
     exit 1
   fi
 
@@ -197,7 +221,6 @@ DOCKERFILE
       set -euo pipefail
       rm -f espeak-ng-data.tar.gz
       cp -a /usr/share/espeak-ng-data ./espeak-ng-data
-      # Strip voices to reduce size (Piper doesn’t need eSpeak voices)
       rm -rf ./espeak-ng-data/voices
       tar -czf espeak-ng-data.tar.gz espeak-ng-data
       rm -rf ./espeak-ng-data
@@ -207,10 +230,7 @@ DOCKERFILE
   rm -rf "$tmp" >/dev/null 2>&1 || true
 
   [[ -f "${ESPEAK_ARCHIVE}" ]] || { echo "ERROR: failed to generate ${ESPEAK_ARCHIVE}"; exit 1; }
-
   echo "✔ Generated: ${ESPEAK_ARCHIVE}"
-  echo "  (Tip) Embed in Rust via:"
-  echo "    include_bytes!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/assets/espeak-ng-data.tar.gz\"))"
 }
 
 ARTIFACTS=()
@@ -220,12 +240,13 @@ ARTIFACTS=()
 ########################################
 build_macos_native() {
   if [[ "${HOST_OS}" != "macos" ]]; then
-    echo "Skipping macOS build: host is ${HOST_OS} (macOS native build requires macOS)."
+    echo "Skipping macOS build: host is ${HOST_OS}."
     return 0
   fi
-  echo "== macOS build (native) =="
+  echo "== macOS build (native) features: ${FEATURES_MACOS} =="
+
   command -v cargo >/dev/null 2>&1 || { echo "ERROR: cargo not found"; exit 1; }
-  cargo build --release
+  cargo build --release --no-default-features --features "${FEATURES_MACOS}"
 
   local arch; arch="$(uname -m)"
   local out="${DIST_DIR}/${BIN_NAME}-${VERSION}-macos-${arch}"
@@ -236,20 +257,23 @@ build_macos_native() {
 }
 
 ########################################
-# Windows MSVC build (skipped on macOS/Linux)
+# Windows MSVC build (native on Windows)
 ########################################
 build_windows_msvc_amd64() {
   if [[ "${HOST_OS}" != "windows" ]]; then
-    echo "Skipping Windows MSVC build: host is ${HOST_OS} (requires Windows + MSVC toolchain)."
+    echo "Skipping Windows MSVC build: host is ${HOST_OS}."
     return 0
   fi
-  echo "== Windows x86_64 MSVC build (local) =="
+  echo "== Windows x86_64 MSVC build features: ${FEATURES_WINDOWS} =="
+
   if ! command -v cl.exe >/dev/null 2>&1; then
     echo "Skipping Windows build: cl.exe not found (run from VS x64 Native Tools prompt)."
     return 0
   fi
+
   rustup target add x86_64-pc-windows-msvc >/dev/null
-  cargo build --release --target x86_64-pc-windows-msvc
+  cargo build --release --target x86_64-pc-windows-msvc --no-default-features --features "${FEATURES_WINDOWS}"
+
   local out="${DIST_DIR}/${BIN_NAME}-${VERSION}-windows-msvc-amd64.exe"
   cp "${PROJECT_ROOT}/target/x86_64-pc-windows-msvc/release/${BIN_NAME}.exe" "$out"
   ARTIFACTS+=("$out")
@@ -257,7 +281,7 @@ build_windows_msvc_amd64() {
 }
 
 ########################################
-# Linux amd64 build (Docker, Ubuntu noble for newer glibc)
+# Linux amd64 build (Docker)
 ########################################
 build_linux_amd64_docker() {
   if [[ "$docker_ok" -ne 1 ]]; then
@@ -265,7 +289,7 @@ build_linux_amd64_docker() {
     return 0
   fi
   if [[ "${FORCE_AMD64_DOCKER}" -ne 1 ]]; then
-    echo "Skipping linux-amd64: linux/amd64 containers not runnable (enable Rosetta/QEMU)."
+    echo "Skipping linux-amd64: linux/amd64 containers not runnable."
     return 0
   fi
 
@@ -273,9 +297,11 @@ build_linux_amd64_docker() {
   local df="${tmp}/Dockerfile.linux.amd64"
   local img="local/${BIN_NAME}-linux-amd64:${VERSION}-$$"
 
-  cat > "$df" <<'DOCKERFILE'
+  cat > "$df" <<DOCKERFILE
 FROM ubuntu:noble
 ENV DEBIAN_FRONTEND=noninteractive
+
+# Base deps + OpenBLAS + Vulkan (Ubuntu 24.04: use vulkan-utility-libraries-dev)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl git xz-utils \
     build-essential pkg-config \
@@ -286,9 +312,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libasound2-dev \
     libxdo-dev \
     libx11-dev \
+    libopenblas-dev \
+    libvulkan-dev vulkan-tools vulkan-utility-libraries-dev \
+    spirv-tools glslang-tools \
  && rm -rf /var/lib/apt/lists/*
+
+# Optional CUDA toolkit (STRICT: fail if requested but not installable)
+ARG WITH_CUDA=1
+RUN if [ "\$WITH_CUDA" = "1" ]; then \
+      apt-get update && apt-get install -y --no-install-recommends nvidia-cuda-toolkit && \
+      rm -rf /var/lib/apt/lists/* ; \
+    fi
+
+# Optional ROCm/hipBLAS (STRICT: fail if requested but not installable)
+ARG WITH_ROCM=1
+RUN if [ "\$WITH_ROCM" = "1" ]; then \
+      apt-get update && apt-get install -y --no-install-recommends rocm-hip-sdk hipblas rocblas && \
+      rm -rf /var/lib/apt/lists/* ; \
+    fi
+
 RUN curl -sSf https://sh.rustup.rs | sh -s -- -y
-ENV PATH="/root/.cargo/bin:${PATH}"
+ENV PATH="/root/.cargo/bin:\${PATH}"
 RUN rustup target add x86_64-unknown-linux-gnu
 WORKDIR /work
 DOCKERFILE
@@ -296,14 +340,31 @@ DOCKERFILE
   local build_args=(--pull)
   [[ "${DOCKER_NO_CACHE}" -eq 1 ]] && build_args+=(--no-cache)
 
-  echo "== Linux amd64 build (Docker) =="
-  docker build "${build_args[@]}" --platform=linux/amd64 -f "$df" -t "$img" "$tmp"
+  echo "== Linux amd64 build (Docker) features: ${FEATURES_LINUX_AMD64} =="
+  docker build "${build_args[@]}" --platform=linux/amd64 \
+    --build-arg WITH_CUDA="${WITH_CUDA}" \
+    --build-arg WITH_ROCM="${WITH_ROCM}" \
+    -f "$df" -t "$img" "$tmp"
 
   docker run --rm --platform=linux/amd64 \
     -v "${PROJECT_ROOT}:/work" -w /work \
     -e CARGO_TARGET_DIR=/work/target-cross/linux-amd64 \
     "$img" \
-    bash -lc "cargo build --release --target x86_64-unknown-linux-gnu"
+    bash -lc '
+      set -euo pipefail
+      # Auto-detect OpenBLAS include dir required by whisper-rs-sys
+      if [ -d /usr/include/x86_64-linux-gnu/openblas-pthread ]; then
+        export BLAS_INCLUDE_DIRS=/usr/include/x86_64-linux-gnu/openblas-pthread
+      elif [ -d /usr/include/x86_64-linux-gnu/openblas ]; then
+        export BLAS_INCLUDE_DIRS=/usr/include/x86_64-linux-gnu/openblas
+      elif [ -d /usr/include/openblas ]; then
+        export BLAS_INCLUDE_DIRS=/usr/include/openblas
+      else
+        export BLAS_INCLUDE_DIRS=/usr/include
+      fi
+      echo "BLAS_INCLUDE_DIRS=$BLAS_INCLUDE_DIRS"
+      cargo build --release --target x86_64-unknown-linux-gnu --no-default-features --features "'"${FEATURES_LINUX_AMD64}"'"
+    '
 
   local out="${DIST_DIR}/${BIN_NAME}-${VERSION}-linux-amd64"
   cp "${PROJECT_ROOT}/target-cross/linux-amd64/x86_64-unknown-linux-gnu/release/${BIN_NAME}" "$out"
@@ -316,7 +377,7 @@ DOCKERFILE
 }
 
 ########################################
-# Linux arm64 build (Docker, native linux/arm64 on Apple Silicon)
+# Linux arm64 build (Docker)
 ########################################
 build_linux_arm64_docker() {
   if [[ "$docker_ok" -ne 1 ]]; then
@@ -331,6 +392,7 @@ build_linux_arm64_docker() {
   cat > "$df" <<'DOCKERFILE'
 FROM ubuntu:noble
 ENV DEBIAN_FRONTEND=noninteractive
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl git xz-utils \
     build-essential pkg-config \
@@ -341,7 +403,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libasound2-dev \
     libxdo-dev \
     libx11-dev \
+    libopenblas-dev \
+    libvulkan-dev vulkan-tools vulkan-utility-libraries-dev \
+    spirv-tools glslang-tools \
  && rm -rf /var/lib/apt/lists/*
+
 RUN curl -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 RUN rustup target add aarch64-unknown-linux-gnu
@@ -351,14 +417,28 @@ DOCKERFILE
   local build_args=(--pull)
   [[ "${DOCKER_NO_CACHE}" -eq 1 ]] && build_args+=(--no-cache)
 
-  echo "== Linux arm64 build (Docker, native arm64) =="
+  echo "== Linux arm64 build (Docker) features: ${FEATURES_LINUX_ARM64} =="
   docker build "${build_args[@]}" --platform=linux/arm64 -f "$df" -t "$img" "$tmp"
 
   docker run --rm --platform=linux/arm64 \
     -v "${PROJECT_ROOT}:/work" -w /work \
     -e CARGO_TARGET_DIR=/work/target-cross/linux-arm64 \
     "$img" \
-    bash -lc "cargo build --release --target aarch64-unknown-linux-gnu"
+    bash -lc '
+      set -euo pipefail
+      # Auto-detect OpenBLAS include dir required by whisper-rs-sys
+      if [ -d /usr/include/aarch64-linux-gnu/openblas-pthread ]; then
+        export BLAS_INCLUDE_DIRS=/usr/include/aarch64-linux-gnu/openblas-pthread
+      elif [ -d /usr/include/aarch64-linux-gnu/openblas ]; then
+        export BLAS_INCLUDE_DIRS=/usr/include/aarch64-linux-gnu/openblas
+      elif [ -d /usr/include/openblas ]; then
+        export BLAS_INCLUDE_DIRS=/usr/include/openblas
+      else
+        export BLAS_INCLUDE_DIRS=/usr/include
+      fi
+      echo "BLAS_INCLUDE_DIRS=$BLAS_INCLUDE_DIRS"
+      cargo build --release --target aarch64-unknown-linux-gnu --no-default-features --features "'"${FEATURES_LINUX_ARM64}"'"
+    '
 
   local out="${DIST_DIR}/${BIN_NAME}-${VERSION}-linux-arm64"
   cp "${PROJECT_ROOT}/target-cross/linux-arm64/aarch64-unknown-linux-gnu/release/${BIN_NAME}" "$out"
@@ -373,7 +453,6 @@ DOCKERFILE
 ########################################
 # Run selected builds
 ########################################
-# Ensure the embedded asset exists BEFORE compiling anything that includes it.
 ensure_espeak_data_archive
 
 if want_os macos; then build_macos_native; fi
