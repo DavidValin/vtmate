@@ -7,6 +7,9 @@ use std::process::Command;
 // Map file names to hardcoded URLs
 fn find_url_for_file(file_name: &str) -> Option<String> {
   match file_name {
+    "ggml-tiny.bin" => {
+      Some("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin".to_string())
+    },
     "ggml-small.bin" => {
       Some("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin".to_string())
     }
@@ -30,6 +33,7 @@ fn main() {
     (".cache/k/0.bin", "0.bin"),
     (".cache/k/0.onnx", "0.onnx"),
     (".whisper-models/ggml-small.bin", "ggml-small.bin"),
+    (".whisper-models/ggml-tiny.bin", "ggml-tiny.bin"),
   ];
 
   // Try to find the files locally, if not found, download them remotely
@@ -115,16 +119,20 @@ use std::collections::HashMap;
 fn init_expected_hashes() -> HashMap<&'static str, &'static str> {
   let mut m = HashMap::new();
   m.insert(
-    "ggml-small.bin",
-    "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
-  );
-  m.insert(
     "0.bin",
     "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d",
   );
   m.insert(
     "0.onnx",
     "7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5",
+  );
+    m.insert(
+    "ggml-small.bin",
+    "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+  );
+    m.insert(
+    "ggml-tiny.bin",
+    "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
   );
   m
 }

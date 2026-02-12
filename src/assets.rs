@@ -47,11 +47,14 @@ pub fn ensure_assets_env() {
   };
   let kokoro_assets_dir = home.join(".cache/k");
   let whisper_dir = home.join(".whisper-models");
+
   // Check if the expected files already exist
   let bin_path = kokoro_assets_dir.join("0.bin");
   let onnx_path = kokoro_assets_dir.join("0.onnx");
-  let whisper_path = whisper_dir.join("ggml-small.bin");
-  let all_exist = bin_path.exists() && onnx_path.exists() && whisper_path.exists();
+  let whisper_small_path = whisper_dir.join("ggml-small.bin");
+  let whisper_tiny_path = whisper_dir.join("ggml-tiny.bin");
+
+  let all_exist = bin_path.exists() && onnx_path.exists() && whisper_small_path.exists() && whisper_tiny_path.exists();
   if !all_exist {
     println!("Extracting models, one moment...");
     let _ = fs::remove_dir_all(&kokoro_assets_dir);
@@ -59,7 +62,8 @@ pub fn ensure_assets_env() {
     if fs::create_dir_all(&kokoro_assets_dir).is_ok() && fs::create_dir_all(&whisper_dir).is_ok() {
       let _ = fs::write(bin_path, embedded_kokoro_0_bin());
       let _ = fs::write(onnx_path, embedded_kokoro_0_onnx());
-      let _ = fs::write(whisper_path, embedded_whisper_small());
+      let _ = fs::write(whisper_small_path, embedded_whisper_small());
+      let _ = fs::write(whisper_tiny_path, embedded_whisper_tiny());
     }
   }
 
@@ -93,4 +97,8 @@ fn embedded_kokoro_0_onnx() -> &'static [u8] {
 
 fn embedded_whisper_small() -> &'static [u8] {
   include_bytes!(concat!(env!("OUT_DIR"), "/embedded/ggml-small.bin"))
+}
+
+fn embedded_whisper_tiny() -> &'static [u8] {
+  include_bytes!(concat!(env!("OUT_DIR"), "/embedded/ggml-tiny.bin"))
 }
