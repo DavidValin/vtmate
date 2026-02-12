@@ -66,6 +66,11 @@ pub fn playback_thread(
               crate::util::now_ms(start_instant).saturating_add(hangover_ms),
               Ordering::Relaxed,
             );
+
+            // ✅ FIX: fill silence so CPAL doesn’t replay stale buffer
+            for s in out.iter_mut() {
+              *s = 0.0;
+            }
             return;
           }
           let mut q = queue.lock().unwrap();
@@ -87,13 +92,12 @@ pub fn playback_thread(
           let mut any_real = false;
           for s in out.iter_mut() {
             if let Some(v) = q.pop_front() {
-              *s = v * vol;
+              *s = v.clamp(-1.0, 1.0) * vol;
               any_real = true;
             } else {
               *s = 0.0;
             }
           }
-
           if any_real {
             empty_callbacks.store(0, Ordering::Relaxed);
           } else {
@@ -131,6 +135,11 @@ pub fn playback_thread(
               crate::util::now_ms(start_instant).saturating_add(hangover_ms),
               Ordering::Relaxed,
             );
+
+            // ✅ FIX: silence
+            for s in out.iter_mut() {
+              *s = 0;
+            }
             return;
           }
           let mut q = queue.lock().unwrap();
@@ -195,6 +204,11 @@ pub fn playback_thread(
               crate::util::now_ms(start_instant).saturating_add(hangover_ms),
               Ordering::Relaxed,
             );
+
+            // ✅ FIX: silence for unsigned (midpoint)
+            for s in out.iter_mut() {
+              *s = u16::MAX / 2;
+            }
             return;
           }
           let mut q = queue.lock().unwrap();
