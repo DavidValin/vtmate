@@ -73,7 +73,7 @@ pub struct Args {
   /// Llama‑Server URL (used when --llm=llama-server)
   #[arg(
     long,
-    default_value = "http://localhost:8080",
+    default_value = "http://0.0.0.0:8080",
     env = "LLAMA_SERVER_URL"
   )]
   pub llama_server_url: String,
@@ -92,7 +92,7 @@ const SOUND_THRESHOLD_PEAK_DEFAULT: f32 = 0.10;
 pub const HANGOVER_MS_DEFAULT: u64 = 1000;
 const END_SILENCE_MS_DEFAULT: u64 = 1000;
 pub const MIN_UTTERANCE_MS_DEFAULT: u64 = 300;
-pub const OLLAMA_URL_DEFAULT: &str = "http://localhost:11434/api/generate";
+pub const OLLAMA_URL_DEFAULT: &str = "http://0.0.0.0:11434/api/generate";
 pub const OLLAMA_MODEL_DEFAULT: &str = "llama3.2:3b";
 pub const WHISPER_MODEL_PATH: &str = "~/.whisper-models/ggml-tiny.bin";
 const OPENTTS_BASE_URL_DEFAULT: &str = "http://0.0.0.0:5500/api/tts?&vocoder=high&denoiserStrength=0.005&&speakerId=&ssml=false&ssmlNumbers=true&ssmlDates=true&ssmlCurrency=true&cache=false";
