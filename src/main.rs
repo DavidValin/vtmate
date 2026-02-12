@@ -171,12 +171,19 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let print_lock = state.print_lock.clone();
 
   let available_langs = tts::get_all_available_languages();
-if !available_langs.contains(&args.language.as_str()) {
-    log::log("error", &format!("Unsupported language '{}'. Next languages are supported: {}", args.language, available_langs.join(", ")));
+  if !available_langs.contains(&args.language.as_str()) {
+    log::log(
+      "error",
+      &format!(
+        "Unsupported language '{}'. Next languages are supported: {}",
+        args.language,
+        available_langs.join(", ")
+      ),
+    );
     process::exit(1);
-}
+  }
 
-let voice_selected = if let Some(v) = &args.voice {
+  let voice_selected = if let Some(v) = &args.voice {
     v.clone()
   } else {
     if args.tts == "opentts" {
@@ -196,12 +203,27 @@ let voice_selected = if let Some(v) = &args.voice {
 
   let valid_voices: Vec<&str> = tts::get_voices_for(&args.tts, &args.language);
   if valid_voices.is_empty() {
-      log::log("error", &format!("No available voices for TTS '{}' and language '{}'.", args.tts, args.language));
-      process::exit(1);
+    log::log(
+      "error",
+      &format!(
+        "No available voices for TTS '{}' and language '{}'.",
+        args.tts, args.language
+      ),
+    );
+    process::exit(1);
   }
   if !valid_voices.contains(&voice_selected.as_str()) {
-      log::log("error", &format!("Invalid voice '{}' for TTS '{}' and language '{}'. Available voices: {}", voice_selected, args.tts, args.language, valid_voices.join(", ")));
-      process::exit(1);
+    log::log(
+      "error",
+      &format!(
+        "Invalid voice '{}' for TTS '{}' and language '{}'. Available voices: {}",
+        voice_selected,
+        args.tts,
+        args.language,
+        valid_voices.join(", ")
+      ),
+    );
+    process::exit(1);
   }
   log::log("info", &format!("TTS system: {}", args.tts));
   if args.tts == "kokoro" {

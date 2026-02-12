@@ -45,7 +45,7 @@ pub fn env_u64(name: &str, default: u64) -> u64 {
     .and_then(|v| v.parse::<u64>().ok())
     .unwrap_or(default)
 }
- 
+
 pub fn get_flag(lang: &str) -> &str {
   match lang {
     "en" => "🇬🇧",

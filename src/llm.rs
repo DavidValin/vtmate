@@ -5,8 +5,8 @@
 use crossbeam_channel::Receiver;
 use std::io::{BufRead, BufReader};
 use std::sync::{
-  atomic::{AtomicU64, Ordering},
   Arc,
+  atomic::{AtomicU64, Ordering},
 };
 
 // API
