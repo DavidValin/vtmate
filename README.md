@@ -88,7 +88,7 @@ ai-mate
 llamafile example:
 
 ```
-./Meta-Llama-3-8B-Instruct.Q8_0.llamafile
+./Meta-Llama-3-8B-Instruct.Q8_0.llamafile --server
 ai-mate --llm llama-server
 ```
 
@@ -167,7 +167,7 @@ alias ai-mate_es_llama='ai-mate --ollama-model "llama3:8b" --language es'
 
 ## Useful to know
 
-ai-model self contains espeak-ng-data, the whisper small model as well as kokoro model and voices which will be autoextracted when running ai-mate if they are not found in next locations:
+ai-mate self contains espeak-ng-data, the whisper small model as well as kokoro model and voices which will be autoextracted when running ai-mate if they are not found in next locations:
 
 - `~/.whisper-models/ggml-small.bin`
 - `~/.cache/k/0.bin`
