@@ -2,8 +2,13 @@
 //  Util
 // ------------------------------------------------------------------
 
+use std::io::IsTerminal;
+use std::sync::atomic::AtomicU64;
 use std::sync::OnceLock;
 use std::time::Instant;
+
+/// Global timestamp of last speech end (in ms since program start).
+pub static SPEECH_END_AT: AtomicU64 = AtomicU64::new(0);
 
 // API
 // ------------------------------------------------------------------
@@ -45,7 +50,7 @@ pub fn env_u64(name: &str, default: u64) -> u64 {
     .and_then(|v| v.parse::<u64>().ok())
     .unwrap_or(default)
 }
- 
+
 pub fn get_flag(lang: &str) -> &str {
   match lang {
     "en" => "🇬🇧",
@@ -78,4 +83,10 @@ pub fn get_flag(lang: &str) -> &str {
     "kn" => "🇮🇳",
     _ => "",
   }
+}
+
+pub fn terminal_supported() -> bool {
+  let is_tty = std::io::stdout().is_terminal();
+  let term = std::env::var("TERM").unwrap_or_default();
+  is_tty && term != "dumb"
 }

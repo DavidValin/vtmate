@@ -2,11 +2,16 @@
 //  UI (single renderer thread)
 // ------------------------------------------------------------------
 
-use crate::state::{GLOBAL_STATE, get_speed};
-
+use crate::state::{GLOBAL_STATE, get_speed, get_voice};
 use crossbeam_channel::Receiver;
-use crossterm::terminal;
-use std::io::Write;
+use crossterm::{
+  cursor::{Hide, MoveTo, Show},
+  execute,
+  style::{Print, ResetColor},
+  terminal,
+  terminal::{Clear, ClearType},
+};
+use std::io::{self, Write};
 use std::sync::{Arc, Mutex, atomic::Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -18,39 +23,20 @@ use std::time::{Duration, Instant};
 pub const USER_LABEL: &str = "\x1b[47;30mUSER:\x1b[0m"; // white bg, black text
 pub const ASSIST_LABEL: &str = "\x1b[48;5;22;37mASSISTANT:\x1b[0m"; // dark green bg, white text
 
-fn visible_len(s: &str) -> usize {
-  let mut in_escape = false;
-  let mut len = 0;
-  for c in s.chars() {
-    if in_escape {
-      if c == 'm' {
-        in_escape = false;
-      }
-      continue;
-    }
-    if c == '\x1b' {
-      in_escape = true;
-      continue;
-    }
-    len += 1;
-  }
-  len
-}
-
 pub fn spawn_ui_thread(
   ui: crate::state::UiState,
   stop_all_rx: Receiver<()>,
   status_line: Arc<Mutex<String>>,
-  print_lock: Arc<Mutex<()>>,
+  _print_lock: Arc<Mutex<()>>,
   peak: Arc<Mutex<f32>>,
 ) -> thread::JoinHandle<()> {
   thread::spawn(move || {
     let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     let mut i = 0usize;
 
-    // hide cursor (stdout)
-    print!("\x1b[?25l");
-    let _ = std::io::stdout().flush();
+    // Hide cursor and enable raw mode
+    let mut out = io::stdout();
+    execute!(out, Hide).unwrap();
 
     let mut last_cols = 0usize;
     let mut last_change = Instant::now();
@@ -63,30 +49,27 @@ pub fn spawn_ui_thread(
       let speak = state.ui.speaking.load(Ordering::Relaxed);
       let think = ui.thinking.load(Ordering::Relaxed);
       let play = state.ui.playing.load(Ordering::Relaxed);
-
-      // Priority: playing > thinking > idle/speaking.
-      // This ensures we show the speaking emoji any time audio isn't playing,
-      // even if a stale thinking flag is briefly set.
       let paused = state.recording_paused.load(Ordering::Relaxed);
       let status = if paused {
-        format!("⏸️  {}", spinner[i % spinner.len()])
+        format!("⏸️")
       } else if think {
-        format!("🤔. {}", spinner[i % spinner.len()])
+        format!("🤔 {}", spinner[i % spinner.len()])
       } else if speak {
-        format!("🎙  {}", spinner[i % spinner.len()])
+        format!("🎤 {}", spinner[i % spinner.len()])
       } else if play {
-        format!("🔊  {}", spinner[i % spinner.len()])
+        format!("🔊 {}", spinner[i % spinner.len()])
       } else {
-        format!("🎙  {}", spinner[i % spinner.len()])
+        format!("🎤 {}", spinner[i % spinner.len()])
       };
-      // draw amplitude bar
+      let _status_vis_len = visible_len(&status);
+
       let (cols_raw, _) = terminal::size().unwrap_or((80, 24));
+
       let cols = cols_raw as usize;
       if cols != last_cols {
         last_cols = cols;
         last_change = Instant::now();
       }
-      // track terminal width to reduce unnecessary redraws
 
       let resizing = last_change.elapsed().as_millis() < 1000;
       if resizing {
@@ -98,22 +81,29 @@ pub fn spawn_ui_thread(
         Ok(v) => *v,
         Err(_) => 0.0,
       };
-      // cols already defined earlier
-      let speed_val = get_speed();
-      let speed_str = format!("[{:.1}x]", speed_val);
-      let paused_str = if state.recording_paused.load(Ordering::Relaxed) {
-        "\x1b[41m\x1b[37m[paused]\x1b[0m"
+      let speed_str = format!("[{:.1}x]", get_speed());
+      let voice_str = format!("({})", get_voice());
+      let paused_str = if paused {
+        "\x1b[41m\x1b[37m  paused  \x1b[0m"
       } else {
-        "\x1b[43m\x1b[30m[listening]\x1b[0m"
+        "\x1b[43m\x1b[30m listening \x1b[0m"
       };
       let paused_vis_len = visible_len(paused_str);
-      let max_bar_len = if cols > status.len() + 2 + speed_str.len() {
-        cols - status.len() - 2 - speed_str.len()
-      } else {
-        0
-      };
-      let bar_len = ((peak_val * (max_bar_len as f32)).round() as usize).min(max_bar_len);
 
+      // Use the actual visible width of the status for bar calculations
+      let max_bar_len = if cols
+        > visible_len(&status) + 2 + voice_str.len() + 1 + speed_str.len() + paused_vis_len
+      {
+        BAR_WIDTH
+      } else {
+        let available = cols.saturating_sub(
+          visible_len(&status) + 2 + voice_str.len() + 1 + speed_str.len() + paused_vis_len,
+        );
+        let max_bar_len = if available > 10 { 10 } else { available };
+        max_bar_len
+      };
+
+      let bar_len = ((peak_val * (max_bar_len as f32)).round() as usize).min(max_bar_len);
       let bar_color = if paused {
         "\x1b[37m"
       } else if state.ui.speaking.load(Ordering::Relaxed) {
@@ -121,40 +111,43 @@ pub fn spawn_ui_thread(
       } else {
         "\x1b[37m"
       };
-      let bar_len = if paused { 1 } else { bar_len };
+      let bar_len = if paused { 0 } else { bar_len };
       let bar = format!("{}{}\x1b[0m", bar_color, "█".repeat(bar_len));
 
-      let status_vis_len = visible_len(&status);
-      let _status_len = status_vis_len + 2 + bar_len;
-      let spaces = if cols > status.len() + 2 + bar_len + speed_str.len() + paused_str.len() {
-        cols - status_vis_len - 2 - bar_len - speed_str.len() - paused_vis_len - 1
+      let _status_len = status.len() + 2 + bar_len;
+      let spaces = if cols
+        > visible_len(&status) + 2 + bar_len + speed_str.len() + voice_str.len() + paused_vis_len
+      {
+        cols
+          - visible_len(&status)
+          - 2
+          - bar_len
+          - speed_str.len()
+          - voice_str.len()
+          - paused_vis_len
       } else {
         0
       };
-      let status_without_speed =
-        format!("{}{}{}{}", status, "  ".repeat(1), bar, " ".repeat(spaces));
-      let status_with_bar = format!("{}{}{}", status_without_speed, speed_str, paused_str);
-      // Remember current status and repaint it on the bottom line.
-      {
-        if let Ok(mut st) = status_line.lock() {
-          *st = status_with_bar.clone();
-        }
+
+      let status_without_speed = format!("{} {}{}", status, bar, " ".repeat(spaces));
+      let status_with_bar = format!(
+        "{}{} {}{}",
+        status_without_speed, speed_str, voice_str, paused_str
+      );
+
+      // Update shared status
+      if let Ok(mut st) = status_line.lock() {
+        *st = status_with_bar.clone();
       }
-      // one-line repaint (stdout)
-      let _g = print_lock.lock().unwrap();
-      clear_line_cr();
-      print!("{}", status_with_bar);
-      let _ = std::io::stdout().flush();
+      // Draw status line using crossterm
+      let _ = draw(&mut out, &status_with_bar);
 
       i = i.wrapping_add(1);
       thread::sleep(Duration::from_millis(100));
     }
 
-    // clear + show cursor
-    let _g = print_lock.lock().unwrap();
-    clear_line_cr();
-    print!("\x1b[?25h");
-    let _ = std::io::stdout().flush();
+    // Show cursor before exit
+    execute!(out, Show).unwrap();
   })
 }
 
@@ -172,13 +165,66 @@ pub fn ui_println(print_lock: &Arc<Mutex<()>>, status_line: &Arc<Mutex<String>>,
   if let Ok(st) = status_line.lock() {
     print!("{}", *st);
   }
+  // do nothing further, status will be refreshed by UI thread
   let _ = std::io::stdout().flush();
 }
 
-// Clear the previous line (used when interrupting).
-
 // PRIVATE
 // ------------------------------------------------------------------
+
+const BAR_WIDTH: usize = 50;
+
+/// Return the display width of a string.
+fn visible_len(s: &str) -> usize {
+  // Count display width excluding ANSI escape codes.
+  // Approximate double‑width for common emojis used in status.
+  let mut len = 0usize;
+  let mut chars = s.chars();
+  while let Some(c) = chars.next() {
+    if c == '\x1b' {
+      // Skip until 'm' which ends the escape sequence
+      while let Some(next) = chars.next() {
+        if next == 'm' {
+          break;
+        }
+      }
+    } else {
+      // Heuristic: treat certain emojis as width 2
+      if c == '\u{FE0F}' {
+        // Variation selector, invisible
+        continue;
+      }
+      let double = match c {
+        '🤔' | '🎤' | '🔊' => true,
+
+        _ => false,
+      };
+      len += if double { 2 } else { 1 };
+    }
+  }
+  len
+}
+
+fn draw<W: Write>(out: &mut W, status: &str) -> std::io::Result<()> {
+  let (_w, h) = terminal::size()?;
+  let bottom_y = h.saturating_sub(1);
+
+  // Clear only the bottom line
+  execute!(out, MoveTo(0, bottom_y), Clear(ClearType::CurrentLine))?;
+
+  // Print status with reverse attribute
+  execute!(
+    out,
+    MoveTo(0, bottom_y),
+    Clear(ClearType::CurrentLine),
+    ResetColor,
+    Print(status),
+    ResetColor,
+  )?;
+
+  out.flush()?;
+  Ok(())
+}
 
 fn clear_line_cr() {
   // Clear the current line and return to column 0.
