@@ -5,7 +5,7 @@ See it in action: [Demo](https://www.youtube.com/watch?v=x0RAX3-PLnE)
 
 ### Status
 
-- ✅ First Release Candidate ready!
+- ✅ First Release Candidate ready! Still fixing bugs
 - ✅ Tested in MacOS
 - ⚠️ Linux version not ready yet
 - ⚠️ Windows version not ready yet
@@ -26,15 +26,16 @@ See it in action: [Demo](https://www.youtube.com/watch?v=x0RAX3-PLnE)
 
 ## Features
 
-- Voice interrupt: `the agent stops talking if you interrupt via voice`
-- Pause / resume: `toggle "<SPACE>" key to pause / resume voice recording. Useful to it running it during the day and switch it on when needed`
-- Voice speed change: `change the agent voice speed by pressing <ARROW_UP> / <ARROW_DOWN>. Do this before asking anything new`
-- Integrated `whisper`
-- Integrated `kokoro TTS` system
-- Interface with `OpenTTS` system
-- Supports `ollama` or `llama-server` or `llamafile`
-- 28 languages supported (`ai-mate --list-voices`)
-- Use any gguf model from huggingface.com or ollama models (small models reply faster)
+- 📌 Voice chat
+- 📌 Voice interrupt: `the agent stops talking if you interrupt via voice`
+- 📌 Pause / Resume: `toggle "<SPACE>" key to pause / resume voice recording. Useful to it running it during the day and switch it on when needed`
+- 📌 Voice speed change: `change the agent voice speed by pressing <ARROW_UP> / <ARROW_DOWN>. Do this before asking anything new`
+- 📌 Integrated `whisper`
+- 📌 Integrated `kokoro TTS` system
+- 📌 Interface with `OpenTTS` system
+- 📌 Supports `ollama` or `llama-server` or `llamafile`
+- 📌 28 languages supported (`ai-mate --list-voices`)
+- 📌 Use any gguf model from huggingface.com or ollama models (small models reply faster)
 
 ## LLM engine support
 
@@ -45,8 +46,18 @@ You can run the models locally (by default) or remotely by configuring the base 
 
 ## TTS engine support
 
-- ✅ kokoro tts (default and integrated)
+- ✅ Kokoro TTS (default and integrated)
 - ✅ OpenTTS (requires external service)
+
+### Acceleration support
+
+Do you have GPU? (nvidia? an apple computer?) Great! then ai-mate speed is at lighting speed =)
+
+- ⚠️ Windows - CUDA (NVIDIA) (working on it)
+- ✅ MacOS - arm64 - Metal acceleration
+- ✅ Linux - amd64 - CUDA (NVIDIA)
+- ⚠️ Linux - amd64 - Openblas - Available but Untested
+- ⚠️ Linux - amd64 - Vulkan - Available but Untested
 
 ## Installation
 
@@ -182,35 +193,35 @@ ai-mate self contains espeak-ng-data, the whisper tiny & small models and kokoro
 
 ## Language support
 
-| ID |           Language           |      Support       |        TTS supported          |
-|----|------------------------------|--------------------|-------------------------------|
-| en |        🇺🇸 English            |  🏆 Best support   |    ✅ Kokoro · ✅ OpenTTS     |
-| es |         🇪🇸 Spanish           |  🏆 Best support   |    ✅ Kokoro · ✅ OpenTTS     |
-| zh |     🇨🇳 Mandarin Chinese      |  🏆 Best support   |    ✅ Kokoro · ✅ OpenTTS     |
-| ja |        🇯🇵 Japanese           |  🏆 Best support   |    ✅ Kokoro · ✅ OpenTTS     |
-| pt |       🇵🇹 Portuguese          |  🏆 Best support   |    ✅ Kokoro · ❌ OpenTTS     |
-| it |         🇮🇹 Italian           |  🏆 Best support   |    ✅ Kokoro · ✅ OpenTTS     |
-| hi |          🇮🇳 Hindi            |  🏆 Best support   |    ✅ Kokoro · ✅ OpenTTS     |
-| fr |         🇫🇷 French            |  🏆 Best support   |    ✅ Kokoro · ✅ OpenTTS     |
-| ar |          🇸🇦 Arabic           |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
-| bn |         🇧🇩 Bengali           |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
-| ca |         🇪🇸 Catalan           |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
-| cs |          🇨🇿 Czech            |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
-| de |          🇩🇪 German           |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
-| el |          🇬🇷 Greek            |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
-| fi |         🇫🇮 Finnish           |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
-| gu |         🇮🇳 Gujarati          |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
-| hu |        🇭🇺 Hungarian          |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
-| kn |         🇮🇳 Kannada           |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
-| ko |          🇰🇷 Korean           |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
-| mr |         🇮🇳 Marathi           |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
-| nl |          🇳🇱 Dutch            |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
-| pa |         🇮🇳 Punjabi           |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
-| ru |         🇷🇺 Russian           |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
-| sv |         🇸🇪 Swedish           |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
-| sw |        🇰🇪 Swahili            |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
-| ta |          🇮🇳 Tamil            |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
-| te |         🇮🇳 Telugu            |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
-| tr |         🇹🇷 Turkish           |     Supported      |    ❌ Kokoro · ✅ OpenTTS     |
+| ID |           Language           |      Support       |        TTS supported            |
+|----|------------------------------|--------------------|---------------------------------|
+| en |       🇺🇸  English            |  🏆 Best support   |    ✅ Kokoro  ·  ✅ OpenTTS     |
+| es |       🇪🇸  Spanish            |  🏆 Best support   |    ✅ Kokoro  ·  ✅ OpenTTS     |
+| zh |       🇨🇳  Mandarin Chinese   |  🏆 Best support   |    ✅ Kokoro  ·  ✅ OpenTTS     |
+| ja |       🇯🇵  Japanese           |  🏆 Best support   |    ✅ Kokoro  ·  ✅ OpenTTS     |
+| pt |       🇵🇹  Portuguese         |  🏆 Best support   |    ✅ Kokoro  ·  ❌ OpenTTS     |
+| it |       🇮🇹  Italian            |  🏆 Best support   |    ✅ Kokoro  ·  ✅ OpenTTS     |
+| hi |       🇮🇳  Hindi              |  🏆 Best support   |    ✅ Kokoro  ·  ✅ OpenTTS     |
+| fr |       🇫🇷  French             |  🏆 Best support   |    ✅ Kokoro  ·  ✅ OpenTTS     |
+| ar |       🇸🇦  Arabic             |     Supported      |    ❌ Kokoro  ·  ✅ OpenTTS     |
+| bn |       🇧🇩  Bengali            |     Supported      |    ❌ Kokoro  ·  ✅ OpenTTS     |
+| ca |       🇪🇸  Catalan            |     Supported      |    ❌ Kokoro  ·  ✅ OpenTTS     |
+| cs |       🇨🇿  Czech              |     Supported      |    ❌ Kokoro  ·  ✅ OpenTTS     |
+| de |       🇩🇪  German             |     Supported      |    ❌ Kokoro  ·  ✅ OpenTTS     |
+| el |       🇬🇷  Greek              |     Supported      |    ❌ Kokoro  ·  ✅ OpenTTS     |
+| fi |       🇫🇮  Finnish            |     Supported      |    ❌ Kokoro  ·  ✅ OpenTTS     |
+| gu |       🇮🇳  Gujarati           |     Supported      |    ❌ Kokoro  ·  ✅ OpenTTS     |
+| hu |       🇭🇺  Hungarian          |     Supported      |    ❌ Kokoro  ·  ✅ OpenTTS     |
+| kn |       🇮🇳  Kannada            |     Supported      |    ❌ Kokoro  ·  ✅ OpenTTS     |
+| ko |       🇰🇷  Korean             |     Supported      |    ❌ Kokoro  ·  ✅ OpenTTS     |
+| mr |       🇮🇳  Marathi            |     Supported      |    ❌ Kokoro  ·  ✅ OpenTTS     |
+| nl |       🇳🇱  Dutch              |     Supported      |    ❌ Kokoro  ·  ✅ OpenTTS     |
+| pa |       🇮🇳  Punjabi            |     Supported      |    ❌ Kokoro  ·  ✅ OpenTTS     |
+| ru |       🇷🇺  Russian            |     Supported      |    ❌ Kokoro  ·  ✅ OpenTTS     |
+| sv |       🇸🇪  Swedish            |     Supported      |    ❌ Kokoro  ·  ✅ OpenTTS     |
+| sw |       🇰🇪  Swahili            |     Supported      |    ❌ Kokoro  ·  ✅ OpenTTS     |
+| ta |       🇮🇳  Tamil              |     Supported      |    ❌ Kokoro  ·  ✅ OpenTTS     |
+| te |       🇮🇳  Telugu             |     Supported      |    ❌ Kokoro  ·  ✅ OpenTTS     |
+| tr |       🇹🇷  Turkish            |     Supported      |    ❌ Kokoro  ·  ✅ OpenTTS     |
 
 Have fun o:)
