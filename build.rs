@@ -9,7 +9,7 @@ fn find_url_for_file(file_name: &str) -> Option<String> {
   match file_name {
     "ggml-tiny.bin" => {
       Some("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin".to_string())
-    },
+    }
     "ggml-small.bin" => {
       Some("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin".to_string())
     }
@@ -126,11 +126,11 @@ fn init_expected_hashes() -> HashMap<&'static str, &'static str> {
     "0.onnx",
     "7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5",
   );
-    m.insert(
+  m.insert(
     "ggml-small.bin",
     "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
   );
-    m.insert(
+  m.insert(
     "ggml-tiny.bin",
     "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
   );

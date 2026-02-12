@@ -54,7 +54,10 @@ pub fn ensure_assets_env() {
   let whisper_small_path = whisper_dir.join("ggml-small.bin");
   let whisper_tiny_path = whisper_dir.join("ggml-tiny.bin");
 
-  let all_exist = bin_path.exists() && onnx_path.exists() && whisper_small_path.exists() && whisper_tiny_path.exists();
+  let all_exist = bin_path.exists()
+    && onnx_path.exists()
+    && whisper_small_path.exists()
+    && whisper_tiny_path.exists();
   if !all_exist {
     println!("Extracting models, one moment...");
     let _ = fs::remove_dir_all(&kokoro_assets_dir);

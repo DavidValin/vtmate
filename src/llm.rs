@@ -6,8 +6,8 @@ use crossbeam_channel::Receiver;
 use serde_json::json;
 use std::io::{BufRead, BufReader};
 use std::sync::{
-  atomic::{AtomicU64, Ordering},
   Arc,
+  atomic::{AtomicU64, Ordering},
 };
 
 // API
