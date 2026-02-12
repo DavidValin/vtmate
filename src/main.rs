@@ -33,6 +33,11 @@ mod util;
 static START_INSTANT: OnceLock<Instant> = OnceLock::new();
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+
+  if !util::terminal_supported() {
+    log::log("error", "Terminal does not support colors or emojis. Please use a different terminal. exiting...");
+    process::exit(1);
+  }
   assets::ensure_piper_espeak_env();
 
   crossterm::execute!(
@@ -52,9 +57,9 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
   println!("    \x1b[90mv{}\x1b[0m\n\n\n\n\n", env!("CARGO_PKG_VERSION"));
 
-  let _ = START_INSTANT.get_or_init(Instant::now);
-
+  let _ = START_INSTANT.get_or_init(Instant::now);  
   let args = crate::config::Args::parse();
+
 
   if args.list_voices {
     tts::print_voices();

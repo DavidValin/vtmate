@@ -2,6 +2,7 @@
 //  Util
 // ------------------------------------------------------------------
 
+use std::io::IsTerminal;
 use std::sync::atomic::AtomicU64;
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -82,4 +83,10 @@ pub fn get_flag(lang: &str) -> &str {
     "kn" => "🇮🇳",
     _ => "",
   }
+}
+
+pub fn terminal_supported() -> bool {
+  let is_tty = std::io::stdout().is_terminal();
+  let term = std::env::var("TERM").unwrap_or_default();
+  is_tty && term != "dumb"
 }
