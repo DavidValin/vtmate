@@ -31,6 +31,7 @@ pub fn whisper_transcribe(
   pcm_chunks: &[i16],
   sample_rate: u32,
   whisper_model_path: &str,
+  language: &str,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
   let mut inter_samples = vec![0f32; pcm_chunks.len()];
   whisper_rs::convert_integer_to_float_audio(pcm_chunks, &mut inter_samples)?;
@@ -63,11 +64,17 @@ pub fn whisper_transcribe(
   params.set_print_timestamps(false);
   params.set_print_realtime(false);
   params.set_translate(false);
-  params.set_language(Some("auto"));
+  params.set_language(Some(language));
 
+  let start = std::time::Instant::now();
   state
     .full(params, &mono_samples[..])
     .map_err(|e| format!("Inference failed: {:?}", e))?;
+  let elapsed = start.elapsed();
+  crate::log::log(
+    "info",
+    &format!("Whisper transcription took {:.2?}", elapsed),
+  );
 
   let mut result = String::new();
   let seg_count = state.full_n_segments() as usize;

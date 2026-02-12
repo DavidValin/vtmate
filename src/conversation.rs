@@ -2,11 +2,12 @@
 //  Conversation
 // ------------------------------------------------------------------
 
-use crossbeam_channel::{Receiver, Sender, select};
+use crate::START_INSTANT;
+use crossbeam_channel::{select, Receiver, Sender};
 use std::cell::Cell;
 use std::sync::{
-  Arc, Mutex,
   atomic::{AtomicU64, Ordering},
+  Arc, Mutex,
 };
 
 // API
@@ -34,10 +35,12 @@ pub fn conversation_thread(
       recv(rx_utt) -> msg => {
         let Ok(utt) = msg else { break };
         let pcm: Vec<i16> = utt.data.iter().map(|s| ((*s).clamp(-1.0, 1.0) * (i16::MAX as f32)) as i16).collect();
-        let user_text = crate::stt::whisper_transcribe(&pcm, utt.sample_rate, &args.resolved_whisper_model_path())?;
+        let user_text = crate::stt::whisper_transcribe(&pcm, utt.sample_rate, &args.resolved_whisper_model_path(), &args.language)?;
         let prompt = format!("{}\n{}: {}", conversation_history.lock().unwrap(), crate::ui::USER_LABEL, user_text);
         let cleaned_prompt = crate::util::strip_ansi(&prompt);
         let user_text = user_text.trim().to_string();
+        let speech_end_ms = crate::util::SPEECH_END_AT.load(std::sync::atomic::Ordering::SeqCst);
+        let mut first_phrase_logged = false;
         if user_text.is_empty() {
           continue;
         }
@@ -103,6 +106,12 @@ pub fn conversation_thread(
           }
 
           if let Some(phrase) = speaker.push_text(piece) {
+            // Log time from utterance start to first phrase playback
+            if !first_phrase_logged {
+              let elapsed_ms = crate::util::now_ms(&START_INSTANT) - speech_end_ms;
+              crate::log::log("info", &format!("Time from speech end to first phrase playback: {:.2?}", elapsed_ms));
+              first_phrase_logged = true;
+            }
             crate::ui::ui_println(&print_lock, &status_line, &phrase);
             conversation_history.lock().unwrap().push_str(&format!("{}: {}\n", crate::ui::ASSIST_LABEL, phrase));
 
@@ -244,12 +253,20 @@ impl PhraseSpeaker {
 
     // cap phrases by new lines or dots
     let trigger = self.buf.contains('\n') || self.buf.ends_with('.');
-    if trigger { self.flush() } else { None }
+    if trigger {
+      self.flush()
+    } else {
+      None
+    }
   }
   fn flush(&mut self) -> Option<String> {
     let out = self.buf.trim().to_string();
     self.buf.clear();
-    if out.is_empty() { None } else { Some(out) }
+    if out.is_empty() {
+      None
+    } else {
+      Some(out)
+    }
   }
 }
 

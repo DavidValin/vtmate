@@ -2,12 +2,13 @@
 //  Record
 // ------------------------------------------------------------------
 
+use crate::START_INSTANT;
 use cpal::traits::{DeviceTrait, StreamTrait};
 use crossbeam_channel::{Receiver, Sender};
 use std::sync::OnceLock;
 use std::sync::{
-  Arc, Mutex,
   atomic::{AtomicBool, AtomicU64, Ordering},
+  Arc, Mutex,
 };
 use std::thread;
 use std::time::{Duration, Instant};
@@ -258,6 +259,10 @@ fn build_input_f32(
               ),
             );
             if dur_ms >= min_utt_ms {
+              crate::util::SPEECH_END_AT.store(
+                crate::util::now_ms(&START_INSTANT),
+                std::sync::atomic::Ordering::SeqCst,
+              );
               let _ = tx_utt.send(crate::audio::AudioChunk {
                 data: audio,
                 channels,
@@ -396,6 +401,10 @@ fn build_input_i16(
               ),
             );
             if dur_ms >= min_utt_ms {
+              crate::util::SPEECH_END_AT.store(
+                crate::util::now_ms(&START_INSTANT),
+                std::sync::atomic::Ordering::SeqCst,
+              );
               let _ = tx_utt.send(crate::audio::AudioChunk {
                 data: audio,
                 channels,
@@ -531,6 +540,10 @@ fn build_input_u16(
               ),
             );
             if dur_ms >= min_utt_ms {
+              crate::util::SPEECH_END_AT.store(
+                crate::util::now_ms(&START_INSTANT),
+                std::sync::atomic::Ordering::SeqCst,
+              );
               let _ = tx_utt.send(crate::audio::AudioChunk {
                 data: audio,
                 channels,
