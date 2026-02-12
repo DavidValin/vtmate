@@ -10,8 +10,8 @@ use crossterm::{
   terminal,
 };
 use std::sync::{
-  Arc, Mutex,
   atomic::{AtomicBool, Ordering},
+  Arc, Mutex,
 };
 use std::time::Duration;
 
@@ -99,9 +99,7 @@ pub fn keyboard_thread(
         }
 
         // pause/resume recording
-        if (k.code == KeyCode::Char('p') || k.code == KeyCode::Char('P'))
-          && k.modifiers.contains(KeyModifiers::CONTROL)
-        {
+        if k.code == KeyCode::Char(' ') {
           let new_val = !recording_paused.load(Ordering::Relaxed);
           recording_paused.store(new_val, Ordering::Relaxed);
         }

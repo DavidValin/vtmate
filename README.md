@@ -27,7 +27,7 @@ See it in action: [Demo](https://www.youtube.com/watch?v=x0RAX3-PLnE)
 ## Features
 
 - Voice interrupt: `the agent stops talking if you interrupt via voice`
-- Pause / resume: `press "<CONTROL> + <ALT> + p" to pause voice recording / resume. Useful to it running it during the day and switch it on when needed`
+- Pause / resume: `toggle "<SPACE>" key to pause / resume voice recording. Useful to it running it during the day and switch it on when needed`
 - Voice speed change: `change the agent voice speed by pressing <ARROW_UP> / <ARROW_DOWN>. Do this before asking anything new`
 - Integrated `whisper`
 - Integrated `kokoro TTS` system
