@@ -54,11 +54,7 @@ You can run the models locally (by default) or remotely by configuring the base 
 - `https://github.com/DavidValin/ai-mate/releases`
 - Move the binary to a folder in your $PATH so you can use `ai-mate` command anywhere
 
-### 📌 2. **Download whisper model**
-- Download model, example: `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin?download=true`
-- Place the model under  `~/.whisper-models/ggml-small.bin`
-
-### 📌 3. **Install llm engine (needed for ai responses)**
+### 📌 2. **Install llm engine (needed for ai responses)**
 
 Option A- ollama (the default)
 - Install `https://ollama.com/download`.
@@ -72,11 +68,11 @@ Option C- llama-server support.
 - Install llama.cpp: `https://github.com/ggml-org/llama.cpp`.
 - Download a gguf model: `https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q8_0.gguf?download=true`.
 
-### 📌 4. **(Windows only) Install supported terminal**
+### 📌 3. **(Windows only) Install supported terminal**
 
 - Install Windows Terminal (which supports emojis): `https://apps.microsoft.com/detail/9n0dx20hk701` (use this terminal to run ai-mate)
 
-### 5. **(Optional: OpenTTS support)**
+### 📌 4. **(Optional) OpenTTS support**
 
 - `docker pull synesthesiam/opentts:all`
 
@@ -123,6 +119,7 @@ You can just override a specific variable, for example:
 ai-mate --tts opentts --ollama-model "llama3.2:3b" --language ru
 ai-mate --ollama-model "llama3.2:3b" --language zh
 ai-mate --llm llama-server --language it
+ai-mate --language es --whisper-model-path ~/.whisper-models/ggml-medium-q5_0.bin`
 ```
 
 If you want to use OpenTTS, start the docker service first: `docker run --rm --platform=linux/amd64 -p 5500:5500 synesthesiam/opentts:all` (it will pull the image the first time). Adjust the platform as needed depending on your hardware. 
@@ -133,7 +130,6 @@ If you need help:
 ai-mate --help
 ```
 
-
 ### Build ai-mate from source code
 
 Use cross_build.sh script, get help on how to use it:
@@ -142,6 +138,7 @@ Use cross_build.sh script, get help on how to use it:
 ./cross_build.sh -h
 ```
 
+* During build, tts and stt models are fetched locally
 * Mac build only works from native MacOS
 * Windows build only works from native Windows (requires https://visualstudio.microsoft.com/visual-cpp-build-tools)
 
@@ -170,8 +167,12 @@ alias ai-mate_es_llama='ai-mate --ollama-model "llama3:8b" --language es'
 
 ## Useful to know
 
-- ai-mate unzips `espeak-ng-data.tar.gz` in ~/.ai-mate directory
-- kokoro-tiny autodownloads the models if not found locally under `~/.cache/k`
+ai-model self contains espeak-ng-data, the whisper small model as well as kokoro model and voices which will be autoextracted when running ai-mate if they are not found in next locations:
+
+- `~/.whisper-models/ggml-small.bin`
+- `~/.cache/k/0.bin`
+- `~/.cache/k/0.onnx`
+- `~/.ai-mate/espeak-ng-data.tar.gz`
 
 ## Language support
 

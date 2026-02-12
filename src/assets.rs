@@ -2,6 +2,7 @@
 //  Router
 // ------------------------------------------------------------------
 
+use crate::state::GLOBAL_STATE;
 use flate2::read::GzDecoder;
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -16,16 +17,13 @@ pub fn ensure_piper_espeak_env() {
   if std::env::var_os("PIPER_ESPEAKNG_DATA_DIRECTORY").is_some() {
     return;
   }
-
   let home = match std::env::var("HOME") {
     Ok(h) => PathBuf::from(h),
     Err(_) => return,
   };
-
   let base = home.join(".ai-mate");
   let espeak_dir = base.join("espeak-ng-data");
   let marker = base.join(".espeak_extracted");
-
   if !(marker.exists() && espeak_dir.is_dir()) {
     let _ = fs::remove_dir_all(&base);
     if fs::create_dir_all(&base).is_ok() {
@@ -36,106 +34,41 @@ pub fn ensure_piper_espeak_env() {
       }
     }
   }
-
-  // SAFETY: called once at program startup before any threads exist
   unsafe {
     std::env::set_var("PIPER_ESPEAKNG_DATA_DIRECTORY", base.as_os_str());
   }
 }
 
-pub static _ASSET_FILES: LazyLock<HashMap<&'static str, (&'static str, &'static str)>> =
-  LazyLock::new(|| {
-    let mut assets = HashMap::new();
-    assets.insert(
-      "SST::WHISPER::TINY",
-      (
-        "https://huggingface.co/ggerganov/whisper.cpp/blob/main/ggml-tiny.bin",
-        "~/.whisper-models/ggml-tiny.bin",
-      ),
-    );
-    assets.insert(
-      "SST::WHISPER::SMALL",
-      (
-        "https://huggingface.co/ggerganov/whisper.cpp/blob/main/ggml-small.bin",
-        "~/.whisper-models/ggml-small.bin",
-      ),
-    );
-    assets.insert(
-      "SST::WHISPER::MEDIUM",
-      (
-        "https://huggingface.co/ggerganov/whisper.cpp/blob/main/ggml-medium.bin",
-        "~/.whisper-models/ggml-medium.bin",
-      ),
-    );
-    assets.insert(
-      "SST::WHISPER::BASE",
-      (
-        "https://huggingface.co/ggerganov/whisper.cpp/blob/main/ggml-base.bin",
-        "~/.whisper-models/ggml-base.bin",
-      ),
-    );
-    assets.insert(
-      "SST::WHISPER::LARGE_V1",
-      (
-        "https://huggingface.co/ggerganov/whisper.cpp/blob/main/ggml-large-v1.bin",
-        "~/.whisper-models/ggml-large-v1.bin",
-      ),
-    );
-    assets.insert(
-      "SST::WHISPER::LARGE_V2",
-      (
-        "https://huggingface.co/ggerganov/whisper.cpp/blob/main/ggml-large-v2.bin",
-        "~/.whisper-models/ggml-large-v2.bin",
-      ),
-    );
-    assets.insert(
-      "SST::WHISPER::LARGE_V3",
-      (
-        "https://huggingface.co/ggerganov/whisper.cpp/blob/main/ggml-large-v3.bin",
-        "~/.whisper-models/ggml-large-v3.bin",
-      ),
-    );
-    assets.insert(
-      "SST::WHISPER::LARGE_V3_TURBO",
-      (
-        "https://huggingface.co/ggerganov/whisper.cpp/blob/main/ggml-large-v3-turbo.bin",
-        "~/.whisper-models/ggml-large-v3-turbo.bin",
-      ),
-    );
-    assets.insert(
-      "SST::TTS::KOKORO_TINY::MODEL",
-      (
-        "https://github.com/8b-is/kokoro-tiny/raw/main/models/0.onnx",
-        "~/.cache/.k/0.onnx",
-      ),
-    );
-    assets.insert(
-      "SST::TTS::KOKORO_TINY::VOICES",
-      (
-        "https://github.com/8b-is/kokoro-tiny/raw/main/models/0.bin",
-        "~/.cache/.k/0.bin",
-      ),
-    );
-    assets
-  });
+pub fn ensure_assets_env() {
+  // Respect user override
+  if std::env::var_os("KOKORO_TTS_DATA_DIRECTORY").is_some() {
+    return;
+  }
+  let home = match std::env::var("HOME") {
+    Ok(h) => PathBuf::from(h),
+    Err(_) => return,
+  };
+  let kokoro_assets_dir = home.join(".cache/k");
+  let whisper_dir = home.join(".whisper-models");
+  // Check if the expected files already exist
+  let bin_path = kokoro_assets_dir.join("0.bin");
+  let onnx_path = kokoro_assets_dir.join("0.onnx");
+  let whisper_path = whisper_dir.join("ggml-small.bin");
+  let all_exist = bin_path.exists() && onnx_path.exists() && whisper_path.exists();
+  if !all_exist {
+    println!("Extracting models, one moment...");
+    let _ = fs::remove_dir_all(&kokoro_assets_dir);
+    let _ = fs::remove_dir_all(&whisper_dir);
+    if fs::create_dir_all(&kokoro_assets_dir).is_ok() && fs::create_dir_all(&whisper_dir).is_ok() {
+      let _ = fs::write(bin_path, embedded_kokoro_0_bin());
+      let _ = fs::write(onnx_path, embedded_kokoro_0_onnx());
+      let _ = fs::write(whisper_path, embedded_whisper_small());
+    }
+  }
 
-
-/// Returns all whisper asset URLs.
-///
-/// The function filters ASSET_FILES for keys that start with "SST::WHISPER::".
-pub fn _get_assets(key_prefix: &str) -> Vec<(&'static str, (&'static str, &'static str))> {
-  _ASSET_FILES
-    .iter()
-    .filter_map(|(k, v)| {
-      if k.starts_with(key_prefix) {
-        // remove the prefix to return just the asset type key
-        let key = k.trim_start_matches(key_prefix);
-        Some((key, *v))
-      } else {
-        None
-      }
-    })
-    .collect()
+  unsafe {
+    std::env::set_var("KOKORO_TTS_DATA_DIRECTORY", kokoro_assets_dir.as_os_str());
+  }
 }
 
 // PRIVATE
@@ -147,9 +80,20 @@ pub fn _get_assets(key_prefix: &str) -> Vec<(&'static str, (&'static str, &'stat
 /// Make sure this path exists when compiling:
 ///   <crate>/assets/espeak-ng-data.tar.gz
 fn embedded_espeak_archive() -> &'static [u8] {
-  static ESPEAK_TGZ: &[u8] = include_bytes!(concat!(
+  include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/assets/espeak-ng-data.tar.gz"
-  ));
-  ESPEAK_TGZ
+  ))
+}
+
+fn embedded_kokoro_0_bin() -> &'static [u8] {
+  include_bytes!(concat!(env!("OUT_DIR"), "/embedded/0.bin"))
+}
+
+fn embedded_kokoro_0_onnx() -> &'static [u8] {
+  include_bytes!(concat!(env!("OUT_DIR"), "/embedded/0.onnx"))
+}
+
+fn embedded_whisper_small() -> &'static [u8] {
+  include_bytes!(concat!(env!("OUT_DIR"), "/embedded/ggml-small.bin"))
 }
