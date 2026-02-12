@@ -7,7 +7,7 @@ See it in action: [Demo](https://www.youtube.com/watch?v=x0RAX3-PLnE)
 
 - ✅ First Release Candidate ready!
 - ✅ Tested in MacOS
-- ✅ Tested in Linux
+- ⚠️ Windows version not ready yet
 - ⚠️ Windows version not ready yet
 
 ## How it works
