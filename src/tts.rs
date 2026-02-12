@@ -4,6 +4,7 @@
 
 use crossbeam_channel::{Receiver, Sender};
 use kokoro_tiny::TtsEngine;
+mod kokoro_tts;
 use reqwest;
 use std::io::{BufReader, Read};
 use std::sync::OnceLock;
@@ -11,6 +12,8 @@ use std::sync::{
   Arc, Mutex,
   atomic::{AtomicU64, Ordering},
 };
+use std::thread;
+use std::time::Duration;
 use urlencoding;
 
 // API
@@ -340,14 +343,6 @@ pub fn start_kokoro_engine() -> Result<(), Box<dyn std::error::Error + Send + Sy
 }
 
 //  OpenTTS integration ---------------------------------------------
-// +++++++++++++++++++++++++++++
-
-mod kokoro_tts;
-
-// Streaming wrapper for Kokoro
-use std::thread;
-use std::time::Duration;
-
 // +++++++++++++++++++++++++++++
 
 pub const DEFAULT_OPENTTS_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[

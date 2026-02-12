@@ -24,8 +24,11 @@ pub struct PlaybackState {
   pub volume: Arc<Mutex<f32>>,
 }
 
+pub static GLOBAL_STATE: OnceLock<Arc<AppState>> = OnceLock::new();
+
 #[derive(Debug)]
 pub struct AppState {
+  pub voice: Arc<Mutex<String>>,
   pub ui: UiState,
   pub speed: AtomicU32,
   pub conversation_history: std::sync::Arc<std::sync::Mutex<String>>,
@@ -36,10 +39,8 @@ pub struct AppState {
   pub recording_paused: Arc<AtomicBool>,
 }
 
-pub static GLOBAL_STATE: OnceLock<Arc<AppState>> = OnceLock::new();
-
 impl AppState {
-  pub fn new() -> Self {
+  pub fn new_with_voice(voice: String) -> Self {
     Self {
       ui: UiState {
         thinking: Arc::new(AtomicBool::new(false)),
@@ -59,14 +60,19 @@ impl AppState {
       print_lock: Arc::new(Mutex::new(())),
       interrupt_counter: Arc::new(AtomicU64::new(0)),
       recording_paused: Arc::new(AtomicBool::new(false)),
+      voice: Arc::new(Mutex::new(voice)),
     }
   }
 }
 
-/// Get current speed as f32.
 pub fn get_speed() -> f32 {
   let state = GLOBAL_STATE.get().expect("AppState not initialized");
   state.speed.load(Ordering::Relaxed) as f32 / 10.0
+}
+
+pub fn get_voice() -> String {
+  let state = GLOBAL_STATE.get().expect("AppState not initialized");
+  state.voice.lock().unwrap().clone()
 }
 
 /// Increase speed by 0.1, capped at 8.0.
