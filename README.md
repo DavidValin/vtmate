@@ -99,7 +99,7 @@ ai-mate --llm llama-server
 llama-server example:
 
 ```
-llama-server -m Meta-Llama-3-8B-Instruct.Q8_0.gguf --jinja -c 100000
+llama-server -m Meta-Llama-3-8B-Instruct.Q8_0.gguf
 ai-mate --llm llama-server
 ```
 
