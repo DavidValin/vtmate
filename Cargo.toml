@@ -1,6 +1,6 @@
 [package]
 name = "ai-mate"
-version = "0.3.0-rc-1"
+version = "0.3.0-rc-2"
 edition = "2024"
 
 authors = ["David Valin <hola@davidvalin.com>"]
