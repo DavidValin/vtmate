@@ -21,6 +21,11 @@ pub struct StreamingTts {
   gain: f32,
 }
 
+// PRIVATE
+// ------------------------------------------------------------------
+
+const MAX_CHUNK_SIZE: usize = 50;
+
 impl StreamingTts {
   pub fn new(engine: Arc<Mutex<TtsEngine>>) -> Self {
     Self {
@@ -117,8 +122,3 @@ impl StreamingTts {
     }
   }
 }
-
-// PRIVATE
-// ------------------------------------------------------------------
-
-const MAX_CHUNK_SIZE: usize = 50;

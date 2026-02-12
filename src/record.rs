@@ -2,12 +2,13 @@
 //  Record
 // ------------------------------------------------------------------
 
+use crate::START_INSTANT;
 use cpal::traits::{DeviceTrait, StreamTrait};
 use crossbeam_channel::{Receiver, Sender};
 use std::sync::OnceLock;
 use std::sync::{
-  Arc, Mutex,
   atomic::{AtomicBool, AtomicU64, Ordering},
+  Arc, Mutex,
 };
 use std::thread;
 use std::time::{Duration, Instant};
@@ -258,6 +259,10 @@ fn build_input_f32(
               ),
             );
             if dur_ms >= min_utt_ms {
+              crate::util::SPEECH_END_AT.store(
+                crate::util::now_ms(&START_INSTANT),
+                std::sync::atomic::Ordering::SeqCst,
+              );
               let _ = tx_utt.send(crate::audio::AudioChunk {
                 data: audio,
                 channels,
@@ -287,7 +292,26 @@ fn build_input_f32(
         let zeros = vec![0.0f32; data.len()];
         chunk_and_send(&zeros, channels, sample_rate, &tx, &accum);
       } else {
-        chunk_and_send(data, channels, sample_rate, &tx, &accum);
+        // FIX: if input is multichannel interleaved, downmix to mono before resampling
+        let ch = (channels as usize).max(1);
+        let mono: Vec<f32> = if ch == 1 {
+          data.to_vec()
+        } else {
+          let frames = data.len() / ch;
+          let mut out = Vec::with_capacity(frames);
+          for f in 0..frames {
+            let mut acc = 0.0f32;
+            let base = f * ch;
+            for c in 0..ch {
+              acc += data[base + c];
+            }
+            out.push(acc / ch as f32);
+          }
+          out
+        };
+
+        let resampled = crate::audio::resample_to(&mono, 1, sample_rate, 16000);
+        chunk_and_send(&resampled, 1, 16000, &tx, &accum);
       }
     },
     move |e| err_fn(e),
@@ -333,9 +357,10 @@ fn build_input_i16(
         return;
       }
 
+      // Convert to f32 interleaved (preserve existing behavior)
       let mut tmp = Vec::with_capacity(data.len());
       for &s in data {
-        tmp.push(s as f32 / i16::MAX as f32);
+        tmp.push((s as f32) / 32768.0);
       }
 
       let local_peak = peak_abs(&tmp);
@@ -396,11 +421,26 @@ fn build_input_i16(
               ),
             );
             if dur_ms >= min_utt_ms {
+              crate::util::SPEECH_END_AT.store(
+                crate::util::now_ms(&START_INSTANT),
+                std::sync::atomic::Ordering::SeqCst,
+              );
               let _ = tx_utt.send(crate::audio::AudioChunk {
                 data: audio,
                 channels,
                 sample_rate,
               });
+            } else {
+              // FIX: match f32 behavior (warn + drop)
+              crate::log::log(
+                "warning",
+                &format!(
+                  "[{}ms] utterance too short ({}ms < {}ms), dropped",
+                  crate::util::now_ms(start_instant),
+                  dur_ms,
+                  min_utt_ms
+                ),
+              );
             }
           }
         }
@@ -415,7 +455,26 @@ fn build_input_i16(
         let zeros = vec![0.0f32; tmp.len()];
         chunk_and_send(&zeros, channels, sample_rate, &tx, &accum);
       } else {
-        chunk_and_send(&tmp, channels, sample_rate, &tx, &accum);
+        // FIX: downmix interleaved to mono before resampling
+        let ch = (channels as usize).max(1);
+        let mono: Vec<f32> = if ch == 1 {
+          tmp.clone()
+        } else {
+          let frames = tmp.len() / ch;
+          let mut out = Vec::with_capacity(frames);
+          for f in 0..frames {
+            let mut acc = 0.0f32;
+            let base = f * ch;
+            for c in 0..ch {
+              acc += tmp[base + c];
+            }
+            out.push(acc / ch as f32);
+          }
+          out
+        };
+
+        let resampled = crate::audio::resample_to(&mono, 1, sample_rate, 16000);
+        chunk_and_send(&resampled, 1, 16000, &tx, &accum);
       }
     },
     move |e| err_fn(e),
@@ -457,28 +516,24 @@ fn build_input_u16(
       if recording_paused.load(Ordering::Relaxed) {
         return;
       }
-      let local_peak = peak_abs(
-        &data
-          .iter()
-          .map(|&s| (s as f32 / u16::MAX as f32) * 2.0 - 1.0)
-          .collect::<Vec<f32>>(),
-      );
-      if let Ok(mut p) = peak.lock() {
-        *p = local_peak;
-      }
 
       if stop_all_rx.try_recv().is_ok() {
         return;
       }
 
-      let tmp = data
-        .iter()
-        .map(|&s| (s as f32 / u16::MAX as f32) * 2.0 - 1.0)
-        .collect::<Vec<f32>>();
+      // Convert once (preserve existing behavior), and reuse for peak + utt_buf + resample
+      let mut tmp = Vec::with_capacity(data.len());
+      for &s in data {
+        tmp.push((s as f32 / u16::MAX as f32) * 2.0 - 1.0);
+      }
+
+      let local_peak = peak_abs(&tmp);
+      if let Ok(mut p) = peak.lock() {
+        *p = local_peak;
+      }
 
       if local_peak >= vad_thresh {
-        last_voice_ms.store(crate::util::now_ms(start_instant), Ordering::Relaxed);
-        ui.speaking.store(true, Ordering::Relaxed);
+        // FIX: remove duplicate stores
         last_voice_ms.store(crate::util::now_ms(start_instant), Ordering::Relaxed);
         ui.speaking.store(true, Ordering::Relaxed);
 
@@ -514,6 +569,9 @@ fn build_input_u16(
         let last = last_voice_ms.load(Ordering::Relaxed);
         if last > 0 && crate::util::now_ms(start_instant).saturating_sub(last) >= end_silence_ms {
           crate::log::log("info", "Silence detected");
+          // FIX: ensure UI clears speaking state on silence
+          ui.speaking.store(false, Ordering::Relaxed);
+
           in_speech.store(false, Ordering::Relaxed);
           stop_sent.store(false, Ordering::Relaxed);
 
@@ -531,6 +589,10 @@ fn build_input_u16(
               ),
             );
             if dur_ms >= min_utt_ms {
+              crate::util::SPEECH_END_AT.store(
+                crate::util::now_ms(&START_INSTANT),
+                std::sync::atomic::Ordering::SeqCst,
+              );
               let _ = tx_utt.send(crate::audio::AudioChunk {
                 data: audio,
                 channels,
@@ -550,7 +612,26 @@ fn build_input_u16(
         let zeros = vec![0.0f32; tmp.len()];
         chunk_and_send(&zeros, channels, sample_rate, &tx, &accum);
       } else {
-        chunk_and_send(&tmp, channels, sample_rate, &tx, &accum);
+        // FIX: downmix interleaved to mono before resampling
+        let ch = (channels as usize).max(1);
+        let mono: Vec<f32> = if ch == 1 {
+          tmp.clone()
+        } else {
+          let frames = tmp.len() / ch;
+          let mut out = Vec::with_capacity(frames);
+          for f in 0..frames {
+            let mut acc = 0.0f32;
+            let base = f * ch;
+            for c in 0..ch {
+              acc += tmp[base + c];
+            }
+            out.push(acc / ch as f32);
+          }
+          out
+        };
+
+        let resampled = crate::audio::resample_to(&mono, 1, sample_rate, 16000);
+        chunk_and_send(&resampled, 1, 16000, &tx, &accum);
       }
     },
     move |e| err_fn(e),

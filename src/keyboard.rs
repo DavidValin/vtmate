@@ -3,13 +3,14 @@
 // ------------------------------------------------------------------
 
 use crate::state::{decrease_voice_speed, increase_voice_speed};
+use crate::tts;
 use crossbeam_channel::{Receiver, Sender};
 use crossterm::{
   event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
   terminal,
 };
 use std::sync::{
-  Arc,
+  Arc, Mutex,
   atomic::{AtomicBool, Ordering},
 };
 use std::time::Duration;
@@ -23,6 +24,9 @@ pub fn keyboard_thread(
   paused: Arc<AtomicBool>,
   playback_active: Arc<AtomicBool>,
   recording_paused: Arc<AtomicBool>,
+  voice_state: Arc<Mutex<String>>,
+  tts: String,
+  language: String,
 ) {
   // Raw mode lets us capture single key presses (space to pause/resume).
   let _ = terminal::enable_raw_mode();
@@ -59,14 +63,42 @@ pub fn keyboard_thread(
             let _ = stop_all_tx.try_send(());
             break;
           }
+
+          // increase voice speed
           KeyCode::Up => {
             increase_voice_speed();
           }
+
+          // decrease voice speed
           KeyCode::Down => {
             decrease_voice_speed();
           }
+
+          // swap to previous voice
+          KeyCode::Left => {
+            let voices = tts::get_voices_for(&tts, &language);
+            let mut current = voice_state.lock().unwrap();
+            if !voices.is_empty() {
+              let pos = voices.iter().position(|v| *v == *current).unwrap_or(0);
+              let new_idx = if pos == 0 { voices.len() - 1 } else { pos - 1 };
+              *current = voices[new_idx].to_string();
+            }
+          }
+
+          // swap to next voice
+          KeyCode::Right => {
+            let voices = tts::get_voices_for(&tts, &language);
+            let mut current = voice_state.lock().unwrap();
+            if !voices.is_empty() {
+              let pos = voices.iter().position(|v| *v == *current).unwrap_or(0);
+              let new_idx = (pos + 1) % voices.len();
+              *current = voices[new_idx].to_string();
+            }
+          }
           _ => {}
         }
+
+        // pause/resume recording
         if (k.code == KeyCode::Char('p') || k.code == KeyCode::Char('P'))
           && k.modifiers.contains(KeyModifiers::CONTROL)
         {

@@ -1,19 +1,10 @@
-// avoiding printing external whisper logs
-extern "C" fn noop_whisper_log(
-  _: u32,
-  _: *const std::os::raw::c_char,
-  _: *mut std::os::raw::c_void,
-) {
-} // intentionally do nothing
-
 use clap::Parser;
 use cpal::traits::DeviceTrait;
 use crossbeam_channel::{bounded, unbounded};
 use std::process;
 use std::sync::{Arc, OnceLock};
-use std::thread;
+use std::thread::{self, Builder};
 use std::time::Instant;
-use whisper_rs;
 
 mod assets;
 mod audio;
@@ -33,7 +24,15 @@ mod util;
 static START_INSTANT: OnceLock<Instant> = OnceLock::new();
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  env_logger::init();
+  whisper_rs::install_logging_hooks();
+
+  if !util::terminal_supported() {
+    log::log("error", "Terminal does not support colors or emojis. Please use a different terminal. exiting...");
+    process::exit(1);
+  }
   assets::ensure_piper_espeak_env();
+  assets::ensure_assets_env();
 
   crossterm::execute!(
     std::io::stdout(),
@@ -47,13 +46,14 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   ███████║██║█████╗██╔████╔██║███████║   ██║   █████╗  
   ██╔══██║██║╚════╝██║╚██╔╝██║██╔══██║   ██║   ██╔══╝  
   ██║  ██║██║      ██║ ╚═╝ ██║██║  ██║   ██║   ███████╗
-  ╚═╝  ╚═╝╚═╝      ╚═╝     ╚═╝╚═╝  ╚═╝   ╚═╝   ╚══════╝
-  "#
+  ╚═╝  ╚═╝╚═╝      ╚═╝     ╚═╝╚═╝  ╚═╝   ╚═╝   ╚══════╝"#
   );
 
-  let _ = START_INSTANT.get_or_init(Instant::now);
+  println!("    \x1b[90mv{}\x1b[0m\n\n\n\n\n", env!("CARGO_PKG_VERSION"));
 
+  let _ = START_INSTANT.get_or_init(Instant::now);  
   let args = crate::config::Args::parse();
+
 
   if args.list_voices {
     tts::print_voices();
@@ -61,20 +61,16 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   }
 
   // silence external whisper logs
-  unsafe {
-    whisper_rs::set_log_callback(Some(noop_whisper_log), std::ptr::null_mut());
-  }
+  // unsafe {
+  //   whisper_rs::set_log_callback(Some(noop_whisper_log), std::ptr::null_mut());
+  // }
+  // show external whisper.cpp logs
+
   crate::log::set_verbose(args.verbose);
+
+  // Resolve Whisper model path and log it
   let whisper_path = args.resolved_whisper_model_path();
-  if let Err(e) = crate::stt::whisper_warmup(&whisper_path) {
-    crate::log::log(
-      "error",
-      &format!(
-        "Whisper failed: {e}; check that the whisper model at {whisper_path} is a valid whisper model"
-      ),
-    );
-    process::exit(1);
-  }
+  crate::log::log("info", &format!("Whisper model path: {}", whisper_path));
 
   let vad_thresh: f32 = args.sound_threshold_peak;
   let end_silence_ms: u64 = args.end_silence_ms;
@@ -134,14 +130,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     &format!("Playback stream SR (truth): {}", out_sample_rate),
   );
 
-  // application
-  let state = Arc::new(state::AppState::new());
-  let recording_paused = state.recording_paused.clone();
-  let recording_paused_for_record = recording_paused.clone();
-
-  // set global state for speed functions
-  state::GLOBAL_STATE.set(state.clone()).unwrap();
-
   // broadcast stop signal to all threads
   let (stop_all_tx, stop_all_rx) = bounded::<()>(1);
   // channel for recording audio chunks
@@ -157,26 +145,21 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let stop_all_rx_for_record = stop_all_rx.clone();
   let stop_all_rx_for_keyboard = stop_all_rx.clone();
   let (stop_play_tx, stop_play_rx) = bounded::<()>(2); // stop playback signal
-  let interrupt_counter = state.interrupt_counter.clone();
-  let paused = state.playback.paused.clone();
-  let playback_active = state.playback.playback_active.clone();
-  let gate_until_ms = state.playback.gate_until_ms.clone();
-
-  let ui = state.ui.clone();
-  let volume = state.playback.volume.clone();
-  let conversation_history = state.conversation_history.clone();
-  let volume_play = volume.clone();
-  let volume_rec = volume.clone();
-  let status_line = state.status_line.clone();
-  let print_lock = state.print_lock.clone();
 
   let available_langs = tts::get_all_available_languages();
-if !available_langs.contains(&args.language.as_str()) {
-    log::log("error", &format!("Unsupported language '{}'. Next languages are supported: {}", args.language, available_langs.join(", ")));
+  if !available_langs.contains(&args.language.as_str()) {
+    log::log(
+      "error",
+      &format!(
+        "Unsupported language '{}'. Next languages are supported: {}",
+        args.language,
+        available_langs.join(", ")
+      ),
+    );
     process::exit(1);
-}
+  }
 
-let voice_selected = if let Some(v) = &args.voice {
+  let voice_selected = if let Some(v) = &args.voice {
     v.clone()
   } else {
     if args.tts == "opentts" {
@@ -196,12 +179,27 @@ let voice_selected = if let Some(v) = &args.voice {
 
   let valid_voices: Vec<&str> = tts::get_voices_for(&args.tts, &args.language);
   if valid_voices.is_empty() {
-      log::log("error", &format!("No available voices for TTS '{}' and language '{}'.", args.tts, args.language));
-      process::exit(1);
+    log::log(
+      "error",
+      &format!(
+        "No available voices for TTS '{}' and language '{}'.",
+        args.tts, args.language
+      ),
+    );
+    process::exit(1);
   }
   if !valid_voices.contains(&voice_selected.as_str()) {
-      log::log("error", &format!("Invalid voice '{}' for TTS '{}' and language '{}'. Available voices: {}", voice_selected, args.tts, args.language, valid_voices.join(", ")));
-      process::exit(1);
+    log::log(
+      "error",
+      &format!(
+        "Invalid voice '{}' for TTS '{}' and language '{}'. Available voices: {}",
+        voice_selected,
+        args.tts,
+        args.language,
+        valid_voices.join(", ")
+      ),
+    );
+    process::exit(1);
   }
   log::log("info", &format!("TTS system: {}", args.tts));
   if args.tts == "kokoro" {
@@ -211,6 +209,25 @@ let voice_selected = if let Some(v) = &args.voice {
   log::log("info", &format!("TTS voice: {}", voice_selected));
   log::log("info", &format!("LLM engine: ollama"));
   log::log("info", &format!("ollama base url: {}", args.ollama_url));
+
+  // initialize state after voice_selected
+  let state = Arc::new(state::AppState::new_with_voice(voice_selected.clone()));
+  let recording_paused = state.recording_paused.clone();
+  let recording_paused_for_record = recording_paused.clone();
+  state::GLOBAL_STATE.set(state.clone()).unwrap();
+
+  let interrupt_counter = state.interrupt_counter.clone();
+  let paused = state.playback.paused.clone();
+  let playback_active = state.playback.playback_active.clone();
+  let gate_until_ms = state.playback.gate_until_ms.clone();
+
+  let ui = state.ui.clone();
+  let volume = state.playback.volume.clone();
+  let conversation_history = state.conversation_history.clone();
+  let volume_play = volume.clone();
+  let volume_rec = volume.clone();
+  let status_line = state.status_line.clone();
+  let print_lock = state.print_lock.clone();
 
   // ---- Thread: UI Thread ----
   let ui_handle = ui::spawn_ui_thread(
@@ -251,46 +268,51 @@ let voice_selected = if let Some(v) = &args.voice {
   });
 
   // ---- Thread: record ----
-  let rec_handle = thread::spawn({
-    let start_instant = &START_INSTANT;
-    let device = in_dev.clone();
-    let supported = in_cfg_supported;
-    let config = in_cfg;
-    let tx = tx_rec.clone();
-    let tx_utt = tx_utt.clone();
-    let vad_thresh = vad_thresh;
-    let end_silence_ms = end_silence_ms;
-    let playback_active = playback_active.clone();
-    let gate_until_ms = gate_until_ms.clone();
-    let stop_play_tx = stop_play_tx.clone();
-    let interrupt_counter = interrupt_counter.clone();
-    let stop_all_rx = stop_all_rx_for_record.clone();
-    let peak = ui.peak.clone();
-    let ui = ui.clone();
-    move || {
-      record::record_thread(
-        start_instant,
-        device,
-        supported,
-        config,
-        tx,
-        tx_utt,
-        vad_thresh,
-        end_silence_ms,
-        playback_active,
-        gate_until_ms,
-        stop_play_tx,
-        interrupt_counter,
-        stop_all_rx,
-        peak,
-        ui,
-        volume_rec.clone(),
-        recording_paused_for_record.clone(),
-      )
-    }
-  });
-
+  let rec_handle = Builder::new()
+    .name("record_thread".to_string())
+    .stack_size(4 * 1024 * 1024)
+    .spawn({
+      let start_instant = &START_INSTANT;
+      let device = in_dev.clone();
+      let supported = in_cfg_supported;
+      let config = in_cfg;
+      let tx = tx_rec.clone();
+      let tx_utt = tx_utt.clone();
+      let vad_thresh = vad_thresh;
+      let end_silence_ms = end_silence_ms;
+      let playback_active = playback_active.clone();
+      let gate_until_ms = gate_until_ms.clone();
+      let stop_play_tx = stop_play_tx.clone();
+      let interrupt_counter = interrupt_counter.clone();
+      let stop_all_rx = stop_all_rx_for_record.clone();
+      let peak = ui.peak.clone();
+      let ui = ui.clone();
+      move || {
+        record::record_thread(
+          start_instant,
+          device,
+          supported,
+          config,
+          tx,
+          tx_utt,
+          vad_thresh,
+          end_silence_ms,
+          playback_active,
+          gate_until_ms,
+          stop_play_tx,
+          interrupt_counter,
+          stop_all_rx,
+          peak,
+          ui,
+          volume_rec.clone(),
+          recording_paused_for_record.clone(),
+        )
+      }
+    })?;
+  
   // ---- Thread: conversation ----
+  // clone state for conversation thread to avoid move
+  let state_conv = state.clone();
   let conv_handle = thread::spawn({
     let out_sample_rate = out_sample_rate;
     let interrupt_counter = interrupt_counter.clone();
@@ -300,15 +322,17 @@ let voice_selected = if let Some(v) = &args.voice {
     let print_lock = print_lock.clone();
     let stop_all_tx_conv = stop_all_tx.clone();
     let conversation_history = conversation_history.clone();
+    let whisper_path = whisper_path.clone();
     move || {
       conversation::conversation_thread(
-        &voice_selected,
+        state_conv.voice.clone(),
         rx_utt,
         tx_play.clone(),
         stop_all_rx.clone(),
         stop_all_tx_conv,
         out_sample_rate,
         interrupt_counter,
+        whisper_path,
         args,
         ui,
         status_line,
@@ -319,6 +343,8 @@ let voice_selected = if let Some(v) = &args.voice {
   });
 
   // ---- Thread: keyboard ----
+  // clone state for keyboard thread
+  let state_key = state.clone();
   let key_handle = thread::spawn({
     let stop_all_tx = stop_all_tx.clone();
     let stop_all_rx = stop_all_rx_for_keyboard.clone();
@@ -331,6 +357,9 @@ let voice_selected = if let Some(v) = &args.voice {
         paused,
         playback_active,
         recording_paused.clone(),
+        state_key.voice.clone(),
+        args.tts.clone(),
+        args.language.clone(),
       )
     }
   });

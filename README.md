@@ -5,7 +5,10 @@ See it in action: [Demo](https://www.youtube.com/watch?v=x0RAX3-PLnE)
 
 ### Status
 
-✅ First beta released. Currently under heavy development
+- ✅ First Release Candidate ready!
+- ✅ Tested in MacOS
+- ⚠️ Linux version not ready yet
+- ⚠️ Windows version not ready yet
 
 ## How it works
 
@@ -26,12 +29,12 @@ See it in action: [Demo](https://www.youtube.com/watch?v=x0RAX3-PLnE)
 - Voice interrupt: `the agent stops talking if you interrupt via voice`
 - Pause / resume: `press "<CONTROL> + <ALT> + p" to pause voice recording / resume. Useful to it running it during the day and switch it on when needed`
 - Voice speed change: `change the agent voice speed by pressing <ARROW_UP> / <ARROW_DOWN>. Do this before asking anything new`
-- Use any model available in ollama (small models reply faster)
-- Integrated whisper
-- Integrated kokoro TTS system
-- Interface with OpenTTS system
-- Supports ollama or llama-server
+- Integrated `whisper`
+- Integrated `kokoro TTS` system
+- Interface with `OpenTTS` system
+- Supports `ollama` or `llama-server` or `llamafile`
 - 28 languages supported (`ai-mate --list-voices`)
+- Use any gguf model from huggingface.com or ollama models (small models reply faster)
 
 ## LLM engine support
 
@@ -47,15 +50,11 @@ You can run the models locally (by default) or remotely by configuring the base 
 
 ## Installation
 
-1. **Download ai-mate**
+### 📌 1. **Download ai-mate**
 - `https://github.com/DavidValin/ai-mate/releases`
 - Move the binary to a folder in your $PATH so you can use `ai-mate` command anywhere
 
-2. **Download whisper model**
-- Download model, example: `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q5_0.bin?download=true`
-- Place the model under  `~/.whisper-models/ggml-medium-q5_0.bin`
-
-3. **Install llm engine (needed for ai responses)**
+### 📌 2. **Install llm engine (needed for ai responses)**
 
 Option A- ollama (the default)
 - Install `https://ollama.com/download`.
@@ -69,11 +68,11 @@ Option C- llama-server support.
 - Install llama.cpp: `https://github.com/ggml-org/llama.cpp`.
 - Download a gguf model: `https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q8_0.gguf?download=true`.
 
-4. **(Windows only) Install supported terminal**
+### 📌 3. **(Windows only) Install supported terminal**
 
 - Install Windows Terminal (which supports emojis): `https://apps.microsoft.com/detail/9n0dx20hk701` (use this terminal to run ai-mate)
 
-5. **(Optional: OpenTTS support)**
+### 📌 4. **(Optional) OpenTTS support**
 
 - `docker pull synesthesiam/opentts:all`
 
@@ -89,15 +88,15 @@ ai-mate
 llamafile example:
 
 ```
-./Meta-Llama-3-8B-Instruct.Q8_0.llamafile
-ai-mate --tts llama-server
+./Meta-Llama-3-8B-Instruct.Q8_0.llamafile --server
+ai-mate --llm llama-server
 ```
 
 llama-server example:
 
 ```
-llama-server -m Meta-Llama-3-8B-Instruct.Q8_0.gguf --jinja -c 100000
-ai-mate --tts llama-server
+llama-server -m Meta-Llama-3-8B-Instruct.Q8_0.gguf
+ai-mate --llm llama-server
 ```
 
 Below are the default parameters, which you can override, example:
@@ -109,7 +108,7 @@ ai-mate \
   --language en \
   --sound-threshold-peak 0.10 \
   --end-silence-ms 850 \
-  --whisper-model-path ~/.whisper-models/ggml-medium-q5_0.bin \
+  --whisper-model-path ~/.whisper-models/ggml-tiny.bin \
   --ollama-model "llama3.2:3b" \
   --ollama-url "http://localhost:11434/api/generate"
 ```
@@ -119,6 +118,8 @@ You can just override a specific variable, for example:
 ```
 ai-mate --tts opentts --ollama-model "llama3.2:3b" --language ru
 ai-mate --ollama-model "llama3.2:3b" --language zh
+ai-mate --llm llama-server --language it
+ai-mate --language es --whisper-model-path ~/.whisper-models/ggml-medium-q5_0.bin`
 ```
 
 If you want to use OpenTTS, start the docker service first: `docker run --rm --platform=linux/amd64 -p 5500:5500 synesthesiam/opentts:all` (it will pull the image the first time). Adjust the platform as needed depending on your hardware. 
@@ -129,7 +130,6 @@ If you need help:
 ai-mate --help
 ```
 
-
 ### Build ai-mate from source code
 
 Use cross_build.sh script, get help on how to use it:
@@ -138,12 +138,13 @@ Use cross_build.sh script, get help on how to use it:
 ./cross_build.sh -h
 ```
 
+* During build, tts and stt models are fetched locally
 * Mac build only works from native MacOS
 * Windows build only works from native Windows (requires https://visualstudio.microsoft.com/visual-cpp-build-tools)
 
 Examples:
 ```
-./cross_build.sh --os linux --arch amd64,arm64
+WITH_CUDA=1 WITH_ROCM=0 ./cross_build.sh --os linux --arch amd64
 ./cross_build.sh --os windows --arch amd64
 ./cross_build.sh --os macos --arch arm64,amd64
 ```
@@ -166,8 +167,13 @@ alias ai-mate_es_llama='ai-mate --ollama-model "llama3:8b" --language es'
 
 ## Useful to know
 
-- ai-mate unzips `espeak-ng-data.tar.gz` in ~/.ai-mate directory
-- kokoro-tiny autodownloads the models if not found locally under `~/.cache/k`
+ai-mate self contains espeak-ng-data, the whisper tiny & small models and kokoro model and voices which will be autoextracted when running ai-mate if they are not found in next locations:
+
+- `~/.ai-mate/espeak-ng-data.tar.gz`
+- `~/.whisper-models/ggml-tiny.bin`
+- `~/.whisper-models/ggml-small.bin`
+- `~/.cache/k/0.onnx`
+- `~/.cache/k/0.bin`
 
 ## Language support
 
