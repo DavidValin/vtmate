@@ -4,6 +4,7 @@
 
 use crossbeam_channel::{Receiver, Sender};
 use kokoro_tiny::TtsEngine;
+mod kokoro_tts;
 use reqwest;
 use std::io::{BufReader, Read};
 use std::sync::OnceLock;
@@ -11,6 +12,8 @@ use std::sync::{
   Arc, Mutex,
   atomic::{AtomicU64, Ordering},
 };
+use std::thread;
+use std::time::Duration;
 use urlencoding;
 
 // API
@@ -67,11 +70,11 @@ pub fn speak(
       stop_all_rx,
       interrupt_counter,
       expected_interrupt,
-    )}?;
-    Ok(outcome)
+    )
+  }?;
+  Ok(outcome)
 }
 
-  
 //  Kokoro Tiny TTS integration -------------------------------------
 static KOKORO_ENGINE: OnceLock<Arc<Mutex<TtsEngine>>> = OnceLock::new();
 // +++++++++++++++++++++++++++++
@@ -122,10 +125,8 @@ pub const KOKORO_VOICES_PER_LANGUAGE: &[(&str, &[&str])] = &[
     "es",
     &[
       // Spanish - female
-      "ef_dora",
-      // Spanish - male
-      "em_alex",
-      "em_santa",
+      "ef_dora", // Spanish - male
+      "em_alex", "em_santa",
     ],
   ),
   // Mandarin chinese language
@@ -202,7 +203,7 @@ pub const KOKORO_VOICES_PER_LANGUAGE: &[(&str, &[&str])] = &[
 ];
 
 pub const DEFAULTKOKORO_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
-  ("en", "bm_fable"),
+  ("en", "bm_daniel"),
   ("es", "em_santa"),
   ("zh", "zf_xiaoni"),
   ("ja", "jm_kumo"),
@@ -212,62 +213,81 @@ pub const DEFAULTKOKORO_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
   ("fr", "ff_siwis"),
 ];
 
-
 pub fn get_all_available_languages() -> Vec<&'static str> {
-    let mut langs: Vec<&str> = KOKORO_VOICES_PER_LANGUAGE.iter().map(|(lang, _)| *lang).collect();
-    langs.extend(DEFAULT_OPENTTS_VOICES_PER_LANGUAGE.iter().map(|(lang, _)| *lang));
-    langs.sort();
-    langs.dedup();
-    langs
+  let mut langs: Vec<&str> = KOKORO_VOICES_PER_LANGUAGE
+    .iter()
+    .map(|(lang, _)| *lang)
+    .collect();
+  langs.extend(
+    DEFAULT_OPENTTS_VOICES_PER_LANGUAGE
+      .iter()
+      .map(|(lang, _)| *lang),
+  );
+  langs.sort();
+  langs.dedup();
+  langs
 }
 
 pub fn get_voices_for(tts: &str, language: &str) -> Vec<&'static str> {
-    match tts {
-        "kokoro" => {
-            for (lang, voices) in KOKORO_VOICES_PER_LANGUAGE.iter() {
-                if *lang == language {
-                    return voices.to_vec();
-                }
-            }
-            Vec::new()
+  match tts {
+    "kokoro" => {
+      for (lang, voices) in KOKORO_VOICES_PER_LANGUAGE.iter() {
+        if *lang == language {
+          return voices.to_vec();
         }
-        "opentts" => {
-            for (lang, voice) in DEFAULT_OPENTTS_VOICES_PER_LANGUAGE.iter() {
-                if *lang == language {
-                    return vec![*voice];
-                }
-            }
-            Vec::new()
-        }
-        _ => Vec::new(),
+      }
+      Vec::new()
     }
+    "opentts" => {
+      for (lang, voice) in DEFAULT_OPENTTS_VOICES_PER_LANGUAGE.iter() {
+        if *lang == language {
+          return vec![*voice];
+        }
+      }
+      Vec::new()
+    }
+    _ => Vec::new(),
+  }
 }
 
 pub fn print_voices() {
-    let langs = get_all_available_languages();
-    // High Quality (Kokoro)
-        println!("🏆 High Quality Voices\n======================================================\n{:<8}\t{:<12}\t{:<2}\t{}", "TTS", "Language", "Flag", "Voices");
-        println!("======================================================");
+  let langs = get_all_available_languages();
+  // High Quality (Kokoro)
+  println!(
+    "🏆 High Quality Voices\n======================================================\n{:<8}\t{:<12}\t{:<2}\t{}",
+    "TTS", "Language", "Flag", "Voices"
+  );
+  println!("======================================================");
 
-    for lang in langs.iter() {
-        let voices = get_voices_for("kokoro", lang);
-        if voices.is_empty() { continue; }
-        let flag = crate::util::get_flag(lang);
-        let voices_str = voices.join(", ");
-        println!("{:<8}\t{:<12}\t{:<2}\t{}", "kokoro", lang, flag, voices_str);
+  for lang in langs.iter() {
+    let voices = get_voices_for("kokoro", lang);
+    if voices.is_empty() {
+      continue;
     }
-    println!();
-    // Standard Quality (OpenTTS)
-        println!("Standard Quality Voices\n======================================================\n{:<8}\t{:<12}\t{:<2}\t{}", "TTS", "Language", "Flag", "Voices");
-        println!("======================================================");
+    let flag = crate::util::get_flag(lang);
+    let voices_str = voices.join(", ");
+    println!("{:<8}\t{:<12}\t{:<2}\t{}", "kokoro", lang, flag, voices_str);
+  }
+  println!();
+  // Standard Quality (OpenTTS)
+  println!(
+    "Standard Quality Voices\n======================================================\n{:<8}\t{:<12}\t{:<2}\t{}",
+    "TTS", "Language", "Flag", "Voices"
+  );
+  println!("======================================================");
 
-    for lang in langs.iter() {
-        let voices = get_voices_for("opentts", lang);
-        if voices.is_empty() { continue; }
-        let flag = crate::util::get_flag(lang);
-        let voices_str = voices.join(", ");
-        println!("{:<8}\t{:<12}\t{:<2}\t{}", "opentts", lang, flag, voices_str);
+  for lang in langs.iter() {
+    let voices = get_voices_for("opentts", lang);
+    if voices.is_empty() {
+      continue;
     }
+    let flag = crate::util::get_flag(lang);
+    let voices_str = voices.join(", ");
+    println!(
+      "{:<8}\t{:<12}\t{:<2}\t{}",
+      "opentts", lang, flag, voices_str
+    );
+  }
 }
 
 pub fn speak_via_kokoro_stream(
@@ -323,14 +343,6 @@ pub fn start_kokoro_engine() -> Result<(), Box<dyn std::error::Error + Send + Sy
 }
 
 //  OpenTTS integration ---------------------------------------------
-// +++++++++++++++++++++++++++++
-
-mod kokoro_tts;
-
-// Streaming wrapper for Kokoro
-use std::thread;
-use std::time::Duration;
-
 // +++++++++++++++++++++++++++++
 
 pub const DEFAULT_OPENTTS_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[

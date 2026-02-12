@@ -3,50 +3,14 @@
 // ------------------------------------------------------------------
 
 use cpal::traits::{DeviceTrait, StreamTrait};
-use crossbeam_channel::{select, Receiver};
+use crossbeam_channel::{Receiver, select};
 use std::collections::VecDeque;
 use std::sync::OnceLock;
 use std::sync::{
-  atomic::{AtomicBool, AtomicU64, Ordering},
   Arc, Mutex,
+  atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::thread;
-
-fn convert_channels(input: &[f32], in_channels: u16, out_channels: u16) -> Vec<f32> {
-  if in_channels == out_channels {
-    return input.to_vec();
-  }
-  let in_ch = in_channels as usize;
-  let out_ch = out_channels as usize;
-  let frames = input.len() / in_ch;
-  let mut out = Vec::with_capacity(frames * out_ch);
-  for f in 0..frames {
-    let frame = &input[f * in_ch..f * in_ch + in_ch];
-    match (in_ch, out_ch) {
-      (1, oc) => {
-        let v = frame[0];
-        for _ in 0..oc {
-          out.push(v);
-        }
-      }
-      (ic, 1) => {
-        let sum: f32 = frame.iter().copied().sum();
-        out.push(sum / ic as f32);
-      }
-      _ => {
-        let n = in_ch.min(out_ch);
-        for i in 0..n {
-          out.push(frame[i]);
-        }
-        for _ in n..out_ch {
-          out.push(0.0);
-        }
-      }
-    }
-  }
-  out
-}
-
 use std::time::Duration;
 use std::time::Instant;
 
@@ -360,4 +324,42 @@ pub fn playback_thread(
 
   drop(stream);
   Ok(())
+}
+
+// PRIVATE
+// ------------------------------------------------------------------
+
+fn convert_channels(input: &[f32], in_channels: u16, out_channels: u16) -> Vec<f32> {
+  if in_channels == out_channels {
+    return input.to_vec();
+  }
+  let in_ch = in_channels as usize;
+  let out_ch = out_channels as usize;
+  let frames = input.len() / in_ch;
+  let mut out = Vec::with_capacity(frames * out_ch);
+  for f in 0..frames {
+    let frame = &input[f * in_ch..f * in_ch + in_ch];
+    match (in_ch, out_ch) {
+      (1, oc) => {
+        let v = frame[0];
+        for _ in 0..oc {
+          out.push(v);
+        }
+      }
+      (ic, 1) => {
+        let sum: f32 = frame.iter().copied().sum();
+        out.push(sum / ic as f32);
+      }
+      _ => {
+        let n = in_ch.min(out_ch);
+        for i in 0..n {
+          out.push(frame[i]);
+        }
+        for _ in n..out_ch {
+          out.push(0.0);
+        }
+      }
+    }
+  }
+  out
 }
