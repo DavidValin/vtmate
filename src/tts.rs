@@ -203,7 +203,7 @@ pub const KOKORO_VOICES_PER_LANGUAGE: &[(&str, &[&str])] = &[
 ];
 
 pub const DEFAULTKOKORO_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
-  ("en", "bm_daniel"),
+  ("en", "bm_george"),
   ("es", "em_santa"),
   ("zh", "zf_xiaoni"),
   ("ja", "jm_kumo"),
