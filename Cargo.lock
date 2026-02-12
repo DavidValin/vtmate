@@ -31,6 +31,7 @@ dependencies = [
  "hex",
  "hound",
  "kokoro-tiny",
+ "once_cell",
  "reqwest",
  "serde",
  "serde_json",

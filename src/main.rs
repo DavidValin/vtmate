@@ -39,6 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     process::exit(1);
   }
   assets::ensure_piper_espeak_env();
+  assets::ensure_assets_env();
 
   crossterm::execute!(
     std::io::stdout(),
