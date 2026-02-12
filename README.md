@@ -132,22 +132,27 @@ ai-mate --help
 
 ### Build ai-mate from source code
 
-Use cross_build.sh script, get help on how to use it:
-
+***MacOS***
+NOTE: 
 ```
-./cross_build.sh -h
+./build_macos.sh
+MAC_WITH_OPENBLAS=1 ./build_macos.sh
+```
+
+***Linux***
+```
+./build_linux.sh --arch all
+LINUX_WITH_VULKAN=0 ./build_linux.sh --arch amd64
+```
+
+***Windows***
+NOTE: (requires https://visualstudio.microsoft.com/visual-cpp-build-tools)
+```
+build_windows.bat
+set WIN_WITH_VULKAN=0 && build_windows.bat
 ```
 
 * During build, tts and stt models are fetched locally
-* Mac build only works from native MacOS
-* Windows build only works from native Windows (requires https://visualstudio.microsoft.com/visual-cpp-build-tools)
-
-Examples:
-```
-WITH_CUDA=1 WITH_ROCM=0 ./cross_build.sh --os linux --arch amd64
-./cross_build.sh --os windows --arch amd64
-./cross_build.sh --os macos --arch arm64,amd64
-```
 
 The built binaries will be placed under `./dist`
 
