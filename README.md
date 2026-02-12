@@ -55,8 +55,8 @@ You can run the models locally (by default) or remotely by configuring the base 
 - Move the binary to a folder in your $PATH so you can use `ai-mate` command anywhere
 
 ### 📌 2. **Download whisper model**
-- Download model, example: `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q5_0.bin?download=true`
-- Place the model under  `~/.whisper-models/ggml-medium-q5_0.bin`
+- Download model, example: `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin?download=true`
+- Place the model under  `~/.whisper-models/ggml-small.bin`
 
 ### 📌 3. **Install llm engine (needed for ai responses)**
 
@@ -112,7 +112,7 @@ ai-mate \
   --language en \
   --sound-threshold-peak 0.10 \
   --end-silence-ms 850 \
-  --whisper-model-path ~/.whisper-models/ggml-medium-q5_0.bin \
+  --whisper-model-path ~/.whisper-models/ggml-small.bin \
   --ollama-model "llama3.2:3b" \
   --ollama-url "http://localhost:11434/api/generate"
 ```
