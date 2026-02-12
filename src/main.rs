@@ -1,19 +1,10 @@
-// avoiding printing external whisper logs
-extern "C" fn noop_whisper_log(
-  _: u32,
-  _: *const std::os::raw::c_char,
-  _: *mut std::os::raw::c_void,
-) {
-} // intentionally do nothing
-
 use clap::Parser;
 use cpal::traits::DeviceTrait;
 use crossbeam_channel::{bounded, unbounded};
 use std::process;
 use std::sync::{Arc, OnceLock};
-use std::thread;
+use std::thread::{self, Builder};
 use std::time::Instant;
-use whisper_rs;
 
 mod assets;
 mod audio;
@@ -33,6 +24,8 @@ mod util;
 static START_INSTANT: OnceLock<Instant> = OnceLock::new();
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  env_logger::init();
+  whisper_rs::install_logging_hooks();
 
   if !util::terminal_supported() {
     log::log("error", "Terminal does not support colors or emojis. Please use a different terminal. exiting...");
@@ -68,20 +61,16 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   }
 
   // silence external whisper logs
-  unsafe {
-    whisper_rs::set_log_callback(Some(noop_whisper_log), std::ptr::null_mut());
-  }
+  // unsafe {
+  //   whisper_rs::set_log_callback(Some(noop_whisper_log), std::ptr::null_mut());
+  // }
+  // show external whisper.cpp logs
+
   crate::log::set_verbose(args.verbose);
+
+  // Resolve Whisper model path and log it
   let whisper_path = args.resolved_whisper_model_path();
-  if let Err(e) = crate::stt::whisper_warmup(&whisper_path) {
-    crate::log::log(
-      "error",
-      &format!(
-        "Whisper failed: {e}; check that the whisper model at {whisper_path} is a valid whisper model"
-      ),
-    );
-    process::exit(1);
-  }
+  crate::log::log("info", &format!("Whisper model path: {}", whisper_path));
 
   let vad_thresh: f32 = args.sound_threshold_peak;
   let end_silence_ms: u64 = args.end_silence_ms;
@@ -279,45 +268,48 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   });
 
   // ---- Thread: record ----
-  let rec_handle = thread::spawn({
-    let start_instant = &START_INSTANT;
-    let device = in_dev.clone();
-    let supported = in_cfg_supported;
-    let config = in_cfg;
-    let tx = tx_rec.clone();
-    let tx_utt = tx_utt.clone();
-    let vad_thresh = vad_thresh;
-    let end_silence_ms = end_silence_ms;
-    let playback_active = playback_active.clone();
-    let gate_until_ms = gate_until_ms.clone();
-    let stop_play_tx = stop_play_tx.clone();
-    let interrupt_counter = interrupt_counter.clone();
-    let stop_all_rx = stop_all_rx_for_record.clone();
-    let peak = ui.peak.clone();
-    let ui = ui.clone();
-    move || {
-      record::record_thread(
-        start_instant,
-        device,
-        supported,
-        config,
-        tx,
-        tx_utt,
-        vad_thresh,
-        end_silence_ms,
-        playback_active,
-        gate_until_ms,
-        stop_play_tx,
-        interrupt_counter,
-        stop_all_rx,
-        peak,
-        ui,
-        volume_rec.clone(),
-        recording_paused_for_record.clone(),
-      )
-    }
-  });
-
+  let rec_handle = Builder::new()
+    .name("record_thread".to_string())
+    .stack_size(4 * 1024 * 1024)
+    .spawn({
+      let start_instant = &START_INSTANT;
+      let device = in_dev.clone();
+      let supported = in_cfg_supported;
+      let config = in_cfg;
+      let tx = tx_rec.clone();
+      let tx_utt = tx_utt.clone();
+      let vad_thresh = vad_thresh;
+      let end_silence_ms = end_silence_ms;
+      let playback_active = playback_active.clone();
+      let gate_until_ms = gate_until_ms.clone();
+      let stop_play_tx = stop_play_tx.clone();
+      let interrupt_counter = interrupt_counter.clone();
+      let stop_all_rx = stop_all_rx_for_record.clone();
+      let peak = ui.peak.clone();
+      let ui = ui.clone();
+      move || {
+        record::record_thread(
+          start_instant,
+          device,
+          supported,
+          config,
+          tx,
+          tx_utt,
+          vad_thresh,
+          end_silence_ms,
+          playback_active,
+          gate_until_ms,
+          stop_play_tx,
+          interrupt_counter,
+          stop_all_rx,
+          peak,
+          ui,
+          volume_rec.clone(),
+          recording_paused_for_record.clone(),
+        )
+      }
+    })?;
+  
   // ---- Thread: conversation ----
   // clone state for conversation thread to avoid move
   let state_conv = state.clone();
@@ -330,6 +322,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let print_lock = print_lock.clone();
     let stop_all_tx_conv = stop_all_tx.clone();
     let conversation_history = conversation_history.clone();
+    let whisper_path = whisper_path.clone();
     move || {
       conversation::conversation_thread(
         state_conv.voice.clone(),
@@ -339,6 +332,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         stop_all_tx_conv,
         out_sample_rate,
         interrupt_counter,
+        whisper_path,
         args,
         ui,
         status_line,

@@ -2,6 +2,21 @@
 //  Conversation
 // ------------------------------------------------------------------
 
+use std::sync::OnceLock;
+
+static WHISPER_CTX: OnceLock<whisper_rs::WhisperContext> = OnceLock::new();
+
+/// Initialise the Whisper context once, performing a warm‑up.
+pub fn init_whisper_context(model_path: &str) -> &'static whisper_rs::WhisperContext {
+  WHISPER_CTX.get_or_init(|| {
+    let ctx = whisper_rs::WhisperContext::new_with_params(model_path, Default::default())
+      .expect("Failed to create WhisperContext");
+    // Perform warm‑up to load the model into memory
+    crate::stt::whisper_warmup(model_path).expect("Whisper warm‑up failed");
+    ctx
+  })
+}
+
 use crate::START_INSTANT;
 use crossbeam_channel::{select, Receiver, Sender};
 use std::cell::Cell;
@@ -21,12 +36,14 @@ pub fn conversation_thread(
   stop_all_tx: Sender<()>,
   out_sample_rate: u32, // MUST match playback SR
   interrupt_counter: Arc<AtomicU64>,
+  model_path: String,
   args: crate::config::Args,
   ui: crate::state::UiState,
   status_line: Arc<Mutex<String>>,
   print_lock: Arc<Mutex<()>>,
   conversation_history: std::sync::Arc<std::sync::Mutex<String>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  let ctx = init_whisper_context(&model_path);
   crate::log::log("info", &format!("Ollama model: {}", args.ollama_model));
 
   loop {
@@ -34,14 +51,32 @@ pub fn conversation_thread(
       recv(stop_all_rx) -> _ => break,
       recv(rx_utt) -> msg => {
         let Ok(utt) = msg else { break };
-        let pcm: Vec<i16> = utt.data.iter().map(|s| ((*s).clamp(-1.0, 1.0) * (i16::MAX as f32)) as i16).collect();
-        let user_text = crate::stt::whisper_transcribe(&pcm, utt.sample_rate, &args.resolved_whisper_model_path(), &args.language)?;
+        let pcm_f32: Vec<f32> = utt.data.clone();
+        let mono_f32 = if utt.channels == 1 {
+            pcm_f32.clone()
+        } else {
+            let ch = utt.channels as usize;
+            let frames = pcm_f32.len() / ch;
+            let mut mono = Vec::with_capacity(frames);
+            for f in 0..frames {
+                let start = f * ch;
+                let sum: f32 = pcm_f32[start..start + ch].iter().sum();
+                mono.push(sum / ch as f32);
+            }
+            mono
+        };
+        crate::log::log("debug", &format!("Received audio chunk of len {}", utt.data.len()));
+        crate::log::log("debug", &format!("Received mono f32 pcm len {}", pcm_f32.len()));
+        crate::log::log("debug", "Transcribing utterance...");
+        let user_text = crate::stt::whisper_transcribe_with_ctx(&ctx, &mono_f32, utt.sample_rate, &args.language)?;
+        crate::log::log("info", &format!("Transcribed: '{}'", user_text));
         let prompt = format!("{}\n{}: {}", conversation_history.lock().unwrap(), crate::ui::USER_LABEL, user_text);
         let cleaned_prompt = crate::util::strip_ansi(&prompt);
         let user_text = user_text.trim().to_string();
         let speech_end_ms = crate::util::SPEECH_END_AT.load(std::sync::atomic::Ordering::SeqCst);
         let mut first_phrase_logged = false;
         if user_text.is_empty() {
+          crate::log::log("debug", "Transcription returned empty string");
           continue;
         }
 

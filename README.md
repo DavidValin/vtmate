@@ -27,7 +27,7 @@ See it in action: [Demo](https://www.youtube.com/watch?v=x0RAX3-PLnE)
 ## Features
 
 - Voice interrupt: `the agent stops talking if you interrupt via voice`
-- Pause / resume: `press "<CONTROL> + <ALT> + p" to pause voice recording / resume. Useful to it running it during the day and switch it on when needed`
+- Pause / resume: `toggle "<SPACE>" key to pause / resume voice recording. Useful to it running it during the day and switch it on when needed`
 - Voice speed change: `change the agent voice speed by pressing <ARROW_UP> / <ARROW_DOWN>. Do this before asking anything new`
 - Integrated `whisper`
 - Integrated `kokoro TTS` system
@@ -108,7 +108,7 @@ ai-mate \
   --language en \
   --sound-threshold-peak 0.10 \
   --end-silence-ms 850 \
-  --whisper-model-path ~/.whisper-models/ggml-small.bin \
+  --whisper-model-path ~/.whisper-models/ggml-tiny.bin \
   --ollama-model "llama3.2:3b" \
   --ollama-url "http://localhost:11434/api/generate"
 ```
@@ -132,22 +132,27 @@ ai-mate --help
 
 ### Build ai-mate from source code
 
-Use cross_build.sh script, get help on how to use it:
-
+***MacOS***
+NOTE: 
 ```
-./cross_build.sh -h
+./build_macos.sh
+MAC_WITH_OPENBLAS=1 ./build_macos.sh
+```
+
+***Linux***
+```
+./build_linux.sh --arch all
+LINUX_WITH_VULKAN=0 ./build_linux.sh --arch amd64
+```
+
+***Windows***
+NOTE: (requires https://visualstudio.microsoft.com/visual-cpp-build-tools)
+```
+build_windows.bat
+set WIN_WITH_VULKAN=0 && build_windows.bat
 ```
 
 * During build, tts and stt models are fetched locally
-* Mac build only works from native MacOS
-* Windows build only works from native Windows (requires https://visualstudio.microsoft.com/visual-cpp-build-tools)
-
-Examples:
-```
-./cross_build.sh --os linux --arch amd64,arm64
-./cross_build.sh --os windows --arch amd64
-./cross_build.sh --os macos --arch arm64,amd64
-```
 
 The built binaries will be placed under `./dist`
 
@@ -167,12 +172,13 @@ alias ai-mate_es_llama='ai-mate --ollama-model "llama3:8b" --language es'
 
 ## Useful to know
 
-ai-mate self contains espeak-ng-data, the whisper small model as well as kokoro model and voices which will be autoextracted when running ai-mate if they are not found in next locations:
+ai-mate self contains espeak-ng-data, the whisper tiny & small models and kokoro model and voices which will be autoextracted when running ai-mate if they are not found in next locations:
 
-- `~/.whisper-models/ggml-small.bin`
-- `~/.cache/k/0.bin`
-- `~/.cache/k/0.onnx`
 - `~/.ai-mate/espeak-ng-data.tar.gz`
+- `~/.whisper-models/ggml-tiny.bin`
+- `~/.whisper-models/ggml-small.bin`
+- `~/.cache/k/0.onnx`
+- `~/.cache/k/0.bin`
 
 ## Language support
 
