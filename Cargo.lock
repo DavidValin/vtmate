@@ -19,7 +19,7 @@ dependencies = [
 
 [[package]]
 name = "ai-mate"
-version = "0.3.0-beta.8"
+version = "0.3.0-rc-1"
 dependencies = [
  "clap",
  "cpal",
