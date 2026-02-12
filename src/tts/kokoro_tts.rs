@@ -24,7 +24,9 @@ pub struct StreamingTts {
 // PRIVATE
 // ------------------------------------------------------------------
 
-const MAX_CHUNK_SIZE: usize = 50;
+// smaller chunks reduce long synth stalls -> fewer underruns/glitches.
+// (Words are variable length; 10–15 is a safer range for real-time streaming.)
+const MAX_CHUNK_SIZE: usize = 12;
 
 impl StreamingTts {
   pub fn new(engine: Arc<Mutex<TtsEngine>>) -> Self {
@@ -87,13 +89,21 @@ impl StreamingTts {
           break;
         }
         if let Ok(mut e) = engine.lock() {
-          if let Ok(samples) = e.synthesize_with_options(
+          if let Ok(mut samples) = e.synthesize_with_options(
             &chunk,
             Some(&voice),
             crate::state::get_speed(),
             gain,
             Some(&language),
           ) {
+            // sanitize output samples (prevents nasty noise if NaN/Inf/out-of-range)
+            for s in &mut samples {
+              if !s.is_finite() {
+                *s = 0.0;
+              } else {
+                *s = s.clamp(-1.0, 1.0);
+              }
+            }
             let audio = AudioChunk {
               data: samples,
               channels: 1,
