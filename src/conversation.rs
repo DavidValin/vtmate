@@ -3,6 +3,7 @@
 // ------------------------------------------------------------------
 
 use crossbeam_channel::{Receiver, Sender, select};
+use std::cell::Cell;
 use std::sync::{
   Arc, Mutex,
   atomic::{AtomicU64, Ordering},
@@ -12,7 +13,7 @@ use std::sync::{
 // ------------------------------------------------------------------
 
 pub fn conversation_thread(
-  voice: &str,
+  voice_state: Arc<Mutex<String>>,
   rx_utt: Receiver<crate::audio::AudioChunk>,
   tx_play: Sender<crate::audio::AudioChunk>,
   stop_all_rx: Receiver<()>,
@@ -31,197 +32,197 @@ pub fn conversation_thread(
     select! {
       recv(stop_all_rx) -> _ => break,
       recv(rx_utt) -> msg => {
-            let Ok(utt) = msg else { break };
-            let pcm: Vec<i16> = utt.data.iter().map(|s| ((*s).clamp(-1.0, 1.0) * (i16::MAX as f32)) as i16).collect();
-            let user_text = crate::stt::whisper_transcribe(&pcm, utt.sample_rate, &args.resolved_whisper_model_path())?;
-            let prompt = format!("{}\n{}: {}", conversation_history.lock().unwrap(), crate::ui::USER_LABEL, user_text);
-            let cleaned_prompt = crate::util::strip_ansi(&prompt);
-            let user_text = user_text.trim().to_string();
-            if user_text.is_empty() {
-              continue;
-            }
+        let Ok(utt) = msg else { break };
+        let pcm: Vec<i16> = utt.data.iter().map(|s| ((*s).clamp(-1.0, 1.0) * (i16::MAX as f32)) as i16).collect();
+        let user_text = crate::stt::whisper_transcribe(&pcm, utt.sample_rate, &args.resolved_whisper_model_path())?;
+        let prompt = format!("{}\n{}: {}", conversation_history.lock().unwrap(), crate::ui::USER_LABEL, user_text);
+        let cleaned_prompt = crate::util::strip_ansi(&prompt);
+        let user_text = user_text.trim().to_string();
+        if user_text.is_empty() {
+          continue;
+        }
 
-            // Print user line (keep spinner/emojis only on the latest bottom line).
-            let my_interrupt = interrupt_counter.load(Ordering::SeqCst);
-            if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
-              // signal playback to stop queued audio
-              let _ = stop_all_tx.try_send(());
-              conversation_history.lock().unwrap().clear();
-              continue;
-            }
-            crate::ui::ui_println(&print_lock, &status_line, "");
-            crate::ui::ui_println(&print_lock, &status_line, &format!("{} {user_text}", crate::ui::USER_LABEL));
-            conversation_history.lock().unwrap().push_str(&format!("{}: {}\n", crate::ui::USER_LABEL, user_text));
-            ui.thinking.store(true, Ordering::Relaxed);
+        // Print user line (keep spinner/emojis only on the latest bottom line).
+        let my_interrupt = interrupt_counter.load(Ordering::SeqCst);
+        if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
+          // signal playback to stop queued audio
+          let _ = stop_all_tx.try_send(());
+          conversation_history.lock().unwrap().clear();
+          continue;
+        }
+        crate::ui::ui_println(&print_lock, &status_line, "");
+        crate::ui::ui_println(&print_lock, &status_line, &format!("{} {user_text}", crate::ui::USER_LABEL));
+        conversation_history.lock().unwrap().push_str(&format!("{}: {}\n", crate::ui::USER_LABEL, user_text));
+        ui.thinking.store(true, Ordering::Relaxed);
 
-            // Snapshot interruption counter for this assistant turn.
+        // Snapshot interruption counter for this assistant turn.
 
-            let mut speaker = PhraseSpeaker::new();
-            let mut got_any_token = false;
+        let mut speaker = PhraseSpeaker::new();
+        let mut got_any_token = false;
 
-            crate::ui::ui_println(&print_lock, &status_line, "");
-            crate::ui::ui_println(&print_lock, &status_line, crate::ui::ASSIST_LABEL);
+        crate::ui::ui_println(&print_lock, &status_line, "");
+        crate::ui::ui_println(&print_lock, &status_line, crate::ui::ASSIST_LABEL);
 
-            let mut interrupted = false;
-            let mut interrupted_printed = false;
+        let mut interrupted = false;
+        let mut interrupted_printed = false;
 
-            // Print interruption banner exactly once per assistant turn.
-            let mut print_user_interrupted = || {
-              if interrupted_printed {
-                return;
-              }
-              interrupted_printed = true;
-              crate::ui::ui_println(&print_lock, &status_line, "");
-              crate::ui::ui_println(&print_lock, &status_line, "🛑 USER interrupted");
-              crate::ui::ui_println(&print_lock, &status_line, "");
-            };
+        // Print interruption banner exactly once per assistant turn.
+        let mut print_user_interrupted = || {
+          if interrupted_printed {
+            return;
+          }
+          interrupted_printed = true;
+          crate::ui::ui_println(&print_lock, &status_line, "");
+          crate::ui::ui_println(&print_lock, &status_line, "🛑 USER interrupted");
+          crate::ui::ui_println(&print_lock, &status_line, "");
+        };
 
-            let stop_all_tx_clone = stop_all_tx.clone();
-            let mut on_piece = |piece: &str| {
-              if interrupted {
-                let _ = stop_all_tx_clone.try_send(());
-                return;
-              }
+        let stop_all_tx_clone = stop_all_tx.clone();
+        let mut on_piece = |piece: &str| {
+          if interrupted {
+            let _ = stop_all_tx_clone.try_send(());
+            return;
+          }
 
-              if stop_all_rx.try_recv().is_ok() {
-                interrupted = true;
-                speaker.buf.clear();
-                return;
-              }
+          if stop_all_rx.try_recv().is_ok() {
+            interrupted = true;
+            speaker.buf.clear();
+            return;
+          }
 
-              // Abort if user interrupted before this token
-              if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
-                interrupted = true;
-                speaker.buf.clear();
-                return;
-              }
+          // Abort if user interrupted before this token
+          if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
+            interrupted = true;
+            speaker.buf.clear();
+            return;
+          }
 
-              if !got_any_token && !piece.is_empty() {
-                got_any_token = true;
-                ui.thinking.store(false, Ordering::Relaxed);
-              }
-
-              if let Some(phrase) = speaker.push_text(piece) {
-                crate::ui::ui_println(&print_lock, &status_line, &phrase);
-                conversation_history.lock().unwrap().push_str(&format!("{}: {}\n", crate::ui::ASSIST_LABEL, phrase));
-
-                let outcome = match crate::tts::speak(
-                  &strip_special_chars(&phrase),
-                  args.tts.as_str(),
-                  args.opentts_base_url.as_str(),
-                  args.language.as_str(),
-                  voice,
-                  out_sample_rate,
-                  tx_play.clone(),
-                  stop_all_rx.clone(),
-                  interrupt_counter.clone(),
-                  my_interrupt,
-                ) {
-                  Ok(o) => o,
-                  Err(_e) => {
-                    crate::log::log("error", &format!("TTS error. Can't play audio speech. Make sure OpenTTS is running: docker run --rm -p 5500:5500 synesthesiam/opentts:all"));
-                    interrupted = true;
-                    return;
-                  }
-                };
-
-                if outcome == crate::tts::SpeakOutcome::Interrupted
-                  || (interrupt_counter.load(Ordering::SeqCst) != my_interrupt && ui.playing.load(Ordering::Relaxed))
-                {
-                  interrupted = true;
-                  print_user_interrupted();
-                  // crate::ui::ui_clear_last_line(&print_lock);
-                  std::thread::sleep(std::time::Duration::from_millis(500));
-                  // *status_line.lock().unwrap() = "".to_string();
-                  return;
-                }
-              }
-            };
-
-            if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
-              // interruption detected, skip remaining speech
-              continue;
-            }
-
-            if args.llm == "llama-server" {
-              match crate::llm::llama_server_stream_response_into(
-                &cleaned_prompt,
-                args.llama_server_url.as_str(),
-                stop_all_rx.clone(),
-                interrupt_counter.clone(),
-                my_interrupt,
-                &mut on_piece,
-              ) {
-                Ok(o) => o,
-                Err(e) => {
-                  crate::log::log("error", &format!("llama server error: {e}. Make sure llama-server / llamafile is running"));
-                  // skip this turn and continue
-                  continue;
-                }
-              }
-            } else {
-              match crate::llm::ollama_stream_response_into(
-                &cleaned_prompt,
-                args.ollama_url.as_str(),
-                args.ollama_model.as_str(),
-                stop_all_rx.clone(),
-                interrupt_counter.clone(),
-                my_interrupt,
-                &mut on_piece
-              ) {
-                Ok(o) => o,
-                Err(e) => {
-                  crate::log::log("error", &format!("ollama error. {e}. Make sure ollama is running"));
-                  // skip this turn and continue
-                  continue;
-                }
-              }
-            }
-
-            if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
-              // interruption detected, skip remaining speech
-              continue;
-            }
-
+          if !got_any_token && !piece.is_empty() {
+            got_any_token = true;
             ui.thinking.store(false, Ordering::Relaxed);
+          }
 
-            // If the user spoke over playback, cancel the rest of the assistant turn.
-            if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
+          if let Some(phrase) = speaker.push_text(piece) {
+            crate::ui::ui_println(&print_lock, &status_line, &phrase);
+            conversation_history.lock().unwrap().push_str(&format!("{}: {}\n", crate::ui::ASSIST_LABEL, phrase));
+
+            let outcome = match crate::tts::speak(
+              &strip_special_chars(&phrase),
+              args.tts.as_str(),
+              args.opentts_base_url.as_str(),
+              args.language.as_str(),
+              &voice_state.lock().unwrap().as_str(),
+              out_sample_rate,
+              tx_play.clone(),
+              stop_all_rx.clone(),
+              interrupt_counter.clone(),
+              my_interrupt,
+            ) {
+              Ok(o) => o,
+              Err(_e) => {
+                crate::log::log("error", &format!("TTS error. Can't play audio speech. Make sure OpenTTS is running: docker run --rm -p 5500:5500 synesthesiam/opentts:all"));
+                interrupted = true;
+                return;
+              }
+            };
+
+            if outcome == crate::tts::SpeakOutcome::Interrupted
+              || (interrupt_counter.load(Ordering::SeqCst) != my_interrupt && ui.playing.load(Ordering::Relaxed))
+            {
+              interrupted = true;
               print_user_interrupted();
+              // crate::ui::ui_clear_last_line(&print_lock);
+              std::thread::sleep(std::time::Duration::from_millis(500));
+              // *status_line.lock().unwrap() = "".to_string();
+              return;
+            }
+          }
+        };
+
+        if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
+          // interruption detected, skip remaining speech
+          continue;
+        }
+
+        if args.llm == "llama-server" {
+          match crate::llm::llama_server_stream_response_into(
+            &cleaned_prompt,
+            args.llama_server_url.as_str(),
+            stop_all_rx.clone(),
+            interrupt_counter.clone(),
+            my_interrupt,
+            &mut on_piece,
+          ) {
+            Ok(o) => o,
+            Err(e) => {
+              crate::log::log("error", &format!("llama server error: {e}. Make sure llama-server / llamafile is running"));
+              // skip this turn and continue
               continue;
             }
-
-            if let Some(phrase) = speaker.flush() {
-              crate::ui::ui_println(&print_lock, &status_line, &phrase);
-              conversation_history.lock().unwrap().push_str(&format!("{}: {}\n", crate::ui::ASSIST_LABEL, phrase));
-              let outcome = match crate::tts::speak(
-                &strip_special_chars(&phrase),
-                args.tts.as_str(),
-                args.opentts_base_url.as_str(),
-                args.language.as_str(),
-                voice,
-                out_sample_rate,
-                tx_play.clone(),
-                stop_all_rx.clone(),
-                interrupt_counter.clone(),
-                my_interrupt,
-              ) {
-                Ok(o) => o,
-                Err(_e) => {
-                  crate::log::log("error", &format!("TTS error. Can't play audio speech. Make sure OpenTTS is running: docker run --rm -p 5500:5500 synesthesiam/opentts:all"));
-                  // skip this turn and continue
-                  continue;
-                }
-              };
-
-              if outcome == crate::tts::SpeakOutcome::Interrupted
-                || interrupt_counter.load(Ordering::SeqCst) != my_interrupt
-              {
-                print_user_interrupted();
-                continue;
-              }
+          }
+        } else {
+          match crate::llm::ollama_stream_response_into(
+            &cleaned_prompt,
+            args.ollama_url.as_str(),
+            args.ollama_model.as_str(),
+            stop_all_rx.clone(),
+            interrupt_counter.clone(),
+            my_interrupt,
+            &mut on_piece
+          ) {
+            Ok(o) => o,
+            Err(e) => {
+              crate::log::log("error", &format!("ollama error. {e}. Make sure ollama is running"));
+              // skip this turn and continue
+              continue;
             }
-         }
+          }
+        }
+
+        if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
+          // interruption detected, skip remaining speech
+          continue;
+        }
+
+        ui.thinking.store(false, Ordering::Relaxed);
+
+        // If the user spoke over playback, cancel the rest of the assistant turn.
+        if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
+          print_user_interrupted();
+          continue;
+        }
+
+        if let Some(phrase) = speaker.flush() {
+          crate::ui::ui_println(&print_lock, &status_line, &phrase);
+          conversation_history.lock().unwrap().push_str(&format!("{}: {}\n", crate::ui::ASSIST_LABEL, phrase));
+          let outcome = match crate::tts::speak(
+            &strip_special_chars(&phrase),
+            args.tts.as_str(),
+            args.opentts_base_url.as_str(),
+            args.language.as_str(),
+            &voice_state.lock().unwrap().as_str(),
+            out_sample_rate,
+            tx_play.clone(),
+            stop_all_rx.clone(),
+            interrupt_counter.clone(),
+            my_interrupt,
+          ) {
+            Ok(o) => o,
+            Err(_e) => {
+              crate::log::log("error", &format!("TTS error. Can't play audio speech. Make sure OpenTTS is running: docker run --rm -p 5500:5500 synesthesiam/opentts:all"));
+              // skip this turn and continue
+              continue;
+            }
+          };
+
+          if outcome == crate::tts::SpeakOutcome::Interrupted
+            || interrupt_counter.load(Ordering::SeqCst) != my_interrupt
+          {
+            print_user_interrupted();
+            continue;
+          }
+        }
+      }
     }
   }
   Ok(())
@@ -251,8 +252,6 @@ impl PhraseSpeaker {
     if out.is_empty() { None } else { Some(out) }
   }
 }
-
-use std::cell::Cell;
 
 thread_local! {
   static IN_CODE_BLOCK: Cell<bool> = Cell::new(false);

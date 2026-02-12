@@ -2,7 +2,7 @@
 //  UI (single renderer thread)
 // ------------------------------------------------------------------
 
-use crate::state::{GLOBAL_STATE, get_speed};
+use crate::state::{GLOBAL_STATE, get_speed, get_voice};
 use crossbeam_channel::Receiver;
 use crossterm::{
   cursor::{Hide, MoveTo, Show},
@@ -82,6 +82,7 @@ pub fn spawn_ui_thread(
         Err(_) => 0.0,
       };
       let speed_str = format!("[{:.1}x]", get_speed());
+      let voice_str = format!("({})", get_voice());
       let paused_str = if paused {
         "\x1b[41m\x1b[37m  paused  \x1b[0m"
       } else {
@@ -90,11 +91,14 @@ pub fn spawn_ui_thread(
       let paused_vis_len = visible_len(paused_str);
 
       // Use the actual visible width of the status for bar calculations
-      let max_bar_len = if cols > visible_len(&status) + 2 + speed_str.len() + paused_vis_len {
+      let max_bar_len = if cols
+        > visible_len(&status) + 2 + voice_str.len() + 1 + speed_str.len() + paused_vis_len
+      {
         BAR_WIDTH
       } else {
-        let available =
-          cols.saturating_sub(visible_len(&status) + 2 + speed_str.len() + paused_vis_len);
+        let available = cols.saturating_sub(
+          visible_len(&status) + 2 + voice_str.len() + 1 + speed_str.len() + paused_vis_len,
+        );
         let max_bar_len = if available > 10 { 10 } else { available };
         max_bar_len
       };
@@ -111,14 +115,25 @@ pub fn spawn_ui_thread(
       let bar = format!("{}{}\x1b[0m", bar_color, "█".repeat(bar_len));
 
       let _status_len = status.len() + 2 + bar_len;
-      let spaces = if cols > visible_len(&status) + 2 + bar_len + speed_str.len() + paused_vis_len {
-        cols - visible_len(&status) - 2 - bar_len - speed_str.len() - paused_vis_len
+      let spaces = if cols
+        > visible_len(&status) + 2 + bar_len + speed_str.len() + voice_str.len() + paused_vis_len
+      {
+        cols
+          - visible_len(&status)
+          - 2
+          - bar_len
+          - speed_str.len()
+          - voice_str.len()
+          - paused_vis_len
       } else {
         0
       };
 
-      let status_without_speed = format!("{}{}{}{}", status, "  ", bar, " ".repeat(spaces));
-      let status_with_bar = format!("{}{}{}", status_without_speed, speed_str, paused_str);
+      let status_without_speed = format!("{} {}{}", status, bar, " ".repeat(spaces));
+      let status_with_bar = format!(
+        "{}{} {}{}",
+        status_without_speed, speed_str, voice_str, paused_str
+      );
 
       // Update shared status
       if let Ok(mut st) = status_line.lock() {

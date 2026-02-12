@@ -134,14 +134,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     &format!("Playback stream SR (truth): {}", out_sample_rate),
   );
 
-  // application
-  let state = Arc::new(state::AppState::new());
-  let recording_paused = state.recording_paused.clone();
-  let recording_paused_for_record = recording_paused.clone();
-
-  // set global state for speed functions
-  state::GLOBAL_STATE.set(state.clone()).unwrap();
-
   // broadcast stop signal to all threads
   let (stop_all_tx, stop_all_rx) = bounded::<()>(1);
   // channel for recording audio chunks
@@ -157,18 +149,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let stop_all_rx_for_record = stop_all_rx.clone();
   let stop_all_rx_for_keyboard = stop_all_rx.clone();
   let (stop_play_tx, stop_play_rx) = bounded::<()>(2); // stop playback signal
-  let interrupt_counter = state.interrupt_counter.clone();
-  let paused = state.playback.paused.clone();
-  let playback_active = state.playback.playback_active.clone();
-  let gate_until_ms = state.playback.gate_until_ms.clone();
-
-  let ui = state.ui.clone();
-  let volume = state.playback.volume.clone();
-  let conversation_history = state.conversation_history.clone();
-  let volume_play = volume.clone();
-  let volume_rec = volume.clone();
-  let status_line = state.status_line.clone();
-  let print_lock = state.print_lock.clone();
 
   let available_langs = tts::get_all_available_languages();
   if !available_langs.contains(&args.language.as_str()) {
@@ -233,6 +213,25 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   log::log("info", &format!("TTS voice: {}", voice_selected));
   log::log("info", &format!("LLM engine: ollama"));
   log::log("info", &format!("ollama base url: {}", args.ollama_url));
+
+  // initialize state after voice_selected
+  let state = Arc::new(state::AppState::new_with_voice(voice_selected.clone()));
+  let recording_paused = state.recording_paused.clone();
+  let recording_paused_for_record = recording_paused.clone();
+  state::GLOBAL_STATE.set(state.clone()).unwrap();
+
+  let interrupt_counter = state.interrupt_counter.clone();
+  let paused = state.playback.paused.clone();
+  let playback_active = state.playback.playback_active.clone();
+  let gate_until_ms = state.playback.gate_until_ms.clone();
+
+  let ui = state.ui.clone();
+  let volume = state.playback.volume.clone();
+  let conversation_history = state.conversation_history.clone();
+  let volume_play = volume.clone();
+  let volume_rec = volume.clone();
+  let status_line = state.status_line.clone();
+  let print_lock = state.print_lock.clone();
 
   // ---- Thread: UI Thread ----
   let ui_handle = ui::spawn_ui_thread(
@@ -313,6 +312,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   });
 
   // ---- Thread: conversation ----
+  // clone state for conversation thread to avoid move
+  let state_conv = state.clone();
   let conv_handle = thread::spawn({
     let out_sample_rate = out_sample_rate;
     let interrupt_counter = interrupt_counter.clone();
@@ -324,7 +325,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let conversation_history = conversation_history.clone();
     move || {
       conversation::conversation_thread(
-        &voice_selected,
+        state_conv.voice.clone(),
         rx_utt,
         tx_play.clone(),
         stop_all_rx.clone(),
@@ -341,6 +342,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   });
 
   // ---- Thread: keyboard ----
+  // clone state for keyboard thread
+  let state_key = state.clone();
   let key_handle = thread::spawn({
     let stop_all_tx = stop_all_tx.clone();
     let stop_all_rx = stop_all_rx_for_keyboard.clone();
@@ -353,6 +356,9 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         paused,
         playback_active,
         recording_paused.clone(),
+        state_key.voice.clone(),
+        args.tts.clone(),
+        args.language.clone(),
       )
     }
   });
