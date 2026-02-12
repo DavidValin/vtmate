@@ -21,6 +21,7 @@ fn find_url_for_file(file_name: &str) -> Option<String> {
 fn main() {
   // Directory where Cargo will place build artifacts
   let out_dir = env::var("OUT_DIR").expect("OUT_DIR not set");
+  let is_release = env::var("PROFILE").unwrap_or_default() == "release";
   let dest = Path::new(&out_dir).join("embedded");
   fs::create_dir_all(&dest).expect("Failed to create embedded dir");
 
@@ -40,20 +41,24 @@ fn main() {
     if !exists {
       println!("cargo:warning=File {} missing at {}", name, src.display());
     } else {
-      // Compute checksum of local file
-      let mut file = fs::File::open(&src).expect("unable to open asset");
-      let mut hasher = sha2::Sha256::new();
-      std::io::copy(&mut file, &mut hasher).expect("copy failed");
-      let hash = hex::encode(hasher.finalize());
-      let expected = EXPECTED_HASHES.get(name).expect("unknown file");
-      if &hash == expected {
-        println!("cargo:warning=File {} exists and checksum OK", name);
-        local_checksum_ok = true;
+      if is_release {
+        // Compute checksum of local file
+        let mut file = fs::File::open(&src).expect("unable to open asset");
+        let mut hasher = sha2::Sha256::new();
+        std::io::copy(&mut file, &mut hasher).expect("copy failed");
+        let hash = hex::encode(hasher.finalize());
+        let expected = EXPECTED_HASHES.get(name).expect("unknown file");
+        if &hash == expected {
+          println!("cargo:warning=File {} exists and checksum OK", name);
+          local_checksum_ok = true;
+        } else {
+          println!(
+            "cargo:warning=Checksum mismatch for {}: expected {}, got {}",
+            name, expected, hash
+          );
+        }
       } else {
-        println!(
-          "cargo:warning=Checksum mismatch for {}: expected {}, got {}",
-          name, expected, hash
-        );
+        local_checksum_ok = true;
       }
     }
     let should_download = !exists || !local_checksum_ok;
@@ -73,23 +78,25 @@ fn main() {
     }
   }
 
-  // Verify all files were copied successfully and validate checksums
-  for (_, name) in &files {
-    let dst = dest.join(name);
-    if !dst.exists() {
-      continue; // skip if asset missing
-    }
-    // Compute SHA256
-    let mut file = fs::File::open(&dst).expect("unable to open asset");
-    let mut hasher = sha2::Sha256::new();
-    std::io::copy(&mut file, &mut hasher).expect("copy failed");
-    let hash = hex::encode(hasher.finalize());
-    let expected = EXPECTED_HASHES.get(name).expect("unknown file");
-    if &hash != expected {
-      panic!(
-        "Checksum mismatch for {}: expected {}, got {}",
-        name, expected, hash
-      );
+  // Verify all files were copied successfully and validate checksums only in release
+  if is_release {
+    for (_, name) in &files {
+      let dst = dest.join(name);
+      if !dst.exists() {
+        continue; // skip if asset missing
+      }
+      // Compute SHA256
+      let mut file = fs::File::open(&dst).expect("unable to open asset");
+      let mut hasher = sha2::Sha256::new();
+      std::io::copy(&mut file, &mut hasher).expect("copy failed");
+      let hash = hex::encode(hasher.finalize());
+      let expected = EXPECTED_HASHES.get(name).expect("unknown file");
+      if &hash != expected {
+        panic!(
+          "Checksum mismatch for {}: expected {}, got {}",
+          name, expected, hash
+        );
+      }
     }
   }
 

@@ -2,10 +2,7 @@
 //  Router
 // ------------------------------------------------------------------
 
-use crate::state::GLOBAL_STATE;
 use flate2::read::GzDecoder;
-use std::collections::HashMap;
-use std::sync::LazyLock;
 use std::{fs, io::Cursor, path::PathBuf};
 use tar::Archive;
 
