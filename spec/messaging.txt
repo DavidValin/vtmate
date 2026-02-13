@@ -1,0 +1,55 @@
+Threads and the channels they use
+
+------------------------------------------------------------------------------------
+ Main   (src/main.rs)
+------------------------------------------------------------------------------------
+- Sends the global stop signal through stop_all_tx.
+- Sends raw microphone audio to the recording thread via tx_rec.
+- Sends recognized utterances to the conversation thread via tx_utt.
+- Sends raw microphone audio to the conversation thread via conv_tx (for synchronous processing).
+- Sends playback audio to the playback thread through tx_play.
+- Sends playback‑stop requests to the recording and playback threads via stop_play_tx.
+- Sends the playback‑stop receiver to the playback thread via stop_play_rx.
+
+------------------------------------------------------------------------------------
+ UI thread   (src/ui.rs)
+------------------------------------------------------------------------------------
+- Receives the global stop signal on stop_all_rx.
+- Reads the shared status_line, print_lock, and peak to update the terminal.
+
+------------------------------------------------------------------------------------
+ Playback thread   (src/playback.rs)
+------------------------------------------------------------------------------------
+- Receives the global stop signal on stop_all_rx.
+- Receives playback audio chunks on rx_play.
+- Receives a playback‑stop signal on stop_play_rx.
+- Reads control flags: playback_active, gate_until_ms, paused.
+- Reads UI state (ui) and updates it.
+- Reads and updates the shared volume.
+
+------------------------------------------------------------------------------------
+ Record thread   (src/record.rs)
+------------------------------------------------------------------------------------
+- Receives the global stop signal on stop_all_rx.
+- Reads the interrupt counter via interrupt_counter.
+- Reads and updates shared state: volume, recording_paused, and peak.
+- Sends microphone audio to the conversation thread via conv_tx.
+- Sends recognized utterance audio to the conversation thread via tx_utt.
+- Sends a playback‑stop request on stop_play_tx.
+
+------------------------------------------------------------------------------------
+ Conversation thread   (src/conversation.rs)
+------------------------------------------------------------------------------------
+- Receives the global stop signal on stop_all_rx.
+- Receives utterance chunks from the record thread on rx_utt.
+- Sends processed speech audio to the playback thread via tx_play.
+- Sends a global stop signal on stop_all_tx when needed.
+
+------------------------------------------------------------------------------------
+ Keyboard thread    (src/keyword.rs)
+------------------------------------------------------------------------------------
+- Receives the global stop signal on stop_all_rx.
+- Sends the global stop signal via stop_all_tx.
+- Reads control flags: paused, playback_active.
+- Reads the recording‑paused flag via recording_paused.
+- Reads configuration: voice, args.tts, args.language.
