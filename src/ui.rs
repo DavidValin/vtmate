@@ -27,7 +27,6 @@ pub fn spawn_ui_thread(
   ui: crate::state::UiState,
   stop_all_rx: Receiver<()>,
   status_line: Arc<Mutex<String>>,
-  _print_lock: Arc<Mutex<()>>,
   peak: Arc<Mutex<f32>>,
 ) -> thread::JoinHandle<()> {
   thread::spawn(move || {
@@ -46,11 +45,13 @@ pub fn spawn_ui_thread(
       }
 
       let state = GLOBAL_STATE.get().expect("AppState not initialized");
-      let speak = state.ui.speaking.load(Ordering::Relaxed);
+      let speak = state.ui.agent_speaking.load(Ordering::Relaxed);
       let think = ui.thinking.load(Ordering::Relaxed);
       let play = state.ui.playing.load(Ordering::Relaxed);
-      let paused = state.recording_paused.load(Ordering::Relaxed);
-      let status = if paused {
+      let recording_paused = state.recording_paused.load(Ordering::Relaxed);
+      let conversation_paused = state.conversation_paused.load(Ordering::Relaxed);
+
+      let status = if recording_paused {
         format!("⏸️")
       } else if think {
         format!("🤔 {}", spinner[i % spinner.len()])
@@ -61,7 +62,6 @@ pub fn spawn_ui_thread(
       } else {
         format!("🎤 {}", spinner[i % spinner.len()])
       };
-      let _status_vis_len = visible_len(&status);
 
       let (cols_raw, _) = terminal::size().unwrap_or((80, 24));
 
@@ -83,48 +83,90 @@ pub fn spawn_ui_thread(
       };
       let speed_str = format!("[{:.1}x]", get_speed());
       let voice_str = format!("({})", get_voice());
-      let paused_str = if paused {
+
+      let recording_paused_str = if recording_paused {
         "\x1b[41m\x1b[37m  paused  \x1b[0m"
       } else {
         "\x1b[43m\x1b[30m listening \x1b[0m"
       };
-      let paused_vis_len = visible_len(paused_str);
+      let recording_paused_vis_len = visible_len(recording_paused_str);
+
+      // Internal status blocks
+      let internal_status = format!(
+        "{}{}{}{}",
+        if recording_paused {
+          "\x1b[47m█\x1b[0m"
+        } else {
+          "\x1b[100m█\x1b[0m"
+        },
+        if conversation_paused {
+          "\x1b[47m█\x1b[0m"
+        } else {
+          "\x1b[100m█\x1b[0m"
+        },
+        if state.playback.paused.load(Ordering::Relaxed) {
+          "\x1b[100m█\x1b[0m"
+        } else {
+          "\x1b[47m█\x1b[0m"
+        },
+        if state.playback.playback_active.load(Ordering::Relaxed) {
+          "\x1b[47m█\x1b[0m"
+        } else {
+          "\x1b[100m█\x1b[0m"
+        }
+      );
+      let combined_status = format!("{} {} ", voice_str, internal_status);
 
       // Use the actual visible width of the status for bar calculations
       let max_bar_len = if cols
-        > visible_len(&status) + 2 + voice_str.len() + 1 + speed_str.len() + paused_vis_len
+        > visible_len(&status)
+          + 2
+          + visible_len(&combined_status)
+          + 1
+          + visible_len(&speed_str)
+          + recording_paused_vis_len
       {
         BAR_WIDTH
       } else {
         let available = cols.saturating_sub(
-          visible_len(&status) + 2 + voice_str.len() + 1 + speed_str.len() + paused_vis_len,
+          visible_len(&status)
+            + 2
+            + visible_len(&combined_status)
+            + 1
+            + visible_len(&speed_str)
+            + recording_paused_vis_len,
         );
         let max_bar_len = if available > 10 { 10 } else { available };
         max_bar_len
       };
 
       let bar_len = ((peak_val * (max_bar_len as f32)).round() as usize).min(max_bar_len);
-      let bar_color = if paused {
+      let bar_color = if recording_paused {
         "\x1b[37m"
-      } else if state.ui.speaking.load(Ordering::Relaxed) {
+      } else if state.ui.agent_speaking.load(Ordering::Relaxed) {
         "\x1b[31m"
       } else {
         "\x1b[37m"
       };
-      let bar_len = if paused { 0 } else { bar_len };
+      let bar_len = if recording_paused { 0 } else { bar_len };
       let bar = format!("{}{}\x1b[0m", bar_color, "█".repeat(bar_len));
 
-      let _status_len = status.len() + 2 + bar_len;
+      let _status_len = visible_len(&status) + 2 + bar_len;
       let spaces = if cols
-        > visible_len(&status) + 2 + bar_len + speed_str.len() + voice_str.len() + paused_vis_len
+        > visible_len(&status)
+          + 2
+          + bar_len
+          + visible_len(&speed_str)
+          + visible_len(&combined_status)
+          + recording_paused_vis_len
       {
         cols
           - visible_len(&status)
           - 2
           - bar_len
-          - speed_str.len()
-          - voice_str.len()
-          - paused_vis_len
+          - visible_len(&speed_str)
+          - visible_len(&combined_status)
+          - recording_paused_vis_len
       } else {
         0
       };
@@ -132,7 +174,7 @@ pub fn spawn_ui_thread(
       let status_without_speed = format!("{} {}{}", status, bar, " ".repeat(spaces));
       let status_with_bar = format!(
         "{}{} {}{}",
-        status_without_speed, speed_str, voice_str, paused_str
+        status_without_speed, speed_str, combined_status, recording_paused_str
       );
 
       // Update shared status

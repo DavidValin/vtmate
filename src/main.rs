@@ -137,12 +137,10 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
   // broadcast stop signal to all threads
   let (stop_all_tx, stop_all_rx) = bounded::<()>(1);
-  // channel for recording audio chunks
-  let (tx_rec, _rx_rec) = unbounded::<audio::AudioChunk>();
-  // channel for playback audio chunks
-  let (tx_play, rx_play) = unbounded::<audio::AudioChunk>();
   // channel for utterance audio chunks
   let (tx_utt, rx_utt) = unbounded::<audio::AudioChunk>();
+  // channel for playback audio chunks
+  let (tx_play, rx_play) = unbounded::<audio::AudioChunk>();
 
   // Clones for threads
   let rx_play_for_playback = rx_play.clone();
@@ -239,132 +237,124 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     ui.clone(),
     stop_all_rx.clone(),
     status_line.clone(),
-    print_lock.clone(),
     ui.peak.clone(),
   );
 
   // ---- Thread: Playback (persistent) ----
+  let playback_active_for_play = playback_active.clone();
+  let gate_until_ms_for_play = gate_until_ms.clone();
+  let paused_for_play = paused.clone();
+  let ui_for_play = ui.clone();
+  let volume_play_for_play = volume_play.clone();
   let play_handle = thread::spawn({
-    let playback_active = playback_active.clone();
-    let gate_until_ms = gate_until_ms.clone();
-    let stop_all_rx = stop_all_rx_for_playback.clone();
-    let paused = paused.clone();
-    let out_dev = out_dev.clone();
-    let out_cfg_supported_thread = out_cfg_supported.clone();
-    let out_cfg_thread = out_cfg.clone();
-    let ui = ui.clone();
     move || {
       playback::playback_thread(
         &START_INSTANT,
-        out_dev,
-        out_cfg_supported_thread,
-        out_cfg_thread,
+        out_dev.clone(),
+        out_cfg_supported.clone(),
+        out_cfg.clone(),
         rx_play_for_playback,
         stop_play_rx,
-        stop_all_rx.clone(),
-        playback_active,
-        gate_until_ms,
-        paused,
+        stop_all_rx_for_playback.clone(),
+        playback_active_for_play.clone(),
+        gate_until_ms_for_play.clone(),
+        paused_for_play.clone(),
         out_channels,
-        ui,
-        volume_play.clone(),
+        ui_for_play.clone(),
+        volume_play_for_play.clone(),
       )
     }
   });
 
   // ---- Thread: record ----
+  let tx_utt_for_rec = tx_utt.clone();
+  let playback_active_for_rec = playback_active.clone();
+  let gate_until_ms_for_rec = gate_until_ms.clone();
+  let stop_play_tx_for_rec = stop_play_tx.clone();
+  let interrupt_counter_for_rec = interrupt_counter.clone();
+  let stop_all_rx_for_record_for_rec = stop_all_rx_for_record.clone();
+  let ui_peak_for_rec = ui.peak.clone();
+  let ui_for_rec = ui.clone();
+  let volume_rec_for_rec = volume_rec.clone();
+  let recording_paused_for_record_for_rec = recording_paused_for_record.clone();
   let rec_handle = Builder::new()
     .name("record_thread".to_string())
     .stack_size(4 * 1024 * 1024)
     .spawn({
-      let start_instant = &START_INSTANT;
-      let device = in_dev.clone();
-      let supported = in_cfg_supported;
-      let config = in_cfg;
-      let tx = tx_rec.clone();
-      let tx_utt = tx_utt.clone();
-      let vad_thresh = vad_thresh;
-      let end_silence_ms = end_silence_ms;
-      let playback_active = playback_active.clone();
-      let gate_until_ms = gate_until_ms.clone();
-      let stop_play_tx = stop_play_tx.clone();
-      let interrupt_counter = interrupt_counter.clone();
-      let stop_all_rx = stop_all_rx_for_record.clone();
-      let peak = ui.peak.clone();
-      let ui = ui.clone();
       move || {
         record::record_thread(
-          start_instant,
-          device,
-          supported,
-          config,
-          tx,
-          tx_utt,
+          &START_INSTANT,
+          in_dev.clone(),
+          in_cfg_supported,
+          in_cfg,
+          tx_utt_for_rec.clone(),
           vad_thresh,
           end_silence_ms,
-          playback_active,
-          gate_until_ms,
-          stop_play_tx,
-          interrupt_counter,
-          stop_all_rx,
-          peak,
-          ui,
-          volume_rec.clone(),
-          recording_paused_for_record.clone(),
+          playback_active_for_rec.clone(),
+          gate_until_ms_for_rec.clone(),
+          stop_play_tx_for_rec.clone(),
+          interrupt_counter_for_rec.clone(),
+          stop_all_rx_for_record_for_rec.clone(),
+          ui_peak_for_rec.clone(),
+          ui_for_rec.clone(),
+          volume_rec_for_rec.clone(),
+          recording_paused_for_record_for_rec.clone(),
         )
       }
     })?;
 
   // ---- Thread: conversation ----
-  // clone state for conversation thread to avoid move
-  let state_conv = state.clone();
+  let state_for_conv = state.clone();
+  let rx_utt_for_conv = rx_utt.clone();
+  let tx_play_for_conv = tx_play.clone();
+  let stop_all_rx_for_conv = stop_all_rx.clone();
+  let stop_all_tx_for_conv = stop_all_tx.clone();
+  let out_sample_rate_for_conv = out_sample_rate.clone();
+  let interrupt_counter_for_conv = interrupt_counter.clone();
+  let whisper_path_for_conv = whisper_path.clone();
+  let args_for_conv = args.clone();
+  let ui_for_conv = ui.clone();
+  let status_line_for_conv = status_line.clone();
+  let print_lock_for_conv = print_lock.clone();
+  let conversation_history_for_conv = conversation_history.clone();
   let conv_handle = thread::spawn({
-    let out_sample_rate = out_sample_rate;
-    let interrupt_counter = interrupt_counter.clone();
-    let args = args.clone();
-    let ui = ui.clone();
-    let status_line = status_line.clone();
-    let print_lock = print_lock.clone();
-    let stop_all_tx_conv = stop_all_tx.clone();
-    let conversation_history = conversation_history.clone();
-    let whisper_path = whisper_path.clone();
     move || {
       conversation::conversation_thread(
-        state_conv.voice.clone(),
-        rx_utt,
-        tx_play.clone(),
-        stop_all_rx.clone(),
-        stop_all_tx_conv,
-        out_sample_rate,
-        interrupt_counter,
-        whisper_path,
-        args,
-        ui,
-        status_line,
-        print_lock,
-        conversation_history,
+        state_for_conv.voice.clone(),
+        rx_utt_for_conv,
+        tx_play_for_conv.clone(),
+        stop_all_rx_for_conv.clone(),
+        stop_all_tx_for_conv.clone(),
+        out_sample_rate_for_conv.clone(),
+        interrupt_counter_for_conv.clone(),
+        whisper_path_for_conv.clone(),
+        args_for_conv.clone(),
+        ui_for_conv.clone(),
+        status_line_for_conv.clone(),
+        print_lock_for_conv.clone(),
+        conversation_history_for_conv.clone(),
       )
     }
   });
 
   // ---- Thread: keyboard ----
-  // clone state for keyboard thread
-  let state_key = state.clone();
+  let state_for_key = state.clone();
+  let paused_for_key = paused.clone();
+  let recording_paused_for_key = recording_paused.clone();
+  let voice_for_key = state_for_key.voice.clone();
+  let args_tts_for_key = args.tts.clone();
+  let args_language_for_key = args.language.clone();
+  let stop_all_tx_for_key = stop_all_tx.clone();
   let key_handle = thread::spawn({
-    let stop_all_tx = stop_all_tx.clone();
-    let stop_all_rx = stop_all_rx_for_keyboard.clone();
-    let paused = paused.clone();
-    let playback_active = playback_active.clone();
     move || {
       keyboard::keyboard_thread(
-        stop_all_tx,
-        stop_all_rx,
-        paused,
-        playback_active,
-        recording_paused.clone(),
-        state_key.voice.clone(),
-        args.tts.clone(),
-        args.language.clone(),
+        stop_all_tx_for_key.clone(),
+        stop_all_rx_for_keyboard.clone(),
+        paused_for_key.clone(),
+        recording_paused_for_key.clone(),
+        voice_for_key.clone(),
+        args_tts_for_key.clone(),
+        args_language_for_key.clone(),
       )
     }
   });
@@ -383,7 +373,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let _ = key_handle.join();
   let _ = stop_all_tx.try_send(());
 
-  drop(tx_rec);
   drop(stop_play_tx);
 
   // Wait for all threads to finish

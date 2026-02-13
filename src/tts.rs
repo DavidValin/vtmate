@@ -76,8 +76,9 @@ pub fn speak(
 }
 
 //  Kokoro Tiny TTS integration -------------------------------------
-static KOKORO_ENGINE: OnceLock<Arc<Mutex<TtsEngine>>> = OnceLock::new();
 // +++++++++++++++++++++++++++++
+
+static KOKORO_ENGINE: OnceLock<Arc<Mutex<TtsEngine>>> = OnceLock::new();
 
 pub const KOKORO_VOICES_PER_LANGUAGE: &[(&str, &[&str])] = &[
   // English language

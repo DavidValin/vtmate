@@ -26,7 +26,7 @@ pub struct StreamingTts {
 
 // smaller chunks reduce long synth stalls -> fewer underruns/glitches.
 // (Words are variable length; 10–15 is a safer range for real-time streaming.)
-const MAX_CHUNK_SIZE: usize = 12;
+const MAX_CHUNK_SIZE: usize = 200;
 
 impl StreamingTts {
   pub fn new(engine: Arc<Mutex<TtsEngine>>) -> Self {

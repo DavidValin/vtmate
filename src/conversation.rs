@@ -2,6 +2,7 @@
 //  Conversation
 // ------------------------------------------------------------------
 
+use crate::state::GLOBAL_STATE;
 use std::sync::OnceLock;
 
 static WHISPER_CTX: OnceLock<whisper_rs::WhisperContext> = OnceLock::new();
@@ -18,6 +19,14 @@ pub fn init_whisper_context(model_path: &str) -> &'static whisper_rs::WhisperCon
 }
 
 use crate::START_INSTANT;
+
+fn print_conversation_line(print_lock: &Arc<Mutex<()>>, status_line: &Arc<Mutex<String>>, s: &str) {
+  let state = GLOBAL_STATE.get().expect("AppState not initialized");
+  if !state.conversation_paused.load(Ordering::Relaxed) {
+    crate::ui::ui_println(print_lock, status_line, s);
+  }
+}
+
 use crossbeam_channel::{Receiver, Sender, select};
 use std::cell::Cell;
 use std::sync::{
@@ -51,6 +60,9 @@ pub fn conversation_thread(
       recv(stop_all_rx) -> _ => break,
       recv(rx_utt) -> msg => {
         let Ok(utt) = msg else { break };
+        let state = GLOBAL_STATE.get().expect("AppState not initialized");
+        state.playback.playback_active.store(true, Ordering::Relaxed);
+        state.conversation_paused.store(false, Ordering::Relaxed);
         let pcm_f32: Vec<f32> = utt.data.clone();
         let mono_f32 = if utt.channels == 1 {
             pcm_f32.clone()
@@ -88,8 +100,8 @@ pub fn conversation_thread(
           conversation_history.lock().unwrap().clear();
           continue;
         }
-        crate::ui::ui_println(&print_lock, &status_line, "");
-        crate::ui::ui_println(&print_lock, &status_line, &format!("{} {user_text}", crate::ui::USER_LABEL));
+        print_conversation_line(&print_lock, &status_line, "");
+        print_conversation_line(&print_lock, &status_line, &format!("{} {user_text}", crate::ui::USER_LABEL));
         conversation_history.lock().unwrap().push_str(&format!("{}: {}\n", crate::ui::USER_LABEL, user_text));
         ui.thinking.store(true, Ordering::Relaxed);
 
@@ -98,8 +110,8 @@ pub fn conversation_thread(
         let mut speaker = PhraseSpeaker::new();
         let mut got_any_token = false;
 
-        crate::ui::ui_println(&print_lock, &status_line, "");
-        crate::ui::ui_println(&print_lock, &status_line, crate::ui::ASSIST_LABEL);
+        print_conversation_line(&print_lock, &status_line, "");
+        print_conversation_line(&print_lock, &status_line, crate::ui::ASSIST_LABEL);
 
         let mut interrupted = false;
         let mut interrupted_printed = false;
@@ -110,9 +122,9 @@ pub fn conversation_thread(
             return;
           }
           interrupted_printed = true;
-          crate::ui::ui_println(&print_lock, &status_line, "");
-          crate::ui::ui_println(&print_lock, &status_line, "🛑 USER interrupted");
-          crate::ui::ui_println(&print_lock, &status_line, "");
+          print_conversation_line(&print_lock, &status_line, "");
+          print_conversation_line(&print_lock, &status_line, "🛑 USER interrupted");
+          print_conversation_line(&print_lock, &status_line, "");
         };
 
         let stop_all_tx_clone = stop_all_tx.clone();
@@ -147,7 +159,7 @@ pub fn conversation_thread(
               crate::log::log("info", &format!("Time from speech end to first phrase playback: {:.2?}", elapsed_ms));
               first_phrase_logged = true;
             }
-            crate::ui::ui_println(&print_lock, &status_line, &phrase);
+            print_conversation_line(&print_lock, &status_line, &phrase);
             conversation_history.lock().unwrap().push_str(&format!("{}: {}\n", crate::ui::ASSIST_LABEL, phrase));
 
             let outcome = match crate::tts::speak(
@@ -237,7 +249,7 @@ pub fn conversation_thread(
         }
 
         if let Some(phrase) = speaker.flush() {
-          crate::ui::ui_println(&print_lock, &status_line, &phrase);
+          print_conversation_line(&print_lock, &status_line, &phrase);
           conversation_history.lock().unwrap().push_str(&format!("{}: {}\n", crate::ui::ASSIST_LABEL, phrase));
           let outcome = match crate::tts::speak(
             &strip_special_chars(&phrase),

@@ -2,7 +2,7 @@
 //  Keyboard handling
 // ------------------------------------------------------------------
 
-use crate::state::{decrease_voice_speed, increase_voice_speed};
+use crate::state::{GLOBAL_STATE, decrease_voice_speed, increase_voice_speed};
 use crate::tts;
 use crossbeam_channel::{Receiver, Sender};
 use crossterm::{
@@ -13,7 +13,7 @@ use std::sync::{
   Arc, Mutex,
   atomic::{AtomicBool, Ordering},
 };
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 // API
 // ------------------------------------------------------------------
@@ -22,7 +22,6 @@ pub fn keyboard_thread(
   stop_all_tx: Sender<()>,
   stop_all_rx: Receiver<()>,
   paused: Arc<AtomicBool>,
-  playback_active: Arc<AtomicBool>,
   recording_paused: Arc<AtomicBool>,
   voice_state: Arc<Mutex<String>>,
   tts: String,
@@ -30,6 +29,7 @@ pub fn keyboard_thread(
 ) {
   // Raw mode lets us capture single key presses (space to pause/resume).
   let _ = terminal::enable_raw_mode();
+  let mut last_esc: Option<Instant> = None;
 
   loop {
     if stop_all_rx.try_recv().is_ok() {
@@ -54,14 +54,28 @@ pub fn keyboard_thread(
 
         match k.code {
           KeyCode::Char(' ') => {
-            if playback_active.load(Ordering::Relaxed) {
-              let new_val = !paused.load(Ordering::Relaxed);
-              paused.store(new_val, Ordering::Relaxed);
-            }
+            // Toggle recording pause only
+            let new_val = !recording_paused.load(Ordering::Relaxed);
+            recording_paused.store(new_val, Ordering::Relaxed);
           }
           KeyCode::Esc => {
-            let _ = stop_all_tx.try_send(());
-            break;
+            // single ESC pauses playback
+            paused.store(true, Ordering::Relaxed);
+            let now = Instant::now();
+            if let Some(prev) = last_esc {
+              if now.duration_since(prev) <= Duration::from_millis(1000) {
+                // double ESC toggles conversation rendering pause
+                let state = GLOBAL_STATE.get().expect("AppState not initialized");
+                let paused = state.conversation_paused.load(Ordering::Relaxed);
+                state.conversation_paused.store(!paused, Ordering::Relaxed);
+                // reset last_esc to avoid triple press
+                last_esc = None;
+              } else {
+                last_esc = Some(now);
+              }
+            } else {
+              last_esc = Some(now);
+            }
           }
 
           // increase voice speed
@@ -98,11 +112,7 @@ pub fn keyboard_thread(
           _ => {}
         }
 
-        // pause/resume recording
-        if k.code == KeyCode::Char(' ') {
-          let new_val = !recording_paused.load(Ordering::Relaxed);
-          recording_paused.store(new_val, Ordering::Relaxed);
-        }
+        //
       }
     }
   }

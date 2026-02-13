@@ -71,11 +71,7 @@ pub struct Args {
   pub ollama_model: String,
 
   /// Llama‑Server URL (used when --llm=llama-server)
-  #[arg(
-    long,
-    default_value = "http://0.0.0.0:8080",
-    env = "LLAMA_SERVER_URL"
-  )]
+  #[arg(long, default_value = "http://0.0.0.0:8080", env = "LLAMA_SERVER_URL")]
   pub llama_server_url: String,
 
   /// OpenTTS base URL (we append &text=...)
@@ -90,7 +86,7 @@ pub struct Args {
 
 const SOUND_THRESHOLD_PEAK_DEFAULT: f32 = 0.10;
 pub const HANGOVER_MS_DEFAULT: u64 = 1000;
-const END_SILENCE_MS_DEFAULT: u64 = 1000;
+const END_SILENCE_MS_DEFAULT: u64 = 1200;
 pub const MIN_UTTERANCE_MS_DEFAULT: u64 = 300;
 pub const OLLAMA_URL_DEFAULT: &str = "http://0.0.0.0:11434/api/generate";
 pub const OLLAMA_MODEL_DEFAULT: &str = "llama3.2:3b";

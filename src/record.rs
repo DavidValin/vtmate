@@ -21,7 +21,6 @@ pub fn record_thread(
   device: cpal::Device,
   supported: cpal::SupportedStreamConfig,
   config: cpal::StreamConfig,
-  tx: Sender<crate::audio::AudioChunk>,     // mic -> router
   tx_utt: Sender<crate::audio::AudioChunk>, // utterance -> conversation
   vad_thresh: f32,
   end_silence_ms: u64,
@@ -45,14 +44,9 @@ pub fn record_thread(
     crate::util::env_u64("MIN_UTTERANCE_MS", crate::config::MIN_UTTERANCE_MS_DEFAULT);
   let hangover_ms = crate::util::env_u64("HANGOVER_MS", crate::config::HANGOVER_MS_DEFAULT);
 
-  // chunker for mic->router
-  let accum: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::with_capacity(
-    crate::tts::CHUNK_FRAMES * channels as usize,
-  )));
-
   // utterance capture state
   let utt_buf: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
-  let in_speech = Arc::new(AtomicBool::new(false));
+  let user_speaking = Arc::new(AtomicBool::new(false));
   let last_voice_ms = Arc::new(AtomicU64::new(0));
 
   // debounced stop signal
@@ -67,7 +61,6 @@ pub fn record_thread(
       &config,
       channels,
       sample_rate,
-      tx.clone(),
       tx_utt.clone(),
       vad_thresh,
       end_silence_ms,
@@ -77,9 +70,8 @@ pub fn record_thread(
       gate_until_ms.clone(),
       stop_play_tx.clone(),
       interrupt_counter.clone(),
-      accum.clone(),
       utt_buf.clone(),
-      in_speech.clone(),
+      user_speaking.clone(),
       last_voice_ms.clone(),
       stop_sent.clone(),
       stop_all_rx.clone(),
@@ -95,7 +87,6 @@ pub fn record_thread(
       &config,
       channels,
       sample_rate,
-      tx.clone(),
       tx_utt.clone(),
       vad_thresh,
       end_silence_ms,
@@ -105,9 +96,8 @@ pub fn record_thread(
       gate_until_ms.clone(),
       stop_play_tx.clone(),
       interrupt_counter.clone(),
-      accum.clone(),
       utt_buf.clone(),
-      in_speech.clone(),
+      user_speaking.clone(),
       last_voice_ms.clone(),
       stop_sent.clone(),
       stop_all_rx.clone(),
@@ -123,7 +113,6 @@ pub fn record_thread(
       &config,
       channels,
       sample_rate,
-      tx.clone(),
       tx_utt.clone(),
       vad_thresh,
       end_silence_ms,
@@ -133,9 +122,8 @@ pub fn record_thread(
       gate_until_ms.clone(),
       stop_play_tx.clone(),
       interrupt_counter.clone(),
-      accum.clone(),
       utt_buf.clone(),
-      in_speech.clone(),
+      user_speaking.clone(),
       last_voice_ms.clone(),
       stop_sent.clone(),
       stop_all_rx.clone(),
@@ -167,7 +155,6 @@ fn build_input_f32(
   config: &cpal::StreamConfig,
   channels: u16,
   sample_rate: u32,
-  tx: Sender<crate::audio::AudioChunk>,
   tx_utt: Sender<crate::audio::AudioChunk>,
   vad_thresh: f32,
   end_silence_ms: u64,
@@ -177,9 +164,8 @@ fn build_input_f32(
   gate_until_ms: Arc<AtomicU64>,
   stop_play_tx: Sender<()>,
   interrupt_counter: Arc<AtomicU64>,
-  accum: Arc<Mutex<Vec<f32>>>,
   utt_buf: Arc<Mutex<Vec<f32>>>,
-  in_speech: Arc<AtomicBool>,
+  user_speaking: Arc<AtomicBool>,
   last_voice_ms: Arc<AtomicU64>,
   stop_sent: Arc<AtomicBool>,
   stop_all_rx: Receiver<()>,
@@ -207,9 +193,9 @@ fn build_input_f32(
       // use previously computed peak for threshold check
       if local_peak >= vad_thresh {
         last_voice_ms.store(crate::util::now_ms(start_instant), Ordering::Relaxed);
-        ui.speaking.store(true, Ordering::Relaxed);
+        ui.agent_speaking.store(true, Ordering::Relaxed);
 
-        if !in_speech.swap(true, Ordering::Relaxed) {
+        if !user_speaking.swap(true, Ordering::Relaxed) {
           let mut b = utt_buf.lock().unwrap();
           b.clear();
           crate::log::log("info", &format!("Audio detected (peak: {:.3})", local_peak));
@@ -234,16 +220,18 @@ fn build_input_f32(
           playback_active.store(false, Ordering::Relaxed);
           stop_sent.store(false, Ordering::Relaxed);
         }
-      } else if in_speech.load(Ordering::Relaxed) {
+      } else if user_speaking.load(Ordering::Relaxed) {
         {
           let mut b = utt_buf.lock().unwrap();
           b.extend_from_slice(data);
         }
         let last = last_voice_ms.load(Ordering::Relaxed);
+
+        // silence detected
         if last > 0 && crate::util::now_ms(start_instant).saturating_sub(last) >= end_silence_ms {
           crate::log::log("info", "Silence detected");
-          ui.speaking.store(false, Ordering::Relaxed);
-          in_speech.store(false, Ordering::Relaxed);
+          ui.agent_speaking.store(false, Ordering::Relaxed);
+          user_speaking.store(false, Ordering::Relaxed);
           stop_sent.store(false, Ordering::Relaxed);
           let mut b = utt_buf.lock().unwrap();
           if !b.is_empty() {
@@ -258,11 +246,13 @@ fn build_input_f32(
                 audio.len()
               ),
             );
+            // new utterance
             if dur_ms >= min_utt_ms {
               crate::util::SPEECH_END_AT.store(
                 crate::util::now_ms(&START_INSTANT),
                 std::sync::atomic::Ordering::SeqCst,
               );
+              // commit utterance audio
               let _ = tx_utt.send(crate::audio::AudioChunk {
                 data: audio,
                 channels,
@@ -270,7 +260,7 @@ fn build_input_f32(
               });
             } else {
               crate::log::log(
-                "warning",
+                "info",
                 &format!(
                   "[{}ms] utterance too short ({}ms < {}ms), dropped",
                   crate::util::now_ms(start_instant),
@@ -284,35 +274,6 @@ fn build_input_f32(
       } else {
         stop_sent.store(false, Ordering::Relaxed);
       }
-
-      let gate_active = playback_active.load(Ordering::Relaxed)
-        || crate::util::now_ms(start_instant) < gate_until_ms.load(Ordering::Relaxed);
-
-      if gate_active {
-        let zeros = vec![0.0f32; data.len()];
-        chunk_and_send(&zeros, channels, sample_rate, &tx, &accum);
-      } else {
-        // FIX: if input is multichannel interleaved, downmix to mono before resampling
-        let ch = (channels as usize).max(1);
-        let mono: Vec<f32> = if ch == 1 {
-          data.to_vec()
-        } else {
-          let frames = data.len() / ch;
-          let mut out = Vec::with_capacity(frames);
-          for f in 0..frames {
-            let mut acc = 0.0f32;
-            let base = f * ch;
-            for c in 0..ch {
-              acc += data[base + c];
-            }
-            out.push(acc / ch as f32);
-          }
-          out
-        };
-
-        let resampled = crate::audio::resample_to(&mono, 1, sample_rate, 16000);
-        chunk_and_send(&resampled, 1, 16000, &tx, &accum);
-      }
     },
     move |e| err_fn(e),
     None,
@@ -325,7 +286,6 @@ fn build_input_i16(
   config: &cpal::StreamConfig,
   channels: u16,
   sample_rate: u32,
-  tx: Sender<crate::audio::AudioChunk>,
   tx_utt: Sender<crate::audio::AudioChunk>,
   vad_thresh: f32,
   end_silence_ms: u64,
@@ -335,9 +295,8 @@ fn build_input_i16(
   gate_until_ms: Arc<AtomicU64>,
   stop_play_tx: Sender<()>,
   interrupt_counter: Arc<AtomicU64>,
-  accum: Arc<Mutex<Vec<f32>>>,
   utt_buf: Arc<Mutex<Vec<f32>>>,
-  in_speech: Arc<AtomicBool>,
+  user_speaking: Arc<AtomicBool>,
   last_voice_ms: Arc<AtomicU64>,
   stop_sent: Arc<AtomicBool>,
   stop_all_rx: Receiver<()>,
@@ -370,9 +329,9 @@ fn build_input_i16(
 
       if local_peak >= vad_thresh {
         last_voice_ms.store(crate::util::now_ms(start_instant), Ordering::Relaxed);
-        ui.speaking.store(true, Ordering::Relaxed);
+        ui.agent_speaking.store(true, Ordering::Relaxed);
 
-        if !in_speech.swap(true, Ordering::Relaxed) {
+        if !user_speaking.swap(true, Ordering::Relaxed) {
           let mut b = utt_buf.lock().unwrap();
           b.clear();
           crate::log::log("info", &format!("Audio detected (peak: {:.3})", local_peak));
@@ -396,7 +355,7 @@ fn build_input_i16(
           playback_active.store(false, Ordering::Relaxed);
           stop_sent.store(false, Ordering::Relaxed);
         }
-      } else if in_speech.load(Ordering::Relaxed) {
+      } else if user_speaking.load(Ordering::Relaxed) {
         {
           let mut b = utt_buf.lock().unwrap();
           b.extend_from_slice(&tmp);
@@ -404,8 +363,8 @@ fn build_input_i16(
         let last = last_voice_ms.load(Ordering::Relaxed);
         if last > 0 && crate::util::now_ms(start_instant).saturating_sub(last) >= end_silence_ms {
           crate::log::log("info", "Silence detected");
-          ui.speaking.store(false, Ordering::Relaxed);
-          in_speech.store(false, Ordering::Relaxed);
+          ui.agent_speaking.store(false, Ordering::Relaxed);
+          user_speaking.store(false, Ordering::Relaxed);
           stop_sent.store(false, Ordering::Relaxed);
           let mut b = utt_buf.lock().unwrap();
           if !b.is_empty() {
@@ -447,35 +406,6 @@ fn build_input_i16(
       } else {
         stop_sent.store(false, Ordering::Relaxed);
       }
-
-      let gate_active = playback_active.load(Ordering::Relaxed)
-        || crate::util::now_ms(start_instant) < gate_until_ms.load(Ordering::Relaxed);
-
-      if gate_active {
-        let zeros = vec![0.0f32; tmp.len()];
-        chunk_and_send(&zeros, channels, sample_rate, &tx, &accum);
-      } else {
-        // FIX: downmix interleaved to mono before resampling
-        let ch = (channels as usize).max(1);
-        let mono: Vec<f32> = if ch == 1 {
-          tmp.clone()
-        } else {
-          let frames = tmp.len() / ch;
-          let mut out = Vec::with_capacity(frames);
-          for f in 0..frames {
-            let mut acc = 0.0f32;
-            let base = f * ch;
-            for c in 0..ch {
-              acc += tmp[base + c];
-            }
-            out.push(acc / ch as f32);
-          }
-          out
-        };
-
-        let resampled = crate::audio::resample_to(&mono, 1, sample_rate, 16000);
-        chunk_and_send(&resampled, 1, 16000, &tx, &accum);
-      }
     },
     move |e| err_fn(e),
     None,
@@ -488,7 +418,6 @@ fn build_input_u16(
   config: &cpal::StreamConfig,
   channels: u16,
   sample_rate: u32,
-  tx: Sender<crate::audio::AudioChunk>,
   tx_utt: Sender<crate::audio::AudioChunk>,
   vad_thresh: f32,
   end_silence_ms: u64,
@@ -498,9 +427,8 @@ fn build_input_u16(
   gate_until_ms: Arc<AtomicU64>,
   stop_play_tx: Sender<()>,
   interrupt_counter: Arc<AtomicU64>,
-  accum: Arc<Mutex<Vec<f32>>>,
   utt_buf: Arc<Mutex<Vec<f32>>>,
-  in_speech: Arc<AtomicBool>,
+  user_speaking: Arc<AtomicBool>,
   last_voice_ms: Arc<AtomicU64>,
   stop_sent: Arc<AtomicBool>,
   stop_all_rx: Receiver<()>,
@@ -535,9 +463,9 @@ fn build_input_u16(
       if local_peak >= vad_thresh {
         // FIX: remove duplicate stores
         last_voice_ms.store(crate::util::now_ms(start_instant), Ordering::Relaxed);
-        ui.speaking.store(true, Ordering::Relaxed);
+        ui.agent_speaking.store(true, Ordering::Relaxed);
 
-        if !in_speech.swap(true, Ordering::Relaxed) {
+        if !user_speaking.swap(true, Ordering::Relaxed) {
           let mut b = utt_buf.lock().unwrap();
           b.clear();
           crate::log::log("info", &format!("Audio detected (peak: {:.3})", local_peak));
@@ -561,7 +489,7 @@ fn build_input_u16(
           playback_active.store(false, Ordering::Relaxed);
           stop_sent.store(false, Ordering::Relaxed);
         }
-      } else if in_speech.load(Ordering::Relaxed) {
+      } else if user_speaking.load(Ordering::Relaxed) {
         {
           let mut b = utt_buf.lock().unwrap();
           b.extend_from_slice(&tmp);
@@ -570,9 +498,9 @@ fn build_input_u16(
         if last > 0 && crate::util::now_ms(start_instant).saturating_sub(last) >= end_silence_ms {
           crate::log::log("info", "Silence detected");
           // FIX: ensure UI clears speaking state on silence
-          ui.speaking.store(false, Ordering::Relaxed);
+          ui.agent_speaking.store(false, Ordering::Relaxed);
 
-          in_speech.store(false, Ordering::Relaxed);
+          user_speaking.store(false, Ordering::Relaxed);
           stop_sent.store(false, Ordering::Relaxed);
 
           let mut b = utt_buf.lock().unwrap();
@@ -604,60 +532,10 @@ fn build_input_u16(
       } else {
         stop_sent.store(false, Ordering::Relaxed);
       }
-
-      let gate_active = playback_active.load(Ordering::Relaxed)
-        || crate::util::now_ms(start_instant) < gate_until_ms.load(Ordering::Relaxed);
-
-      if gate_active {
-        let zeros = vec![0.0f32; tmp.len()];
-        chunk_and_send(&zeros, channels, sample_rate, &tx, &accum);
-      } else {
-        // FIX: downmix interleaved to mono before resampling
-        let ch = (channels as usize).max(1);
-        let mono: Vec<f32> = if ch == 1 {
-          tmp.clone()
-        } else {
-          let frames = tmp.len() / ch;
-          let mut out = Vec::with_capacity(frames);
-          for f in 0..frames {
-            let mut acc = 0.0f32;
-            let base = f * ch;
-            for c in 0..ch {
-              acc += tmp[base + c];
-            }
-            out.push(acc / ch as f32);
-          }
-          out
-        };
-
-        let resampled = crate::audio::resample_to(&mono, 1, sample_rate, 16000);
-        chunk_and_send(&resampled, 1, 16000, &tx, &accum);
-      }
     },
     move |e| err_fn(e),
     None,
   )
-}
-
-fn chunk_and_send(
-  data: &[f32],
-  channels: u16,
-  sample_rate: u32,
-  tx: &Sender<crate::audio::AudioChunk>,
-  accum: &Arc<Mutex<Vec<f32>>>,
-) {
-  let mut acc = accum.lock().unwrap();
-  acc.extend_from_slice(data);
-
-  let chunk_len = crate::tts::CHUNK_FRAMES * channels as usize;
-  while acc.len() >= chunk_len {
-    let chunk_data: Vec<f32> = acc.drain(..chunk_len).collect();
-    let _ = tx.try_send(crate::audio::AudioChunk {
-      data: chunk_data,
-      channels,
-      sample_rate,
-    });
-  }
 }
 
 fn peak_abs(x: &[f32]) -> f32 {

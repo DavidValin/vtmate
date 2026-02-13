@@ -12,8 +12,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 pub struct UiState {
   pub thinking: Arc<AtomicBool>,
   pub playing: Arc<AtomicBool>,
-  pub speaking: Arc<AtomicBool>, // voice activity flag
-  pub peak: Arc<Mutex<f32>>,     // current audio peak
+  pub agent_speaking: Arc<AtomicBool>, // voice activity flag
+  pub peak: Arc<Mutex<f32>>,           // current audio peak
 }
 
 #[derive(Debug)]
@@ -28,6 +28,7 @@ pub static GLOBAL_STATE: OnceLock<Arc<AppState>> = OnceLock::new();
 
 #[derive(Debug)]
 pub struct AppState {
+  pub conversation_paused: Arc<AtomicBool>,
   pub voice: Arc<Mutex<String>>,
   pub ui: UiState,
   pub speed: AtomicU32,
@@ -42,16 +43,21 @@ pub struct AppState {
 impl AppState {
   pub fn new_with_voice(voice: String) -> Self {
     Self {
+      conversation_paused: Arc::new(AtomicBool::new(false)),
+      voice: Arc::new(Mutex::new(voice)),
       ui: UiState {
         thinking: Arc::new(AtomicBool::new(false)),
         playing: Arc::new(AtomicBool::new(false)),
-        speaking: Arc::new(AtomicBool::new(false)),
+        agent_speaking: Arc::new(AtomicBool::new(false)), // tts synthesizing
         peak: Arc::new(Mutex::new(0.0)),
       },
       speed: AtomicU32::new(12),
       conversation_history: std::sync::Arc::new(std::sync::Mutex::new(String::new())),
       playback: PlaybackState {
+        // user initialized pause
         paused: Arc::new(AtomicBool::new(false)),
+        // playback thread playing sound (or has queued audio to play)
+        // set to false when volume is 0 or the stream is stopped/ended
         playback_active: Arc::new(AtomicBool::new(false)),
         gate_until_ms: Arc::new(AtomicU64::new(0)),
         volume: Arc::new(Mutex::new(1.0_f32)),
@@ -60,7 +66,6 @@ impl AppState {
       print_lock: Arc::new(Mutex::new(())),
       interrupt_counter: Arc::new(AtomicU64::new(0)),
       recording_paused: Arc::new(AtomicBool::new(false)),
-      voice: Arc::new(Mutex::new(voice)),
     }
   }
 }
