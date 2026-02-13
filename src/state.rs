@@ -38,6 +38,7 @@ pub struct AppState {
   pub print_lock: Arc<Mutex<()>>,
   pub interrupt_counter: Arc<AtomicU64>,
   pub recording_paused: Arc<AtomicBool>,
+  pub processing_response: Arc<AtomicBool>,
 }
 
 impl AppState {
@@ -66,6 +67,7 @@ impl AppState {
       print_lock: Arc::new(Mutex::new(())),
       interrupt_counter: Arc::new(AtomicU64::new(0)),
       recording_paused: Arc::new(AtomicBool::new(false)),
+      processing_response: Arc::new(AtomicBool::new(false)),
     }
   }
 }

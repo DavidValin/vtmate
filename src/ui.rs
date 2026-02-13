@@ -185,7 +185,7 @@ pub fn spawn_ui_thread(
       let _ = draw(&mut out, &status_with_bar);
 
       i = i.wrapping_add(1);
-      thread::sleep(Duration::from_millis(100));
+      thread::sleep(Duration::from_millis(50));
     }
 
     // Show cursor before exit
