@@ -147,7 +147,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let stop_all_rx_for_playback = stop_all_rx.clone();
   let stop_all_rx_for_record = stop_all_rx.clone();
   let stop_all_rx_for_keyboard = stop_all_rx.clone();
-  let (stop_play_tx, stop_play_rx) = bounded::<()>(2); // stop playback signal
+  let (stop_play_tx, stop_play_rx) = unbounded::<()>(); // stop playback signal
 
   let available_langs = tts::get_all_available_languages();
   if !available_langs.contains(&args.language.as_str()) {
@@ -345,6 +345,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let args_tts_for_key = args.tts.clone();
   let args_language_for_key = args.language.clone();
   let stop_all_tx_for_key = stop_all_tx.clone();
+  let stop_play_tx_for_key = stop_play_tx.clone();
   let key_handle = thread::spawn({
     move || {
       keyboard::keyboard_thread(
@@ -355,6 +356,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         voice_for_key.clone(),
         args_tts_for_key.clone(),
         args_language_for_key.clone(),
+        stop_play_tx_for_key.clone(),
+        interrupt_counter.clone(),
       )
     }
   });

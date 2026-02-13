@@ -2,6 +2,7 @@
 //  Playback
 // ------------------------------------------------------------------
 
+use crate::state::GLOBAL_STATE;
 use cpal::traits::{DeviceTrait, StreamTrait};
 use crossbeam_channel::{Receiver, select};
 use std::collections::VecDeque;
@@ -267,7 +268,7 @@ pub fn playback_thread(
     select! {
       recv(stop_all_rx) -> _ => {
         queue.lock().unwrap().clear();
-        // Drain any queued audio chunks to stop lingering playback
+          // IMPORTANT: also drain any already-enqueued audio chunks.
         while rx_audio.try_recv().is_ok() {}
         playback_active.store(false, Ordering::Relaxed);
         ui.playing.store(false, Ordering::Relaxed);
@@ -284,10 +285,8 @@ pub fn playback_thread(
         *vol = 0.0;
 
         // IMPORTANT: also drain any already-enqueued audio chunks.
-        // Without this, multi-phrase TTS may have queued extra chunks
-        // in the crossbeam channel; they would get played even after
-        // we clear the output queue, and can race with interruption UI.
         while rx_audio.try_recv().is_ok() {}
+        continue;
       }
       recv(rx_audio) -> msg => {
         let Ok(chunk) = msg else { break };
@@ -308,8 +307,13 @@ pub fn playback_thread(
         }
         {
           // restore volume when receiving new audio
-          let mut vol = volume.lock().unwrap();
-          *vol = 1.0;
+          if GLOBAL_STATE.get().unwrap().processing_response.load(Ordering::Relaxed) {
+            let mut vol = volume.lock().unwrap();
+            *vol = 1.0;
+            // reset flag after restoring volume
+            GLOBAL_STATE.get().unwrap().processing_response.store(false, Ordering::Relaxed);
+          }
+
           let mut q = queue.lock().unwrap();
           // convert channels if needed
           let data = if chunk.channels != out_channels {

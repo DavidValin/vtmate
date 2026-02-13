@@ -60,9 +60,14 @@ pub fn conversation_thread(
       recv(stop_all_rx) -> _ => break,
       recv(rx_utt) -> msg => {
         let Ok(utt) = msg else { break };
+        // Drain any pending stop signals from previous turn
+        while stop_all_rx.try_recv().is_ok() {}
+
         let state = GLOBAL_STATE.get().expect("AppState not initialized");
         state.playback.playback_active.store(true, Ordering::Relaxed);
         state.conversation_paused.store(false, Ordering::Relaxed);
+        // start rendering for this turn (agent response to user query)
+        state.processing_response.store(true, Ordering::Relaxed);
         let pcm_f32: Vec<f32> = utt.data.clone();
         let mono_f32 = if utt.channels == 1 {
             pcm_f32.clone()

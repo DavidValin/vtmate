@@ -11,7 +11,7 @@ use crossterm::{
 };
 use std::sync::{
   Arc, Mutex,
-  atomic::{AtomicBool, Ordering},
+  atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::time::{Duration, Instant};
 
@@ -21,11 +21,13 @@ use std::time::{Duration, Instant};
 pub fn keyboard_thread(
   stop_all_tx: Sender<()>,
   stop_all_rx: Receiver<()>,
-  paused: Arc<AtomicBool>,
+  _paused: Arc<AtomicBool>,
   recording_paused: Arc<AtomicBool>,
   voice_state: Arc<Mutex<String>>,
   tts: String,
   language: String,
+  stop_play_tx: Sender<()>,
+  interrupt_counter: Arc<AtomicU64>,
 ) {
   // Raw mode lets us capture single key presses (space to pause/resume).
   let _ = terminal::enable_raw_mode();
@@ -58,17 +60,21 @@ pub fn keyboard_thread(
             let new_val = !recording_paused.load(Ordering::Relaxed);
             recording_paused.store(new_val, Ordering::Relaxed);
           }
+
           KeyCode::Esc => {
-            // single ESC pauses playback
-            paused.store(true, Ordering::Relaxed);
+            // stop playing
+            let _ = stop_play_tx.try_send(());
             let now = Instant::now();
             if let Some(prev) = last_esc {
               if now.duration_since(prev) <= Duration::from_millis(1000) {
-                // double ESC toggles conversation rendering pause
-                let state = GLOBAL_STATE.get().expect("AppState not initialized");
-                let paused = state.conversation_paused.load(Ordering::Relaxed);
-                state.conversation_paused.store(!paused, Ordering::Relaxed);
-                // reset last_esc to avoid triple press
+                // double ESC stops playback and interrupts conversation
+                interrupt_counter.fetch_add(1, Ordering::SeqCst);
+                // flag that we are waiting for next LLM response
+                GLOBAL_STATE
+                  .get()
+                  .unwrap()
+                  .processing_response
+                  .store(true, Ordering::Relaxed);
                 last_esc = None;
               } else {
                 last_esc = Some(now);
