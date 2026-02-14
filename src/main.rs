@@ -210,9 +210,12 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   }
   log::log("info", &format!("Language: {}", args.language));
   log::log("info", &format!("TTS voice: {}", voice_selected));
-  log::log("info", &format!("LLM engine: ollama"));
-  log::log("info", &format!("ollama base url: {}", args.ollama_url));
-
+  log::log("info", &format!("LLM engine: {}", args.llm));
+  if args.llm == "ollama" {
+    log::log("info", &format!("ollama base url: {}", args.ollama_url));
+  } else {
+    log::log("info", &format!("llama-server url: {}", args.llama_server_url));
+  }
   // initialize state after voice_selected
   let state = Arc::new(state::AppState::new_with_voice(voice_selected.clone()));
   let recording_paused = state.recording_paused.clone();
