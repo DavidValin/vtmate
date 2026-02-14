@@ -95,7 +95,7 @@ if "%WIN_WITH_OPENBLAS%"=="1" (
         powershell -Command "Expand-Archive -LiteralPath '%OPENBLAS_ZIP%' -DestinationPath '%VENDOR_DIR%' -Force"
         if errorlevel 1 exit /b 1
 
-        move /Y "%VENDOR_DIR%\OpenBLAS-v0.3.24-x64" "%OPENBLAS_DIR%"
+        move /Y "%VENDOR_DIR%\OpenBLAS-0.3.30-x64-64" "%OPENBLAS_DIR%"
         del "%OPENBLAS_ZIP%"
         echo OpenBLAS ready.
     )
@@ -111,7 +111,7 @@ echo Using eSpeak lib dir : %ESPEAKNG_LIB_DIR%
 REM ===== Rust target =====
 set "TARGET=x86_64-pc-windows-msvc"
 
-REM ===== Build Variants =====
+REM ===== Build order: CPU → OpenBLAS → Vulkan → CUDA =====
 if "%WIN_WITH_VULKAN%"=="" set "WIN_WITH_VULKAN=1"
 if "%WIN_WITH_CUDA%"=="" set "WIN_WITH_CUDA=1"
 
@@ -149,7 +149,7 @@ REM Build release with Rust
 cargo build --release --target %TARGET%
 if errorlevel 1 exit /b 1
 
-REM Copy and rename binary
+REM Copy and rename binary per variant
 set "SRC_BIN=%PROJECT_ROOT%target\%TARGET%\release\%BIN_BASE%.exe"
 set "DST_BIN=%OUT_DIR%\%BIN_BASE%-%VARIANT%.exe"
 
