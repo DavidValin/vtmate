@@ -31,7 +31,8 @@ See it in action: [Demo](https://www.youtube.com/watch?v=x0RAX3-PLnE)
 - 📌 Recording Pause / Resume: `toggle "<SPACE>" key to pause / resume voice recording only`
 - 📌 Stop PlayBack: `press "<ESCAPE>" once to stop the playback for the current response`
 - 📌 Interrupt: `press "<ESCAPE>" twice to interrupt the current response alltogether`
-- 📌 Voice speed change: `change the agent voice speed by pressing <ARROW_UP> / <ARROW_DOWN>. Do this before asking anything new`
+- 📌 Voice speed change: `change the agent voice speed by pressing <ARROW_UP> / <ARROW_DOWN> (applicable to next response)`
+- 📌 Voice change: `change the agent voice by pressing <ARROW_LEFT> / <ARROW_RIGHT> (applicable to next response)`
 - 📌 Integrated `whisper`
 - 📌 Integrated `kokoro TTS` system
 - 📌 Interface with `OpenTTS` system
