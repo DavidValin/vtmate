@@ -52,7 +52,8 @@ if not exist "%ESPEAK_INSTALL%\lib\espeak-ng.lib" (
           -DCMAKE_INSTALL_PREFIX="%ESPEAK_INSTALL%" ^
           -DBUILD_SHARED_LIBS=OFF ^
           -DESPEAKNG_BUILD_TESTS=OFF ^
-          -DESPEAKNG_BUILD_EXAMPLES=OFF
+          -DESPEAKNG_BUILD_EXAMPLES=OFF ^
+          -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
 
     if errorlevel 1 exit /b 1
 
@@ -71,6 +72,9 @@ echo Using eSpeak lib dir : %ESPEAKNG_LIB_DIR%
 
 REM ===== Rust target =====
 set "TARGET=x86_64-pc-windows-msvc"
+
+REM ===== Force static MSVC runtime =====
+set "RUSTFLAGS=-C target-feature=+crt-static"
 
 REM ===== Build Variants =====
 if "%WIN_WITH_OPENBLAS%"=="" set "WIN_WITH_OPENBLAS=1"
