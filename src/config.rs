@@ -2,6 +2,7 @@
 //  Configuration
 // ------------------------------------------------------------------
 
+use crate::util::get_user_home_path;
 use clap::Parser;
 use cpal::traits::DeviceTrait;
 use cpal::Device;
@@ -102,13 +103,14 @@ impl Args {
   /// Resolve the whisper model path, expanding ~ to home directory.
   pub fn resolved_whisper_model_path(&self) -> String {
     if self.whisper_model_path.starts_with("~") {
-      let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_else(|_| ".".to_string());
-      let rel = self.whisper_model_path.trim_start_matches("~");
-      let mut p = std::path::PathBuf::from(home);
-      p.push(&rel[1..]); // remove leading /
-      p.to_string_lossy().into_owned()
+      if let Some(home) = get_user_home_path() {
+        let rel = self.whisper_model_path.trim_start_matches("~");
+        let mut p = home;
+        p.push(&rel[1..]);
+        p.to_string_lossy().into_owned()
+      } else {
+        self.whisper_model_path.clone()
+      }
     } else {
       self.whisper_model_path.clone()
     }
