@@ -5,6 +5,9 @@
 use crate::audio;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext};
 
+// API
+// ------------------------------------------------------------------
+
 /// Warm‑up helper for Whisper
 /// Call this once at startup to load the model and perform a no‑op
 /// inference to cache the model into memory.
