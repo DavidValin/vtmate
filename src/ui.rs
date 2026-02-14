@@ -5,7 +5,7 @@
 use crate::state::{GLOBAL_STATE, get_speed, get_voice};
 use crossbeam_channel::Receiver;
 use crossterm::{
-  cursor::{Hide, MoveTo, Show},
+  cursor::{Hide, MoveTo},
   execute,
   style::{Print, ResetColor},
   terminal,
@@ -13,6 +13,17 @@ use crossterm::{
 };
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex, atomic::Ordering};
+
+pub fn print_conversation_line(
+  print_lock: &Arc<Mutex<()>>,
+  status_line: &Arc<Mutex<String>>,
+  s: &str,
+) {
+  let state = GLOBAL_STATE.get().expect("AppState not initialized");
+  if !state.conversation_paused.load(Ordering::Relaxed) {
+    crate::ui::ui_println(print_lock, status_line, s);
+  }
+}
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -28,6 +39,7 @@ pub fn spawn_ui_thread(
   stop_all_rx: Receiver<()>,
   status_line: Arc<Mutex<String>>,
   peak: Arc<Mutex<f32>>,
+  ui_rx: Receiver<String>,
 ) -> thread::JoinHandle<()> {
   thread::spawn(move || {
     let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -73,7 +85,7 @@ pub fn spawn_ui_thread(
 
       let resizing = last_change.elapsed().as_millis() < 1000;
       if resizing {
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(30));
         continue;
       }
 
@@ -184,12 +196,15 @@ pub fn spawn_ui_thread(
       // Draw status line using crossterm
       let _ = draw(&mut out, &status_with_bar);
 
+      // Handle incoming conversation lines
+      while let Ok(line) = ui_rx.try_recv() {
+        let state = GLOBAL_STATE.get().expect("AppState not initialized");
+        let print_lock = &state.print_lock;
+        print_conversation_line(print_lock, &status_line, &line);
+      }
       i = i.wrapping_add(1);
       thread::sleep(Duration::from_millis(50));
     }
-
-    // Show cursor before exit
-    execute!(out, Show).unwrap();
   })
 }
 

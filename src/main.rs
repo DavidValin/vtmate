@@ -233,11 +233,13 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let print_lock = state.print_lock.clone();
 
   // ---- Thread: UI Thread ----
+  let (tx_ui, rx_ui) = unbounded::<String>();
   let ui_handle = ui::spawn_ui_thread(
     ui.clone(),
     stop_all_rx.clone(),
     status_line.clone(),
     ui.peak.clone(),
+    rx_ui,
   );
 
   // ---- Thread: Playback (persistent) ----
@@ -333,6 +335,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         status_line_for_conv.clone(),
         print_lock_for_conv.clone(),
         conversation_history_for_conv.clone(),
+        tx_ui.clone(),
       )
     }
   });
