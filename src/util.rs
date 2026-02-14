@@ -3,8 +3,8 @@
 // ------------------------------------------------------------------
 
 use std::io::IsTerminal;
-use std::sync::OnceLock;
 use std::sync::atomic::AtomicU64;
+use std::sync::OnceLock;
 use std::time::Instant;
 
 /// Global timestamp of last speech end (in ms since program start).
@@ -12,6 +12,9 @@ pub static SPEECH_END_AT: AtomicU64 = AtomicU64::new(0);
 
 // API
 // ------------------------------------------------------------------
+
+use directories::UserDirs;
+use std::path::PathBuf;
 
 pub fn now_ms(start_instant: &OnceLock<Instant>) -> u64 {
   let start = start_instant.get_or_init(Instant::now);
@@ -89,4 +92,14 @@ pub fn terminal_supported() -> bool {
   let is_tty = std::io::stdout().is_terminal();
   let term = std::env::var("TERM").unwrap_or_default();
   is_tty && term != "dumb"
+}
+
+/// Returns the current user's home directory.
+/// Works on Unix (~, $HOME) and Windows.
+pub fn get_user_home_path() -> Option<PathBuf> {
+  if let Ok(h) = std::env::var("HOME") {
+    Some(PathBuf::from(h))
+  } else {
+    UserDirs::new().map(|u| u.home_dir().to_path_buf())
+  }
 }

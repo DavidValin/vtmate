@@ -2,6 +2,7 @@
 //  Router
 // ------------------------------------------------------------------
 
+use crate::util::get_user_home_path;
 use flate2::read::GzDecoder;
 use std::{fs, io::Cursor, path::PathBuf};
 use tar::Archive;
@@ -14,9 +15,9 @@ pub fn ensure_piper_espeak_env() {
   if std::env::var_os("PIPER_ESPEAKNG_DATA_DIRECTORY").is_some() {
     return;
   }
-  let home = match std::env::var("HOME") {
-    Ok(h) => PathBuf::from(h),
-    Err(_) => return,
+  let home = match get_user_home_path() {
+    Some(h) => h,
+    None => return,
   };
   let base = home.join(".ai-mate");
   let espeak_dir = base.join("espeak-ng-data");
@@ -41,9 +42,9 @@ pub fn ensure_assets_env() {
   if std::env::var_os("KOKORO_TTS_DATA_DIRECTORY").is_some() {
     return;
   }
-  let home = match std::env::var("HOME") {
-    Ok(h) => PathBuf::from(h),
-    Err(_) => return,
+  let home = match get_user_home_path() {
+    Some(h) => h,
+    None => return,
   };
   let kokoro_assets_dir = home.join(".cache/k");
   let whisper_dir = home.join(".whisper-models");
