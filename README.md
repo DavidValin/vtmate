@@ -6,9 +6,9 @@ See it in action: [Demo](https://www.youtube.com/watch?v=x0RAX3-PLnE)
 ### Status
 
 - ✅ First Release Candidate ready! Still fixing bugs
-- ✅ Tested in MacOS
-- ⚠️ Linux version not ready yet
-- ⚠️ Windows version not ready yet
+- ✅ MacOS version ready (Tested in Mac Studio)
+- ✅ Linux version ready
+- ✅ Windows version ready
 
 ## How it works
 
@@ -52,7 +52,7 @@ You can run the models locally (by default) or remotely by configuring the base 
 - ✅ Kokoro TTS (default and integrated)
 - ✅ OpenTTS (requires external service)
 
-### Acceleration support
+## Acceleration support
 
 Do you have GPU? (nvidia? an apple computer?) Great! then ai-mate speed is at lighting speed =)
 
@@ -65,10 +65,10 @@ Do you have GPU? (nvidia? an apple computer?) Great! then ai-mate speed is at li
 ✅ Windows - x64 - CUDA (NVIDIA)
 ❌ Windows - x64 - Vulkan - (still working on it)
 ⚠️ Linux - amd64 - ROCm (AMD acceleration) - Available but Untested
-⚠️ Linux - amd64 - Openblas (CPU acceleration) - Available but Untested
-⚠️ Linux - amd64 - Vulkan - Available but Untested
-⚠️ Linux - arm64 - Openblas - (CPU acceleration) - Available but Untested
-⚠️ Linux - arm64 - Vulkan - Available but Untested
+✅ Linux - amd64 - Openblas (CPU acceleration)
+✅ Linux - amd64 - Vulkan
+✅ Linux - arm64 - Openblas - (CPU acceleration)
+✅ Linux - arm64 - Vulkan
 ```
 Legend:
 - ✅ = Release binary available
