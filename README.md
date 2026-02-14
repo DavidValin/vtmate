@@ -61,7 +61,8 @@ Do you have GPU? (nvidia? an apple computer?) Great! then ai-mate speed is at li
 ✅ Linux - amd64 - (only CPU)
 ✅ Linux - amd64 - CUDA (NVIDIA)
 ⚠️ Windows - x64 - (only CPU) - Available but Untested
-⚠️ Windows - x64 - CUDA (NVIDIA) - Available but Untested
+✅ Windows - x64 - OpenBLAS (CPU acceleration)
+✅ Windows - x64 - CUDA (NVIDIA)
 ❌ Windows - x64 - Vulkan - (still working on it)
 ⚠️ Linux - amd64 - ROCm (AMD acceleration) - Available but Untested
 ⚠️ Linux - amd64 - Openblas (CPU acceleration) - Available but Untested
@@ -70,8 +71,8 @@ Do you have GPU? (nvidia? an apple computer?) Great! then ai-mate speed is at li
 ⚠️ Linux - arm64 - Vulkan - Available but Untested
 ```
 Legend:
-- ✅ = Release binary available and tested
-- ⚠️ = Release binary available but untested
+- ✅ = Release binary available
+- ⚠️ = Release binary available
 - ❌ = Release binary not yet built / unavailable
 
 ## Installation
