@@ -56,11 +56,23 @@ You can run the models locally (by default) or remotely by configuring the base 
 
 Do you have GPU? (nvidia? an apple computer?) Great! then ai-mate speed is at lighting speed =)
 
-- ⚠️ Windows - CUDA (NVIDIA) (working on it)
-- ✅ MacOS - arm64 - Metal acceleration
-- ✅ Linux - amd64 - CUDA (NVIDIA)
-- ⚠️ Linux - amd64 - Openblas - Available but Untested
-- ⚠️ Linux - amd64 - Vulkan - Available but Untested
+```
+✅ MacOS - arm64 - CPU + Apple Metal acceleration
+✅ Linux - amd64 - (only CPU)
+✅ Linux - amd64 - CUDA (NVIDIA)
+⚠️ Windows - x64 - (only CPU) - Available but Untested
+⚠️ Windows - x64 - CUDA (NVIDIA) - Available but Untested
+❌ Windows - x64 - Vulkan - (still working on it)
+⚠️ Linux - amd64 - ROCm (AMD acceleration) - Available but Untested
+⚠️ Linux - amd64 - Openblas (CPU acceleration) - Available but Untested
+⚠️ Linux - amd64 - Vulkan - Available but Untested
+⚠️ Linux - arm64 - Openblas - (CPU acceleration) - Available but Untested
+⚠️ Linux - arm64 - Vulkan - Available but Untested
+```
+Legend:
+- ✅ = Release binary available and tested
+- ⚠️ = Release binary available but untested
+- ❌ = Release binary not yet built / unavailable
 
 ## Installation
 
