@@ -75,7 +75,7 @@ pub fn conversation_thread(
         crate::log::log("debug", "Transcribing utterance...");
         let user_text = crate::stt::whisper_transcribe_with_ctx(&ctx, &mono_f32, utt.sample_rate, &args.language)?;
         crate::log::log("info", &format!("Transcribed: '{}'", user_text));
-        let prompt = format!("{}\n{}: {}\n", conversation_history.lock().unwrap(), crate::ui::USER_LABEL, user_text);
+        let prompt = format!("{}\n{}\n", conversation_history.lock().unwrap(), user_text);
         let cleaned_prompt = crate::util::strip_ansi(&prompt);
         let user_text = user_text.trim().to_string();
         let speech_end_ms = crate::util::SPEECH_END_AT.load(std::sync::atomic::Ordering::SeqCst);
@@ -88,19 +88,17 @@ pub fn conversation_thread(
         // Print user line (keep spinner/emojis only on the latest bottom line).
         let my_interrupt = interrupt_counter.load(Ordering::SeqCst);
         if handle_interruption(&interrupt_counter, my_interrupt, &stop_all_tx, &conversation_history) {
-            interrupt_counter.store(my_interrupt, Ordering::SeqCst);
-            continue;
+          interrupt_counter.store(my_interrupt, Ordering::SeqCst);
+          continue;
         }
         let _ = tx_ui.send("".to_string());
         let _ = tx_ui.send(format!("{} {user_text}", crate::ui::USER_LABEL));
-        conversation_history.lock().unwrap().push_str(&format!("{}: {}\n", crate::ui::USER_LABEL, user_text));
+        conversation_history.lock().unwrap().push_str(&format!("{}\n", user_text));
         ui.thinking.store(true, Ordering::Relaxed);
 
         // Snapshot interruption counter for this assistant turn.
-
         let mut speaker = PhraseSpeaker::new();
         let mut got_any_token = false;
-        let mut first_phrase = true;
 
         let _ = tx_ui.send("".to_string());
         let _ = tx_ui.send(crate::ui::ASSIST_LABEL.to_string());
@@ -128,12 +126,7 @@ pub fn conversation_thread(
           }
 
           // collect piece to see if there is a new phrase
-          if let Some(mut phrase) = speaker.push_text(piece) {
-            // strip leading ASSISTANT:: if first phrase
-            if first_phrase {
-              phrase = cleanup_first_phrase(&phrase);
-              first_phrase = false;
-            }
+          if let Some(phrase) = speaker.push_text(piece) {
             // Log time from utterance start to first phrase playback
             if !first_phrase_logged {
               let elapsed_ms = crate::util::now_ms(&START_INSTANT) - speech_end_ms;
@@ -143,8 +136,8 @@ pub fn conversation_thread(
 
             let ui_phrase = phrase.clone();
             let _ = tx_ui.send(ui_phrase);
-            conversation_history.lock().unwrap().push_str(&format!("{}: {}\n", crate::ui::ASSIST_LABEL, phrase));
-            let _ = tts_tx.send((strip_special_chars(&phrase), my_interrupt));
+            conversation_history.lock().unwrap().push_str(&format!("{}\n", phrase));
+              let _ = tts_tx.send((strip_special_chars(&phrase), my_interrupt));
           }
         };
 
@@ -185,15 +178,10 @@ pub fn conversation_thread(
 
         ui.thinking.store(false, Ordering::Relaxed);
 
-        if let Some(mut phrase) = speaker.flush() {
-          // strip leading ASSISTANT:: if first phrase not yet seen
-          if first_phrase {
-            phrase = cleanup_first_phrase(&phrase);
-            first_phrase = false;
-          }
+        if let Some(phrase) = speaker.flush() {
           let phrase_clone = phrase.clone();
           let _ = tx_ui.send(phrase_clone);
-          conversation_history.lock().unwrap().push_str(&format!("{}: {}\n", crate::ui::ASSIST_LABEL, phrase));
+          conversation_history.lock().unwrap().push_str(&format!("{}\n", phrase));
           let current_interrupt = interrupt_counter.load(Ordering::SeqCst);
           let _ = tts_tx.send((phrase.clone(), current_interrupt));
         }
@@ -252,14 +240,6 @@ fn handle_interruption(
     true
   } else {
     false
-  }
-}
-
-fn cleanup_first_phrase(s: &str) -> String {
-  if s.starts_with("ASSISTANT::") {
-    s["ASSISTANT::".len()..].trim_start().to_string()
-  } else {
-    s.to_string()
   }
 }
 

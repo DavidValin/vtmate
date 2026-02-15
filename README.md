@@ -26,11 +26,12 @@ See it in action: [Demo](https://www.youtube.com/watch?v=x0RAX3-PLnE)
 
 ## Features
 
-- 📌 Voice chat
+- 📌 Continuous Voice chat (live conversation): `records user continuously and stops on silence, submitting the request to the agent`
 - 📌 Voice interrupt: `the agent stops talking if you interrupt via voice`
 - 📌 Recording Pause / Resume: `toggle "<SPACE>" key to pause / resume voice recording only`
-- 📌 Stop PlayBack: `press "<ESCAPE>" once to stop the playback for the current response`
-- 📌 Interrupt: `press "<ESCAPE>" twice to interrupt the current response alltogether`
+- 📌 Stop PlayBack: `press "<ESCAPE>" ONCE to stop the playback for the current response`
+- 📌 Interrupt: `press "<ESCAPE>" TWICE to interrupt the current response alltogether`
+- 📌 Push to Talk mode (PTT): `run it with --ptt and keep <SPACE> while talking and release to stop recording`
 - 📌 Voice speed change: `change the agent voice speed by pressing <ARROW_UP> / <ARROW_DOWN> (applicable to next response)`
 - 📌 Voice change: `change the agent voice by pressing <ARROW_LEFT> / <ARROW_RIGHT> (applicable to next response)`
 - 📌 Integrated `whisper`

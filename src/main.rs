@@ -2,7 +2,7 @@ use clap::Parser;
 use cpal::traits::DeviceTrait;
 use crossbeam_channel::{bounded, unbounded};
 use std::process;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, OnceLock, atomic::Ordering};
 use std::thread::{self, Builder};
 use std::time::Instant;
 
@@ -223,6 +223,9 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let state = Arc::new(state::AppState::new_with_voice(voice_selected.clone()));
   let recording_paused = state.recording_paused.clone();
   let recording_paused_for_record = recording_paused.clone();
+  if args.ptt {
+    recording_paused.store(true, Ordering::Relaxed);
+  }
   state::GLOBAL_STATE.set(state.clone()).unwrap();
 
   let interrupt_counter = state.interrupt_counter.clone();
@@ -383,6 +386,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         args_language_for_key.clone(),
         stop_play_tx_for_key.clone(),
         interrupt_counter.clone(),
+        args.ptt,
       )
     }
   });

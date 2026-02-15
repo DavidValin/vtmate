@@ -257,7 +257,7 @@ pub fn playback_thread(
   };
 
   // Outer loop to recreate stream on interrupt
-  let mut stop_all_triggered = false;
+  let stop_all_triggered = false;
   let mut interrupted = false;
   while !stop_all_triggered {
     stream.play()?;

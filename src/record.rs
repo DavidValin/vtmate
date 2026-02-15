@@ -186,7 +186,7 @@ fn build_input_f32(
   device.build_input_stream(
     config,
     move |data: &[f32], _| {
-      if recording_paused.load(Ordering::Relaxed) {
+      if stop_all_rx.try_recv().is_ok() {
         return;
       }
       let local_peak = peak_abs(data);
@@ -194,9 +194,38 @@ fn build_input_f32(
       if let Ok(mut p) = peak.lock() {
         *p = local_peak;
       }
-      if stop_all_rx.try_recv().is_ok() {
+      if recording_paused.load(Ordering::Relaxed) {
+        // flush buffer if not empty
+        let mut b = utt_buf.lock().unwrap();
+        if !b.is_empty() {
+          let audio = std::mem::take(&mut *b);
+          let denom = (sample_rate as u64).saturating_mul(channels as u64).max(1);
+          let dur_ms = (audio.len() as u64).saturating_mul(1000) / denom;
+          if dur_ms >= min_utt_ms {
+            crate::util::SPEECH_END_AT.store(
+              crate::util::now_ms(&START_INSTANT),
+              std::sync::atomic::Ordering::SeqCst,
+            );
+            let _ = tx_utt.send(crate::audio::AudioChunk {
+              data: audio,
+              channels,
+              sample_rate,
+            });
+          } else {
+            crate::log::log(
+              "info",
+              &format!(
+                "[{}ms] utterance too short ({}ms < {}ms), dropped",
+                crate::util::now_ms(start_instant),
+                dur_ms,
+                min_utt_ms
+              ),
+            );
+          }
+        }
         return;
       }
+      let local_peak = peak_abs(data);
 
       // use previously computed peak for threshold check
       if local_peak >= vad_thresh {
@@ -318,11 +347,39 @@ fn build_input_i16(
 ) -> Result<cpal::Stream, cpal::BuildStreamError> {
   device.build_input_stream(
     config,
-    move |data: &[i16], _| {
+    move |data: &[f32], _| {
       if stop_all_rx.try_recv().is_ok() {
         return;
       }
       if recording_paused.load(Ordering::Relaxed) {
+        // Flush buffer if not empty
+        let mut b = utt_buf.lock().unwrap();
+        if !b.is_empty() {
+          let audio = std::mem::take(&mut *b);
+          let denom = (sample_rate as u64).saturating_mul(channels as u64).max(1);
+          let dur_ms = (audio.len() as u64).saturating_mul(1000) / denom;
+          if dur_ms >= min_utt_ms {
+            crate::util::SPEECH_END_AT.store(
+              crate::util::now_ms(&START_INSTANT),
+              std::sync::atomic::Ordering::SeqCst,
+            );
+            let _ = tx_utt.send(crate::audio::AudioChunk {
+              data: audio,
+              channels,
+              sample_rate,
+            });
+          } else {
+            crate::log::log(
+              "info",
+              &format!(
+                "[{}ms] utterance too short ({}ms < {}ms), dropped",
+                crate::util::now_ms(start_instant),
+                dur_ms,
+                min_utt_ms
+              ),
+            );
+          }
+        }
         return;
       }
 
@@ -403,7 +460,7 @@ fn build_input_i16(
             } else {
               // FIX: match f32 behavior (warn + drop)
               crate::log::log(
-                "warning",
+                "info",
                 &format!(
                   "[{}ms] utterance too short ({}ms < {}ms), dropped",
                   crate::util::now_ms(start_instant),
@@ -453,10 +510,6 @@ fn build_input_u16(
   device.build_input_stream(
     config,
     move |data: &[u16], _| {
-      if recording_paused.load(Ordering::Relaxed) {
-        return;
-      }
-
       if stop_all_rx.try_recv().is_ok() {
         return;
       }
@@ -472,6 +525,37 @@ fn build_input_u16(
         *p = local_peak;
       }
 
+      if recording_paused.load(Ordering::Relaxed) {
+        // flush buffer if not empty
+        let mut b = utt_buf.lock().unwrap();
+        if !b.is_empty() {
+          let audio = std::mem::take(&mut *b);
+          let denom = (sample_rate as u64).saturating_mul(channels as u64).max(1);
+          let dur_ms = (audio.len() as u64).saturating_mul(1000) / denom;
+          if dur_ms >= min_utt_ms {
+            crate::util::SPEECH_END_AT.store(
+              crate::util::now_ms(&START_INSTANT),
+              std::sync::atomic::Ordering::SeqCst,
+            );
+            let _ = tx_utt.send(crate::audio::AudioChunk {
+              data: audio,
+              channels,
+              sample_rate,
+            });
+          } else {
+            crate::log::log(
+              "info",
+              &format!(
+                "[{}ms] utterance too short ({}ms < {}ms), dropped",
+                crate::util::now_ms(start_instant),
+                dur_ms,
+                min_utt_ms
+              ),
+            );
+          }
+        }
+        return;
+      }
       if local_peak >= vad_thresh {
         // FIX: remove duplicate stores
         last_voice_ms.store(crate::util::now_ms(start_instant), Ordering::Relaxed);

@@ -83,8 +83,13 @@ pub struct Args {
   #[arg(long, default_value = OPENTTS_BASE_URL_DEFAULT, env = "OPENTTS_BASE_URL")]
   pub opentts_base_url: String,
 
+  // Retrieves the list of voices for each TTS system
   #[arg(long, action=clap::ArgAction::SetTrue)]
   pub list_voices: bool,
+
+  // Push to Talk mode (PTT): while in this mode, press <SPACE> while talking, and release it to submit your request
+  #[arg(long, action=clap::ArgAction::SetTrue)]
+  pub ptt: bool,
 }
 
 // CLI parameters default values ---------------------------------------------------

@@ -97,9 +97,9 @@ pub fn spawn_ui_thread(
       let voice_str = format!("({})", get_voice());
 
       let recording_paused_str = if recording_paused {
-        "\x1b[41m\x1b[37m  paused  \x1b[0m"
+        "\x1b[43m\x1b[30m  paused  \x1b[0m"
       } else {
-        "\x1b[43m\x1b[30m listening \x1b[0m"
+        "\x1b[41m\x1b[37m listening \x1b[0m"
       };
       let recording_paused_vis_len = visible_len(recording_paused_str);
 

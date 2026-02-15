@@ -2,7 +2,7 @@
 //  Keyboard handling
 // ------------------------------------------------------------------
 
-use crate::state::{GLOBAL_STATE, decrease_voice_speed, increase_voice_speed};
+use crate::state::{decrease_voice_speed, increase_voice_speed, GLOBAL_STATE};
 use crate::tts;
 use crossbeam_channel::{Receiver, Sender};
 use crossterm::{
@@ -10,8 +10,8 @@ use crossterm::{
   terminal,
 };
 use std::sync::{
-  Arc, Mutex,
   atomic::{AtomicBool, AtomicU64, Ordering},
+  Arc, Mutex,
 };
 use std::time::{Duration, Instant};
 
@@ -28,11 +28,15 @@ pub fn keyboard_thread(
   language: String,
   stop_play_tx: Sender<()>,
   interrupt_counter: Arc<AtomicU64>,
+  ptt: bool,
 ) {
   // Raw mode lets us capture single key presses (space to pause/resume).
   let _ = terminal::enable_raw_mode();
   let mut last_esc: Option<Instant> = None;
 
+  // Track if space was pressed and when last space event occurred
+  let mut space_pressed = false;
+  let mut last_space_time: Option<Instant> = None;
   loop {
     if stop_all_rx.try_recv().is_ok() {
       break;
@@ -41,12 +45,7 @@ pub fn keyboard_thread(
     // Poll so we can also respond to stop_all.
     if event::poll(Duration::from_millis(50)).unwrap_or(false) {
       if let Ok(Event::Key(k)) = event::read() {
-        // Only act on key presses (avoid repeats on some terminals)
-        if k.kind != KeyEventKind::Press {
-          continue;
-        }
-
-        // Ctrl+C should exit immediately (raw mode disables default SIGINT handling on many terminals).
+        // Ctrl+C should exit immediately
         if k.modifiers.contains(KeyModifiers::CONTROL) {
           if let KeyCode::Char('c') | KeyCode::Char('C') = k.code {
             let _ = stop_all_tx.try_send(());
@@ -56,13 +55,35 @@ pub fn keyboard_thread(
 
         match k.code {
           KeyCode::Char(' ') => {
-            // Toggle recording pause only
-            let new_val = !recording_paused.load(Ordering::Relaxed);
-            recording_paused.store(new_val, Ordering::Relaxed);
+            if ptt {
+              crate::log::log("debug", &format!("SPACE event kind={:?}", k.kind));
+              last_space_time = Some(Instant::now());
+              match k.kind {
+                KeyEventKind::Press => {
+                  recording_paused.store(false, Ordering::Relaxed);
+                  space_pressed = true;
+                }
+                KeyEventKind::Repeat => {
+                  recording_paused.store(false, Ordering::Relaxed);
+                }
+                _ => {}
+              }
+              crate::log::log(
+                "debug",
+                &format!(
+                  "recording_paused={}",
+                  recording_paused.load(Ordering::Relaxed)
+                ),
+              );
+            } else {
+              // Toggle pause on space press (no repeat handling)
+              if k.kind == KeyEventKind::Press {
+                let paused = recording_paused.load(Ordering::Relaxed);
+                recording_paused.store(!paused, Ordering::Relaxed);
+              }
+            }
           }
-
           KeyCode::Esc => {
-            // stop playing
             let _ = stop_play_tx.try_send(());
             let now = Instant::now();
             if let Some(prev) = last_esc {
@@ -115,10 +136,25 @@ pub fn keyboard_thread(
               *current = voices[new_idx].to_string();
             }
           }
-          _ => {}
+          _ => {
+            // Any other key while space was pressed indicates release
+            if space_pressed {
+              recording_paused.store(true, Ordering::Relaxed);
+              space_pressed = false;
+            }
+          }
         }
+      }
+    }
 
-        //
+    // If space was pressed but no new space event for a short period, consider it released (only when PTT)
+    if ptt && space_pressed {
+      if let Some(t) = last_space_time {
+        if Instant::now().duration_since(t) > Duration::from_millis(500) {
+          recording_paused.store(true, Ordering::Relaxed);
+          space_pressed = false;
+          last_space_time = None;
+        }
       }
     }
   }
