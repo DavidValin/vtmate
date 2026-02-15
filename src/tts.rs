@@ -2,7 +2,7 @@
 //  TTS - Text to Speech
 // ------------------------------------------------------------------
 
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, select};
 use kokoro_tiny::TtsEngine;
 mod kokoro_tts;
 use reqwest;
@@ -87,40 +87,58 @@ pub fn tts_thread(
   stop_play_tx: Sender<()>,
  ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   loop {
-    let (phrase, expected_interrupt) = match rx_tts.recv() {
-      Ok(v) => v,
-      Err(_) => break,
-    };
-    let voice = voice_state.lock().unwrap().clone();
-    let outcome = crate::tts::speak(
-      &phrase,
-      args.tts.as_str(),
-      args.opentts_base_url.as_str(),
-      args.language.as_str(),
-      voice.as_str(),
-      out_sample_rate,
-      tx_play.clone(),
-      stop_all_rx.clone(),
-      interrupt_counter.clone(),
-      expected_interrupt,
-    );
-    
-    match outcome {
-      Ok(o) => {
-        if o == crate::tts::SpeakOutcome::Interrupted {
-          // skip this phrase, continue with next
-          let _ = stop_play_tx.try_send(());
-          continue;
+    // Wait for either a new phrase or a stop signal
+    crossbeam_channel::select! {
+      recv(rx_tts) -> msg => {
+        let (phrase, expected_interrupt) = match msg {
+          Ok(v) => v,
+          Err(_) => break,
+        };
+        let voice = voice_state.lock().unwrap().clone();
+        let outcome = crate::tts::speak(
+          &phrase,
+          args.tts.as_str(),
+          args.opentts_base_url.as_str(),
+          args.language.as_str(),
+          voice.as_str(),
+          out_sample_rate,
+          tx_play.clone(),
+          stop_all_rx.clone(),
+          interrupt_counter.clone(),
+          expected_interrupt,
+        );
+        match outcome {
+          Ok(o) => {
+            if o == crate::tts::SpeakOutcome::Interrupted {
+              // Drain any remaining phrases that might be queued
+              loop {
+                match rx_tts.try_recv() {
+                  Ok(_) => continue,
+                  Err(_) => break,
+                }
+              }
+              let _ = stop_play_tx.try_send(());
+              continue;
+            }
+          }
+          Err(e) => {
+            crate::log::log("error", &format!("TTS error. Can't play audio speech. {}", e));
+            break;
+          }
         }
-      }
-      Err(e) => {
-        crate::log::log("error", &format!("TTS error. Can't play audio speech. {}", e));
-        break;
-      }
-    }
-    // Stop if interrupt counter changed while speaking
-    if interrupt_counter.load(Ordering::SeqCst) != expected_interrupt {
-      continue;
+        // Stop if interrupt counter changed while speaking
+        if interrupt_counter.load(Ordering::SeqCst) != expected_interrupt {
+            // Drain any queued phrases before exiting
+            while let Ok(_) = rx_tts.try_recv() {}
+            let _ = stop_play_tx.try_send(());
+            // No need to reset counter; keep current value
+            continue;
+        }
+      },
+        recv(stop_all_rx) -> _ => {
+            // Gracefully exit on stop signal
+            break;
+        }
     }
   }
   Ok(())

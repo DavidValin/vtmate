@@ -88,7 +88,8 @@ pub fn conversation_thread(
         // Print user line (keep spinner/emojis only on the latest bottom line).
         let my_interrupt = interrupt_counter.load(Ordering::SeqCst);
         if handle_interruption(&interrupt_counter, my_interrupt, &stop_all_tx, &conversation_history) {
-          continue;
+            interrupt_counter.store(my_interrupt, Ordering::SeqCst);
+            continue;
         }
         let _ = tx_ui.send("".to_string());
         let _ = tx_ui.send(format!("{} {user_text}", crate::ui::USER_LABEL));
@@ -120,13 +121,6 @@ pub fn conversation_thread(
             return;
           }
 
-          // Abort if user interrupted before this token
-          if handle_interruption(&interrupt_counter, my_interrupt, &stop_all_tx, &conversation_history) {
-            interrupted = true;
-            speaker.buf.clear();
-            return;
-          }
-
           if !got_any_token && !piece.is_empty() {
             got_any_token = true;
             ui.thinking.store(false, Ordering::Relaxed);
@@ -147,10 +141,6 @@ pub fn conversation_thread(
             let _ = tts_tx.send((strip_special_chars(&phrase), my_interrupt));
           }
         };
-
-        if handle_interruption(&interrupt_counter, my_interrupt, &stop_all_tx, &conversation_history) {
-          continue;
-        }
 
         if args.llm == "llama-server" {
           match crate::llm::llama_server_stream_response_into(
@@ -187,16 +177,7 @@ pub fn conversation_thread(
           }
         }
 
-        if handle_interruption(&interrupt_counter, my_interrupt, &stop_all_tx, &conversation_history) {
-          continue;
-        }
-
         ui.thinking.store(false, Ordering::Relaxed);
-
-        // If the user spoke over playback, cancel the rest of the assistant turn.
-        if handle_interruption(&interrupt_counter, my_interrupt, &stop_all_tx, &conversation_history) {
-          continue;
-        }
 
         if let Some(phrase) = speaker.flush() {
           let phrase_clone = phrase.clone();
@@ -252,7 +233,7 @@ fn handle_interruption(
   interrupt_counter: &Arc<AtomicU64>,
   current: u64,
   stop_all_tx: &Sender<()>,
-  conversation_history: &Arc<Mutex<String>>
+  conversation_history: &Arc<Mutex<String>>,
 ) -> bool {
   if interrupt_counter.load(Ordering::SeqCst) != current {
     let _ = stop_all_tx.try_send(());
