@@ -29,21 +29,16 @@ pub fn init_whisper_context(model_path: &str) -> &'static whisper_rs::WhisperCon
 }
 
 pub fn conversation_thread(
-  voice_state: Arc<Mutex<String>>,
   rx_utt: Receiver<crate::audio::AudioChunk>,
-  tx_play: Sender<crate::audio::AudioChunk>,
   stop_all_rx: Receiver<()>,
   stop_all_tx: Sender<()>,
-  out_sample_rate: u32, // MUST match playback SR
   interrupt_counter: Arc<AtomicU64>,
   model_path: String,
   args: crate::config::Args,
   ui: crate::state::UiState,
-  _status_line: Arc<Mutex<String>>,
-  _print_lock: Arc<Mutex<()>>,
-
   conversation_history: std::sync::Arc<std::sync::Mutex<String>>,
   tx_ui: Sender<String>,
+  tts_tx: Sender<(String, u64)>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let ctx = init_whisper_context(&model_path);
   crate::log::log("info", &format!("Ollama model: {}", args.ollama_model));
@@ -126,6 +121,8 @@ pub fn conversation_thread(
         };
 
         let stop_all_tx_clone = stop_all_tx.clone();
+
+        // called on every chunk received from llm
         let mut on_piece = |piece: &str| {
           if interrupted {
             let _ = stop_all_tx_clone.try_send(());
@@ -150,47 +147,19 @@ pub fn conversation_thread(
             ui.thinking.store(false, Ordering::Relaxed);
           }
 
+          // collect piece to see if there is a new phrase
           if let Some(phrase) = speaker.push_text(piece) {
             // Log time from utterance start to first phrase playback
             if !first_phrase_logged {
               let elapsed_ms = crate::util::now_ms(&START_INSTANT) - speech_end_ms;
               crate::log::log("info", &format!("Time from speech end to first phrase playback: {:.2?}", elapsed_ms));
               first_phrase_logged = true;
-            }
-            let phrase_clone = phrase.clone();
-            let _ = tx_ui.send(phrase_clone);
-            conversation_history.lock().unwrap().push_str(&format!("{}: {}\n", crate::ui::ASSIST_LABEL, phrase));
-
-            let outcome = match crate::tts::speak(
-              &strip_special_chars(&phrase),
-              args.tts.as_str(),
-              args.opentts_base_url.as_str(),
-              args.language.as_str(),
-              &voice_state.lock().unwrap().as_str(),
-              out_sample_rate,
-              tx_play.clone(),
-              stop_all_rx.clone(),
-              interrupt_counter.clone(),
-              my_interrupt,
-            ) {
-              Ok(o) => o,
-              Err(_e) => {
-                crate::log::log("error", &format!("TTS error. Can't play audio speech. Make sure OpenTTS is running: docker run --rm -p 5500:5500 synesthesiam/opentts:all"));
-                interrupted = true;
-                return;
-              }
             };
 
-            if outcome == crate::tts::SpeakOutcome::Interrupted
-              || (interrupt_counter.load(Ordering::SeqCst) != my_interrupt && ui.playing.load(Ordering::Relaxed))
-            {
-              interrupted = true;
-              print_user_interrupted();
-              // crate::ui::ui_clear_last_line(&print_lock);
-              std::thread::sleep(std::time::Duration::from_millis(500));
-              // *status_line.lock().unwrap() = "".to_string();
-              return;
-            }
+            let ui_phrase = phrase.clone();
+            let _ = tx_ui.send(ui_phrase);
+            conversation_history.lock().unwrap().push_str(&format!("{}: {}\n", crate::ui::ASSIST_LABEL, phrase));
+            let _ = tts_tx.send((phrase.clone(), my_interrupt));
           }
         };
 
@@ -251,32 +220,8 @@ pub fn conversation_thread(
           let phrase_clone = phrase.clone();
           let _ = tx_ui.send(phrase_clone);
           conversation_history.lock().unwrap().push_str(&format!("{}: {}\n", crate::ui::ASSIST_LABEL, phrase));
-          let outcome = match crate::tts::speak(
-            &strip_special_chars(&phrase),
-            args.tts.as_str(),
-            args.opentts_base_url.as_str(),
-            args.language.as_str(),
-            &voice_state.lock().unwrap().as_str(),
-            out_sample_rate,
-            tx_play.clone(),
-            stop_all_rx.clone(),
-            interrupt_counter.clone(),
-            my_interrupt,
-          ) {
-            Ok(o) => o,
-            Err(_e) => {
-              crate::log::log("error", &format!("TTS error. Can't play audio speech. Make sure OpenTTS is running: docker run --rm -p 5500:5500 synesthesiam/opentts:all"));
-              // skip this turn and continue
-              continue;
-            }
-          };
-
-          if outcome == crate::tts::SpeakOutcome::Interrupted
-            || interrupt_counter.load(Ordering::SeqCst) != my_interrupt
-          {
-            print_user_interrupted();
-            continue;
-          }
+          let current_interrupt = interrupt_counter.load(Ordering::SeqCst);
+          let _ = tts_tx.send((phrase.clone(), current_interrupt));
         }
       }
     }
@@ -299,12 +244,20 @@ impl PhraseSpeaker {
     self.buf.push_str(s);
     // cap phrases by new lines or dots
     let trigger = self.buf.contains('\n') || self.buf.ends_with('.');
-    if trigger { self.flush() } else { None }
+    if trigger {
+      self.flush()
+    } else {
+      None
+    }
   }
   fn flush(&mut self) -> Option<String> {
     let out = self.buf.trim().to_string();
     self.buf.clear();
-    if out.is_empty() { None } else { Some(out) }
+    if out.is_empty() {
+      None
+    } else {
+      Some(out)
+    }
   }
 }
 

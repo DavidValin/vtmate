@@ -139,6 +139,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let (stop_all_tx, stop_all_rx) = bounded::<()>(1);
   // channel for utterance audio chunks
   let (tx_utt, rx_utt) = unbounded::<audio::AudioChunk>();
+  // channel for tts phrases
+  let (tx_tts, rx_tts) = unbounded::<(String, u64)>();
   // channel for playback audio chunks
   let (tx_play, rx_play) = unbounded::<audio::AudioChunk>();
 
@@ -245,6 +247,27 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     rx_ui,
   );
 
+  // ---- Thread: TTS -----
+  let tts_handle = thread::spawn({
+    let voice_state = state.voice.clone();
+    let out_sample_rate = out_sample_rate.clone();
+    let tx_play = tx_play.clone();
+    let stop_all_rx = stop_all_rx.clone();
+    let interrupt_counter = interrupt_counter.clone();
+    let args = args.clone();
+    move || {
+      tts::tts_thread(
+        voice_state,
+        out_sample_rate,
+        tx_play,
+        stop_all_rx,
+        interrupt_counter,
+        args,
+        rx_tts,
+      ).unwrap();
+    }
+  });
+
   // ---- Thread: Playback (persistent) ----
   let playback_active_for_play = playback_active.clone();
   let gate_until_ms_for_play = gate_until_ms.clone();
@@ -309,36 +332,28 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     })?;
 
   // ---- Thread: conversation ----
-  let state_for_conv = state.clone();
   let rx_utt_for_conv = rx_utt.clone();
-  let tx_play_for_conv = tx_play.clone();
   let stop_all_rx_for_conv = stop_all_rx.clone();
   let stop_all_tx_for_conv = stop_all_tx.clone();
-  let out_sample_rate_for_conv = out_sample_rate.clone();
   let interrupt_counter_for_conv = interrupt_counter.clone();
   let whisper_path_for_conv = whisper_path.clone();
   let args_for_conv = args.clone();
   let ui_for_conv = ui.clone();
-  let status_line_for_conv = status_line.clone();
-  let print_lock_for_conv = print_lock.clone();
   let conversation_history_for_conv = conversation_history.clone();
+  let tx_tts_for_conv = tx_tts.clone();
   let conv_handle = thread::spawn({
     move || {
       conversation::conversation_thread(
-        state_for_conv.voice.clone(),
         rx_utt_for_conv,
-        tx_play_for_conv.clone(),
         stop_all_rx_for_conv.clone(),
         stop_all_tx_for_conv.clone(),
-        out_sample_rate_for_conv.clone(),
         interrupt_counter_for_conv.clone(),
         whisper_path_for_conv.clone(),
         args_for_conv.clone(),
         ui_for_conv.clone(),
-        status_line_for_conv.clone(),
-        print_lock_for_conv.clone(),
         conversation_history_for_conv.clone(),
         tx_ui.clone(),
+        tx_tts_for_conv.clone(),
       )
     }
   });
@@ -383,12 +398,14 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let _ = stop_all_tx.try_send(());
 
   drop(stop_play_tx);
+  drop(tx_tts);
 
   // Wait for all threads to finish
   let _ = rec_handle.join().unwrap();
   let _ = play_handle.join().unwrap();
   let _ = conv_handle.join().unwrap();
   let _ = ui_handle.join().unwrap();
+  let _ = tts_handle.join().unwrap();
 
   Ok(())
 }
