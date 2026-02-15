@@ -85,7 +85,8 @@ pub fn tts_thread(
   interrupt_counter: Arc<AtomicU64>,
   args: crate::config::Args,
   rx_tts: Receiver<(String, u64)>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  stop_play_tx: Sender<()>,
+ ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   loop {
     let (phrase, expected_interrupt) = match rx_tts.recv() {
       Ok(v) => v,
@@ -104,10 +105,13 @@ pub fn tts_thread(
       interrupt_counter.clone(),
       expected_interrupt,
     );
+    
     match outcome {
       Ok(o) => {
         if o == crate::tts::SpeakOutcome::Interrupted {
-          break;
+          // skip this phrase, continue with next
+          let _ = stop_play_tx.try_send(());
+          continue;
         }
       }
       Err(e) => {
@@ -117,7 +121,7 @@ pub fn tts_thread(
     }
     // Stop if interrupt counter changed while speaking
     if interrupt_counter.load(Ordering::SeqCst) != expected_interrupt {
-      break;
+      continue;
     }
   }
   Ok(())

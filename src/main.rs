@@ -140,7 +140,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   // channel for utterance audio chunks
   let (tx_utt, rx_utt) = unbounded::<audio::AudioChunk>();
   // channel for tts phrases
-  let (tx_tts, rx_tts) = unbounded::<(String, u64)>();
+  let (tx_tts, rx_tts) = bounded::<(String, u64)>(1);
   // channel for playback audio chunks
   let (tx_play, rx_play) = unbounded::<audio::AudioChunk>();
 
@@ -248,6 +248,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   );
 
   // ---- Thread: TTS -----
+  let stop_play_tx_for_tts = stop_play_tx.clone();
   let tts_handle = thread::spawn({
     let voice_state = state.voice.clone();
     let out_sample_rate = out_sample_rate.clone();
@@ -264,6 +265,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         interrupt_counter,
         args,
         rx_tts,
+        stop_play_tx_for_tts,
       ).unwrap();
     }
   });

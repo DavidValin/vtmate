@@ -218,10 +218,6 @@ pub fn ui_println(print_lock: &Arc<Mutex<()>>, status_line: &Arc<Mutex<String>>,
   let _g = print_lock.lock().unwrap();
   clear_line_cr();
   println!("{s}");
-  // Print current volume
-  let state = GLOBAL_STATE.get().expect("AppState not initialized");
-  let volume = state.playback.volume.lock().map(|g| *g).unwrap_or(0.0);
-  println!("Volume: {:.2}", volume);
   clear_line_cr();
   if let Ok(st) = status_line.lock() {
     print!("{}", *st);
