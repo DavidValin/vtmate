@@ -4,12 +4,12 @@
 
 use crate::state::GLOBAL_STATE;
 use cpal::traits::{DeviceTrait, StreamTrait};
-use crossbeam_channel::{Receiver, select};
+use crossbeam_channel::{select, Receiver};
 use std::collections::VecDeque;
 use std::sync::OnceLock;
 use std::sync::{
-  Arc, Mutex,
   atomic::{AtomicBool, AtomicU64, Ordering},
+  Arc, Mutex,
 };
 use std::thread;
 use std::time::Duration;
@@ -268,10 +268,13 @@ pub fn playback_thread(
     select! {
       recv(stop_all_rx) -> _ => {
         queue.lock().unwrap().clear();
-          // IMPORTANT: also drain any already-enqueued audio chunks.
+        // IMPORTANT: also drain any already-enqueued audio chunks.
         while rx_audio.try_recv().is_ok() {}
         playback_active.store(false, Ordering::Relaxed);
         ui.playing.store(false, Ordering::Relaxed);
+        // Immediately silence output
+        let mut vol = volume.lock().unwrap();
+        *vol = 0.0;
         break;
       }
       recv(rx_stop) -> _ => {
@@ -307,7 +310,7 @@ pub fn playback_thread(
         }
         {
           // restore volume when receiving new audio
-          if GLOBAL_STATE.get().unwrap().processing_response.load(Ordering::Relaxed) {
+          if GLOBAL_STATE.get().unwrap().processing_response.load(Ordering::Relaxed) || *volume.lock().unwrap() == 0.0 {
             let mut vol = volume.lock().unwrap();
             *vol = 1.0;
             // reset flag after restoring volume

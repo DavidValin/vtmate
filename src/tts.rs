@@ -17,7 +17,6 @@ use std::time::Duration;
 use urlencoding;
 
 // API
-use crate::log;
 // ------------------------------------------------------------------
 
 // TUNABLES
@@ -74,6 +73,57 @@ pub fn speak(
     )
   }?;
   Ok(outcome)
+}
+
+// tts_thread - dedicated thread for speaking phrases
+pub fn tts_thread(
+  voice_state: Arc<Mutex<String>>,
+  out_sample_rate: u32,
+  tx_play: Sender<crate::audio::AudioChunk>,
+  stop_all_rx: Receiver<()>,
+  interrupt_counter: Arc<AtomicU64>,
+  args: crate::config::Args,
+  rx_tts: Receiver<(String, u64)>,
+  stop_play_tx: Sender<()>,
+ ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  loop {
+    let (phrase, expected_interrupt) = match rx_tts.recv() {
+      Ok(v) => v,
+      Err(_) => break,
+    };
+    let voice = voice_state.lock().unwrap().clone();
+    let outcome = crate::tts::speak(
+      &phrase,
+      args.tts.as_str(),
+      args.opentts_base_url.as_str(),
+      args.language.as_str(),
+      voice.as_str(),
+      out_sample_rate,
+      tx_play.clone(),
+      stop_all_rx.clone(),
+      interrupt_counter.clone(),
+      expected_interrupt,
+    );
+    
+    match outcome {
+      Ok(o) => {
+        if o == crate::tts::SpeakOutcome::Interrupted {
+          // skip this phrase, continue with next
+          let _ = stop_play_tx.try_send(());
+          continue;
+        }
+      }
+      Err(e) => {
+        crate::log::log("error", &format!("TTS error. Can't play audio speech. {}", e));
+        break;
+      }
+    }
+    // Stop if interrupt counter changed while speaking
+    if interrupt_counter.load(Ordering::SeqCst) != expected_interrupt {
+      continue;
+    }
+  }
+  Ok(())
 }
 
 //  Kokoro Tiny TTS integration -------------------------------------

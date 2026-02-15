@@ -7,8 +7,8 @@ use cpal::traits::{DeviceTrait, StreamTrait};
 use crossbeam_channel::{Receiver, Sender};
 use std::sync::OnceLock;
 use std::sync::{
-  Arc, Mutex,
   atomic::{AtomicBool, AtomicU64, Ordering},
+  Arc, Mutex,
 };
 use std::thread;
 use std::time::{Duration, Instant};
@@ -22,6 +22,7 @@ pub fn record_thread(
   supported: cpal::SupportedStreamConfig,
   config: cpal::StreamConfig,
   tx_utt: Sender<crate::audio::AudioChunk>, // utterance -> conversation
+  tx_ui: Sender<String>,                    // UI channel for interrupt banner
   vad_thresh: f32,
   end_silence_ms: u64,
   playback_active: Arc<AtomicBool>,
@@ -79,8 +80,10 @@ pub fn record_thread(
       ui,
       volume.clone(),
       recording_paused.clone(),
+      tx_ui.clone(),
       err_fn,
     )?,
+
     SampleFormat::I16 => build_input_i16(
       start_instant,
       &device,
@@ -105,8 +108,10 @@ pub fn record_thread(
       ui,
       volume.clone(),
       recording_paused.clone(),
+      tx_ui.clone(),
       err_fn,
     )?,
+
     SampleFormat::U16 => build_input_u16(
       start_instant,
       &device,
@@ -131,8 +136,10 @@ pub fn record_thread(
       ui,
       volume.clone(),
       recording_paused.clone(),
+      tx_ui.clone(),
       err_fn,
     )?,
+
     other => return Err(format!("unsupported input format: {other:?}").into()),
   };
 
@@ -173,6 +180,7 @@ fn build_input_f32(
   ui: crate::state::UiState,
   volume: Arc<Mutex<f32>>,
   recording_paused: Arc<AtomicBool>,
+  tx_ui: Sender<String>,
   mut err_fn: impl FnMut(cpal::StreamError) + Send + 'static,
 ) -> Result<cpal::Stream, cpal::BuildStreamError> {
   device.build_input_stream(
@@ -209,6 +217,7 @@ fn build_input_f32(
           let _ = stop_play_tx.try_send(());
           // Signal conversation + TTS cancellation (user spoke over playback)
           interrupt_counter.fetch_add(1, Ordering::SeqCst);
+          let _ = tx_ui.send("\n🛑 USER interrupted\n".to_string());
           stop_sent.store(true, Ordering::Relaxed);
           gate_until_ms.store(
             crate::util::now_ms(start_instant).saturating_add(hangover_ms),
@@ -304,6 +313,7 @@ fn build_input_i16(
   ui: crate::state::UiState,
   volume: Arc<Mutex<f32>>,
   recording_paused: Arc<AtomicBool>,
+  tx_ui: Sender<String>,
   mut err_fn: impl FnMut(cpal::StreamError) + Send + 'static,
 ) -> Result<cpal::Stream, cpal::BuildStreamError> {
   device.build_input_stream(
@@ -344,6 +354,7 @@ fn build_input_i16(
         if playback_active.load(Ordering::Relaxed) && !stop_sent.load(Ordering::Relaxed) {
           let _ = stop_play_tx.try_send(());
           interrupt_counter.fetch_add(1, Ordering::SeqCst);
+          let _ = tx_ui.send("\n🛑 USER interrupted\n".to_string());
           stop_sent.store(true, Ordering::Relaxed);
           gate_until_ms.store(
             crate::util::now_ms(start_instant).saturating_add(hangover_ms),
@@ -436,6 +447,7 @@ fn build_input_u16(
   ui: crate::state::UiState,
   volume: Arc<Mutex<f32>>,
   recording_paused: Arc<AtomicBool>,
+  tx_ui: Sender<String>,
   mut err_fn: impl FnMut(cpal::StreamError) + Send + 'static,
 ) -> Result<cpal::Stream, cpal::BuildStreamError> {
   device.build_input_stream(
@@ -478,6 +490,7 @@ fn build_input_u16(
         if playback_active.load(Ordering::Relaxed) && !stop_sent.load(Ordering::Relaxed) {
           let _ = stop_play_tx.try_send(());
           interrupt_counter.fetch_add(1, Ordering::SeqCst);
+          let _ = tx_ui.send("\n🛑 USER interrupted\n".to_string());
           stop_sent.store(true, Ordering::Relaxed);
           gate_until_ms.store(
             crate::util::now_ms(start_instant).saturating_add(hangover_ms),
