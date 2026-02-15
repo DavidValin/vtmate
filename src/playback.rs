@@ -24,7 +24,7 @@ pub fn playback_thread(
   supported: cpal::SupportedStreamConfig,
   config: cpal::StreamConfig,
   rx_audio: Receiver<crate::audio::AudioChunk>,
-  rx_stop: Receiver<()>,
+  stop_play_rx: Receiver<()>,
   stop_all_rx: Receiver<()>,
   playback_active: Arc<AtomicBool>,
   gate_until_ms: Arc<AtomicU64>,
@@ -60,6 +60,8 @@ pub fn playback_thread(
         move |out: &mut [f32], _| {
           let vol = *volume_for_stream.lock().unwrap();
           if vol == 0.0 {
+            // Restore volume to default before returning
+            *volume_for_stream.lock().unwrap() = 1.0;
             queue.lock().unwrap().clear();
             playback_active.store(false, Ordering::Relaxed);
             ui.playing.store(false, Ordering::Relaxed);
@@ -67,11 +69,6 @@ pub fn playback_thread(
               crate::util::now_ms(start_instant).saturating_add(hangover_ms),
               Ordering::Relaxed,
             );
-
-            // ✅ FIX: fill silence so CPAL doesn’t replay stale buffer
-            for s in out.iter_mut() {
-              *s = 0.0;
-            }
             return;
           }
           let mut q = queue.lock().unwrap();
@@ -259,91 +256,79 @@ pub fn playback_thread(
     other => return Err(format!("unsupported output format: {other:?}").into()),
   };
 
-  stream.play()?;
-
-  playback_active.store(false, Ordering::Relaxed);
-  ui.playing.store(false, Ordering::Relaxed);
-
-  loop {
-    select! {
-      recv(stop_all_rx) -> _ => {
-        queue.lock().unwrap().clear();
-        // IMPORTANT: also drain any already-enqueued audio chunks.
-        while rx_audio.try_recv().is_ok() {}
-        playback_active.store(false, Ordering::Relaxed);
-        ui.playing.store(false, Ordering::Relaxed);
-        // Immediately silence output
-        let mut vol = volume.lock().unwrap();
-        *vol = 0.0;
-        break;
-      }
-      recv(rx_stop) -> _ => {
-        queue.lock().unwrap().clear();
-        playback_active.store(false, Ordering::Relaxed);
-        ui.playing.store(false, Ordering::Relaxed);
-        empty_callbacks.store(0, Ordering::Relaxed);
-        gate_until_ms.store(crate::util::now_ms(start_instant).saturating_add(hangover_ms), Ordering::Relaxed);
-        // mute volume immediately when stopping playback
-        let mut vol = volume.lock().unwrap();
-        *vol = 0.0;
-
-        // IMPORTANT: also drain any already-enqueued audio chunks.
-        while rx_audio.try_recv().is_ok() {}
-        continue;
-      }
-      recv(rx_audio) -> msg => {
-        let Ok(chunk) = msg else { break };
-
-        // Sanity: must match playback SR
-        let channels = out_channels as usize;
-        let max_samples = crate::tts::QUEUE_CAP_FRAMES * channels;
-
-        // Backpressure: wait until there's room
-        loop {
-          {
+  // Outer loop to recreate stream on interrupt
+  let mut stop_all_triggered = false;
+  let mut interrupted = false;
+  while !stop_all_triggered {
+    stream.play()?;
+    // Reset state before each stream
+    *volume.lock().unwrap() = 1.0;
+    queue.lock().unwrap().clear();
+    empty_callbacks.store(0, Ordering::Relaxed);
+    playback_active.store(false, Ordering::Relaxed);
+    ui.playing.store(false, Ordering::Relaxed);
+    loop {
+      select! {
+        recv(stop_all_rx) -> _ => {
+          // Interrupt: pause and clear, ignore incoming audio
+          stream.pause()?;
+          queue.lock().unwrap().clear();
+          // Set flag to drop any new audio until restart
+          interrupted = true;
+          // continue loop
+        }
+        recv(stop_play_rx) -> _ => {
+          // Stop current stream, drop it, and let outer loop recreate
+          stream.pause()?;
+          // Clear queue immediately before pausing
+          queue.lock().unwrap().clear();
+          // Drain any pending audio chunks from rx_audio
+          while let Ok(_) = rx_audio.try_recv() {}
+          // Allow CPAL buffer to flush
+          std::thread::sleep(std::time::Duration::from_millis(50));
+          break;
+        }
+        recv(rx_audio) -> msg => {
+          let Ok(chunk) = msg else { break };
+          if interrupted {
+            // Drop any audio received during interrupt
+            continue;
+          }
+          let channels = out_channels as usize;
+          let max_samples = crate::tts::QUEUE_CAP_FRAMES * channels;
+          loop {
             let q = queue.lock().unwrap();
             if q.len() + chunk.data.len() <= max_samples {
               break;
             }
+            drop(q);
+            thread::sleep(Duration::from_millis(5));
           }
-          thread::sleep(Duration::from_millis(5));
-        }
-        {
-          // restore volume when receiving new audio
+
           if GLOBAL_STATE.get().unwrap().processing_response.load(Ordering::Relaxed) || *volume.lock().unwrap() == 0.0 {
             let mut vol = volume.lock().unwrap();
             *vol = 1.0;
-            // reset flag after restoring volume
             GLOBAL_STATE.get().unwrap().processing_response.store(false, Ordering::Relaxed);
           }
-
           let mut q = queue.lock().unwrap();
-          // convert channels if needed
           let data = if chunk.channels != out_channels {
             convert_channels(&chunk.data, chunk.channels, out_channels)
           } else {
             chunk.data.clone()
           };
-          // resample if needed
           if chunk.sample_rate != config.sample_rate.0 {
             let resampled = crate::audio::resample_to(&data, out_channels, chunk.sample_rate, config.sample_rate.0);
-            for s in resampled {
-              q.push_back(s);
-            }
+            for s in resampled { q.push_back(s); }
           } else {
-            for s in data {
-              q.push_back(s);
-            }
+            for s in data { q.push_back(s); }
           }
+          empty_callbacks.store(0, Ordering::Relaxed);
+          playback_active.store(true, Ordering::Relaxed);
+          ui.playing.store(true, Ordering::Relaxed);
         }
-        empty_callbacks.store(0, Ordering::Relaxed);
-        playback_active.store(true, Ordering::Relaxed);
-        ui.playing.store(true, Ordering::Relaxed);
       }
     }
   }
-
-  drop(stream);
   Ok(())
 }
 

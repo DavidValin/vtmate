@@ -214,6 +214,9 @@ fn build_input_f32(
         }
 
         if playback_active.load(Ordering::Relaxed) && !stop_sent.load(Ordering::Relaxed) {
+          // silence audio
+          let mut vol = volume.lock().unwrap();
+          *vol = 0.0;
           let _ = stop_play_tx.try_send(());
           // Signal conversation + TTS cancellation (user spoke over playback)
           interrupt_counter.fetch_add(1, Ordering::SeqCst);
@@ -223,9 +226,6 @@ fn build_input_f32(
             crate::util::now_ms(start_instant).saturating_add(hangover_ms),
             Ordering::Relaxed,
           );
-          // silence audio
-          let mut vol = volume.lock().unwrap();
-          *vol = 0.0;
           playback_active.store(false, Ordering::Relaxed);
           stop_sent.store(false, Ordering::Relaxed);
         }
@@ -352,6 +352,9 @@ fn build_input_i16(
         }
 
         if playback_active.load(Ordering::Relaxed) && !stop_sent.load(Ordering::Relaxed) {
+          // silence audio
+          let mut vol = volume.lock().unwrap();
+          *vol = 0.0;
           let _ = stop_play_tx.try_send(());
           interrupt_counter.fetch_add(1, Ordering::SeqCst);
           let _ = tx_ui.send("\n🛑 USER interrupted\n".to_string());
@@ -360,9 +363,6 @@ fn build_input_i16(
             crate::util::now_ms(start_instant).saturating_add(hangover_ms),
             Ordering::Relaxed,
           );
-          // silence audio
-          let mut vol = volume.lock().unwrap();
-          *vol = 0.0;
           playback_active.store(false, Ordering::Relaxed);
           stop_sent.store(false, Ordering::Relaxed);
         }
@@ -488,6 +488,9 @@ fn build_input_u16(
         }
 
         if playback_active.load(Ordering::Relaxed) && !stop_sent.load(Ordering::Relaxed) {
+          // silence audio
+          let mut vol = volume.lock().unwrap();
+          *vol = 0.0;
           let _ = stop_play_tx.try_send(());
           interrupt_counter.fetch_add(1, Ordering::SeqCst);
           let _ = tx_ui.send("\n🛑 USER interrupted\n".to_string());
@@ -496,9 +499,6 @@ fn build_input_u16(
             crate::util::now_ms(start_instant).saturating_add(hangover_ms),
             Ordering::Relaxed,
           );
-          // silence audio
-          let mut vol = volume.lock().unwrap();
-          *vol = 0.0;
           playback_active.store(false, Ordering::Relaxed);
           stop_sent.store(false, Ordering::Relaxed);
         }

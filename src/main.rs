@@ -146,9 +146,10 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
   // Clones for threads
   let rx_play_for_playback = rx_play.clone();
-  let stop_all_rx_for_playback = stop_all_rx.clone();
+
   let stop_all_rx_for_record = stop_all_rx.clone();
   let stop_all_rx_for_keyboard = stop_all_rx.clone();
+  let stop_all_rx_for_playback = stop_all_rx.clone();
   let (stop_play_tx, stop_play_rx) = unbounded::<()>(); // stop playback signal
 
   let available_langs = tts::get_all_available_languages();
