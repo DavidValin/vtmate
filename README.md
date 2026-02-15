@@ -5,7 +5,7 @@ See it in action: [Demo](https://www.youtube.com/watch?v=x0RAX3-PLnE)
 
 ### Status
 
-- ✅ First Release Candidate ready! Still fixing bugs
+- ✅ First Release Candidate ready! ⚠️ Still fixing bugs
 - ✅ MacOS version ready (Tested in Mac Studio)
 - ✅ Linux version ready
 - ✅ Windows version ready
