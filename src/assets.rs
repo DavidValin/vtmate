@@ -4,7 +4,7 @@
 
 use crate::util::get_user_home_path;
 use flate2::read::GzDecoder;
-use std::{fs, io::Cursor, path::PathBuf};
+use std::{fs, io::Cursor};
 use tar::Archive;
 
 // API

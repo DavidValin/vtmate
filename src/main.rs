@@ -235,7 +235,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let volume_play = volume.clone();
   let volume_rec = volume.clone();
   let status_line = state.status_line.clone();
-  let print_lock = state.print_lock.clone();
 
   // ---- Thread: UI Thread ----
   let (tx_ui, rx_ui) = unbounded::<String>();
@@ -307,6 +306,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let ui_for_rec = ui.clone();
   let volume_rec_for_rec = volume_rec.clone();
   let recording_paused_for_record_for_rec = recording_paused_for_record.clone();
+  let tx_ui_for_record = tx_ui.clone();
   let rec_handle = Builder::new()
     .name("record_thread".to_string())
     .stack_size(4 * 1024 * 1024)
@@ -318,6 +318,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
           in_cfg_supported,
           in_cfg,
           tx_utt_for_rec.clone(),
+          tx_ui_for_record,
           vad_thresh,
           end_silence_ms,
           playback_active_for_rec.clone(),

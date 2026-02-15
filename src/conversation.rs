@@ -2,14 +2,14 @@
 //  Conversation
 // ------------------------------------------------------------------
 
-use crate::START_INSTANT;
 use crate::state::GLOBAL_STATE;
-use crossbeam_channel::{Receiver, Sender, select};
+use crate::START_INSTANT;
+use crossbeam_channel::{select, Receiver, Sender};
 use std::cell::Cell;
 use std::sync::OnceLock;
 use std::sync::{
-  Arc, Mutex,
   atomic::{AtomicU64, Ordering},
+  Arc, Mutex,
 };
 
 static WHISPER_CTX: OnceLock<whisper_rs::WhisperContext> = OnceLock::new();
@@ -87,10 +87,7 @@ pub fn conversation_thread(
 
         // Print user line (keep spinner/emojis only on the latest bottom line).
         let my_interrupt = interrupt_counter.load(Ordering::SeqCst);
-        if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
-          // signal playback to stop queued audio
-          let _ = stop_all_tx.try_send(());
-          conversation_history.lock().unwrap().clear();
+        if handle_interruption(&interrupt_counter, my_interrupt, &stop_all_tx, &conversation_history) {
           continue;
         }
         let _ = tx_ui.send("".to_string());
@@ -107,18 +104,6 @@ pub fn conversation_thread(
         let _ = tx_ui.send(crate::ui::ASSIST_LABEL.to_string());
 
         let mut interrupted = false;
-        let mut interrupted_printed = false;
-
-        // Print interruption banner exactly once per assistant turn.
-        let mut print_user_interrupted = || {
-          if interrupted_printed {
-            return;
-          }
-          interrupted_printed = true;
-          let _ = tx_ui.send("".to_string());
-          let _ = tx_ui.send("🛑 USER interrupted".to_string());
-          let _ = tx_ui.send("".to_string());
-        };
 
         let stop_all_tx_clone = stop_all_tx.clone();
 
@@ -136,7 +121,7 @@ pub fn conversation_thread(
           }
 
           // Abort if user interrupted before this token
-          if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
+          if handle_interruption(&interrupt_counter, my_interrupt, &stop_all_tx, &conversation_history) {
             interrupted = true;
             speaker.buf.clear();
             return;
@@ -159,12 +144,11 @@ pub fn conversation_thread(
             let ui_phrase = phrase.clone();
             let _ = tx_ui.send(ui_phrase);
             conversation_history.lock().unwrap().push_str(&format!("{}: {}\n", crate::ui::ASSIST_LABEL, phrase));
-            let _ = tts_tx.send((phrase.clone(), my_interrupt));
+            let _ = tts_tx.send((strip_special_chars(&phrase), my_interrupt));
           }
         };
 
-        if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
-          // interruption detected, skip remaining speech
+        if handle_interruption(&interrupt_counter, my_interrupt, &stop_all_tx, &conversation_history) {
           continue;
         }
 
@@ -203,16 +187,14 @@ pub fn conversation_thread(
           }
         }
 
-        if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
-          // interruption detected, skip remaining speech
+        if handle_interruption(&interrupt_counter, my_interrupt, &stop_all_tx, &conversation_history) {
           continue;
         }
 
         ui.thinking.store(false, Ordering::Relaxed);
 
         // If the user spoke over playback, cancel the rest of the assistant turn.
-        if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
-          print_user_interrupted();
+        if handle_interruption(&interrupt_counter, my_interrupt, &stop_all_tx, &conversation_history) {
           continue;
         }
 
@@ -263,6 +245,22 @@ impl PhraseSpeaker {
 
 thread_local! {
   static IN_CODE_BLOCK: Cell<bool> = Cell::new(false);
+}
+
+// Helper to centralize interruption handling
+fn handle_interruption(
+  interrupt_counter: &Arc<AtomicU64>,
+  current: u64,
+  stop_all_tx: &Sender<()>,
+  conversation_history: &Arc<Mutex<String>>
+) -> bool {
+  if interrupt_counter.load(Ordering::SeqCst) != current {
+    let _ = stop_all_tx.try_send(());
+    conversation_history.lock().unwrap().clear();
+    true
+  } else {
+    false
+  }
 }
 
 fn strip_special_chars(s: &str) -> String {
