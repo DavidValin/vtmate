@@ -40,10 +40,11 @@ See it in action: [Demo](https://www.youtube.com/watch?v=x0RAX3-PLnE)
 - 📌 28 languages supported (`ai-mate --list-voices`)
 - 📌 Use any gguf model from huggingface.com or ollama models (small models reply faster)
 
-## LLM engine support
+## LLM integration
 
-- ✅ ollama (default)
-- ✅ llama-server / llamafile
+- ✅ ollama - all versions (default)
+- ✅ llama-server / llamafile - all versions
+- ✅ openclaw / clawbot (voice chat with your agent by connecting ai-mate to the chat endpoint)
 
 You can run the models locally (by default) or remotely by configuring the base urls via cli option.
 
