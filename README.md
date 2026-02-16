@@ -5,10 +5,7 @@ See it in action: [Demo](https://www.youtube.com/watch?v=x0RAX3-PLnE)
 
 ### Status
 
-- ✅ First Release Candidate ready! ⚠️ Still fixing bugs
-- ✅ MacOS version ready (Tested in Mac Studio)
-- ✅ Linux version ready
-- ✅ Windows version ready
+✅ First release ready! [Download](https://github.com/DavidValin/ai-mate/releases/tag/0.3.0)
 
 ## How it works
 
@@ -45,7 +42,7 @@ See it in action: [Demo](https://www.youtube.com/watch?v=x0RAX3-PLnE)
 
 - ✅ ollama - all versions (default)
 - ✅ llama-server / llamafile - all versions
-- ✅ openclaw / clawbot (voice chat with your agent by connecting ai-mate to the chat endpoint)
+- ✅ openclaw / clawbot (voice chat with your agent by connecting ai-mate to the endpoint)
 
 You can run the models locally (by default) or remotely by configuring the base urls via cli option.
 
