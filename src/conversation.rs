@@ -41,7 +41,7 @@ pub fn conversation_thread(
   tts_tx: Sender<(String, u64)>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let ctx = init_whisper_context(&model_path);
-  crate::log::log("info", &format!("Ollama model: {}", args.ollama_model));
+  crate::log::log("info", &format!("LLM model: {}", args.model));
 
   loop {
     select! {
@@ -145,10 +145,11 @@ pub fn conversation_thread(
           match crate::llm::llama_server_stream_response_into(
             &cleaned_prompt,
             args.llama_server_url.as_str(),
+            args.model.as_str(),
             stop_all_rx.clone(),
             interrupt_counter.clone(),
             my_interrupt,
-            &mut on_piece,
+            &mut on_piece
           ) {
             Ok(o) => o,
             Err(e) => {
@@ -158,10 +159,10 @@ pub fn conversation_thread(
             }
           }
         } else {
-          match crate::llm::ollama_stream_response_into(
+          match crate::llm::llama_server_stream_response_into(
             &cleaned_prompt,
             args.ollama_url.as_str(),
-            args.ollama_model.as_str(),
+            args.model.as_str(),
             stop_all_rx.clone(),
             interrupt_counter.clone(),
             my_interrupt,
