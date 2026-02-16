@@ -163,7 +163,7 @@ If you need help:
 ai-mate --help
 ```
 
-### Build ai-mate from source code
+## Build ai-mate from source code
 
 - There are 3 script `build_macos.sh`, `build_linux.sh` and `build_windows.bat`
 - The scripts accept --arch flag to build for specific architecture
