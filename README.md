@@ -1,7 +1,6 @@
 ![ai mate screenshot](https://github.com/DavidValin/ai-mate/raw/main/preview.png)
 
 voice chat with your local ai models from your terminal simply!
-See it in action: [Demo](https://www.youtube.com/watch?v=x0RAX3-PLnE)
 
 ### Status
 
