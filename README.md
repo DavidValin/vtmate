@@ -4,7 +4,7 @@ voice chat with your local ai models from your terminal simply!
 
 ### Video Demo
 
-[![English demo](https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/demo/e-thumb.png)]([https://github.com](https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/demo/ai-mate%200.3.0%20-%20English%20speech%20demo.mov) [![Spanish demo](https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/demo/s-thumb.png)](https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/demo/ai-mate%200.3.0%20-%20Spanish%20speech%20demo.mov)
+[![English demo](https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/demo/e-thumb.png)](https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/demo/ai-mate%200.3.0%20-%20English%20speech%20demo.mov) [![Spanish demo](https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/demo/s-thumb.png)](https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/demo/ai-mate%200.3.0%20-%20Spanish%20speech%20demo.mov)
 
 
 ### Status
