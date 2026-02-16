@@ -111,6 +111,13 @@ ollama serve
 ai-mate
 ```
 
+Push to Talk (PTT) example:
+
+```
+ollama serve
+ai-mate --ptt --ollama-model "llama3:8b"
+```
+
 llamafile example:
 
 ```
