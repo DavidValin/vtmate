@@ -1,4 +1,4 @@
-### voice chat with your local ai models from your terminal simply!
+## voice chat with your local ai models from your terminal!
 
 ![ai mate screenshot](https://github.com/DavidValin/ai-mate/raw/main/preview.png)
 
