@@ -68,8 +68,8 @@ pub struct Args {
   pub ollama_url: String,
 
   /// Ollama model name
-  #[arg(long, default_value = OLLAMA_MODEL_DEFAULT, env = "OLLAMA_MODEL")]
-  pub ollama_model: String,
+  #[arg(long, default_value = MODEL_DEFAULT, env = "MODEL")]
+  pub model: String,
 
   /// Llama‑Server URL (used when --llm=llama-server)
   #[arg(
@@ -99,7 +99,7 @@ pub const HANGOVER_MS_DEFAULT: u64 = 0;
 const END_SILENCE_MS_DEFAULT: u64 = 1200;
 pub const MIN_UTTERANCE_MS_DEFAULT: u64 = 300;
 pub const OLLAMA_URL_DEFAULT: &str = "http://localhost:11434/v1/chat/completions";
-pub const OLLAMA_MODEL_DEFAULT: &str = "llama3.2:3b";
+pub const MODEL_DEFAULT: &str = "llama3.2:3b";
 pub const LLAMASERVER_URL_DEFAULT: &str = "http://127.0.0.1:8080/completion";
 pub const WHISPER_MODEL_PATH: &str = "~/.whisper-models/ggml-tiny.bin";
 const OPENTTS_BASE_URL_DEFAULT: &str = "http://127.0.0.1:5500/api/tts?&vocoder=high&denoiserStrength=0.005&&speakerId=&ssml=false&ssmlNumbers=true&ssmlDates=true&ssmlCurrency=true&cache=false";

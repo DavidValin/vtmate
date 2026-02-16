@@ -119,7 +119,7 @@ Push to Talk (PTT) example:
 
 ```
 ollama serve
-ai-mate --ptt --ollama-model "llama3:8b"
+ai-mate --ptt --model "llama3:8b"
 ```
 
 llamafile example:
@@ -146,15 +146,15 @@ ai-mate \
   --sound-threshold-peak 0.10 \
   --end-silence-ms 850 \
   --whisper-model-path ~/.whisper-models/ggml-tiny.bin \
-  --ollama-model "llama3.2:3b" \
+  --model "llama3.2:3b" \
   --ollama-url "http://localhost:11434/api/generate"
 ```
 
 You can just override a specific variable, for example:
 
 ```
-ai-mate --tts opentts --ollama-model "llama3.2:3b" --language ru
-ai-mate --ollama-model "llama3.2:3b" --language zh
+ai-mate --tts opentts --model "llama3.2:3b" --language ru
+ai-mate --model "llama3.2:3b" --language zh
 ai-mate --llm llama-server --language it
 ai-mate --language es --whisper-model-path ~/.whisper-models/ggml-medium-q5_0.bin`
 ```
@@ -201,12 +201,12 @@ For conveniance create bash aliases with the options you want to use, example:
 
 ```
 # English
-alias ai-mate_qwen='ai-mate --ollama-model "qwen3:30b"'
-alias ai-mate_llama='ai-mate --ollama-model "llama3:8b"'
+alias ai-mate_qwen='ai-mate --model "qwen3:30b"'
+alias ai-mate_llama='ai-mate --model "llama3:8b"'
 
 # Spanish
-alias ai-mate_es_qwen='ai-mate --ollama-model "qwen3:30b" --language es'
-alias ai-mate_es_llama='ai-mate --ollama-model "llama3:8b" --language es'
+alias ai-mate_es_qwen='ai-mate --model "qwen3:30b" --language es'
+alias ai-mate_es_llama='ai-mate --model "llama3:8b" --language es'
 ```
 
 ## Useful to know
