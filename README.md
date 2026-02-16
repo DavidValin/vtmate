@@ -165,29 +165,31 @@ ai-mate --help
 
 ### Build ai-mate from source code
 
+- There are 3 script `build_macos.sh`, `build_linux.sh` and `build_windows.bat`
+- The scripts accept --arch flag to build for specific architecture
+- If you are building for specific acceleration, make sure the SDKs are installed
+- During build, TTS and STT models are fetched locally (around 1GB)
+- The built binaries will be placed under `./dist` once built
+
 ***MacOS***
-NOTE: 
+- (require docker for building the image)
+- You can only build the MacOS build from a mac machine
 ```
 ./build_macos.sh
-MAC_WITH_OPENBLAS=1 ./build_macos.sh
 ```
 
 ***Linux***
+- (require docker for building the image)
 ```
-./build_linux.sh --arch all
-LINUX_WITH_VULKAN=0 ./build_linux.sh --arch amd64
+LINUX_WITH_VULKAN=0 ./build_linux.sh
 ```
 
 ***Windows***
-NOTE: (requires https://visualstudio.microsoft.com/visual-cpp-build-tools)
+- You can only build the Windows build from windows
+- You need to install [Visual CPP Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools)
 ```
-build_windows.bat
 set WIN_WITH_VULKAN=0 && build_windows.bat
 ```
-
-* During build, tts and stt models are fetched locally
-
-The built binaries will be placed under `./dist`
 
 ## Tricks
 
