@@ -121,64 +121,64 @@ jobs:
 # ----------------------
 # Windows Builds
 # ----------------------
-windows:
-  name: Windows Build (${{ matrix.arch }})
-  runs-on: windows-latest
-  strategy:
-    matrix:
-      arch: [x64, arm64]
-  concurrency:
-    group: windows-${{ matrix.arch }}
-    cancel-in-progress: false
-  steps:
-    - uses: actions/checkout@v4
+  windows:
+    name: Windows Build (${{ matrix.arch }})
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        arch: [x64, arm64]
+    concurrency:
+      group: windows-${{ matrix.arch }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
 
-    - name: Prepare Directories
-      run: |
-        mkdir dist
-        mkdir packages
+      - name: Prepare Directories
+        run: |
+          mkdir dist
+          mkdir packages
 
-    - name: Install CUDA SDK
-      run: |
-        choco install cuda -y
-        refreshenv
+      - name: Install CUDA SDK
+        run: |
+          choco install cuda -y
+          refreshenv
 
-    - name: Setup MSVC Developer Environment
-      uses: ilammy/msvc-dev-cmd@v1
-      with:
-        arch: ${{ matrix.arch }}
+      - name: Setup MSVC Developer Environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
 
-    - name: Build Windows Variants
-      shell: cmd
-      run: |
-        setlocal EnableDelayedExpansion
+      - name: Build Windows Variants
+        shell: cmd
+        run: |
+          setlocal EnableDelayedExpansion
 
-        REM Define variants: CPU and CUDA
-        set VARIANTS=WIN_WITH_OPENBLAS=1,WIN_WITH_CUDA=1
+          REM Define variants: CPU and CUDA
+          set VARIANTS=WIN_WITH_OPENBLAS=1,WIN_WITH_CUDA=1
 
-        for %%v in (%VARIANTS%) do (
-            REM Map variant name
-            if "%%v"=="WIN_WITH_OPENBLAS=1" (set ART_NAME=cpu) else (set ART_NAME=cuda)
+          for %%v in (%VARIANTS%) do (
+              REM Map variant name
+              if "%%v"=="WIN_WITH_OPENBLAS=1" (set ART_NAME=cpu) else (set ART_NAME=cuda)
 
-            REM Clear previous dist folder for this variant
-            if exist dist\!ART_NAME! rmdir /s /q dist\!ART_NAME!
-            mkdir dist\!ART_NAME!
+              REM Clear previous dist folder for this variant
+              if exist dist\!ART_NAME! rmdir /s /q dist\!ART_NAME!
+              mkdir dist\!ART_NAME!
 
-            echo Building variant %%v in MSVC environment
-            call build_windows.bat %%v
+              echo Building variant %%v in MSVC environment
+              call build_windows.bat %%v
 
-            REM Move build artifacts to variant-specific folder
-            move dist\* dist\!ART_NAME!
-        )
+              REM Move build artifacts to variant-specific folder
+              move dist\* dist\!ART_NAME!
+          )
 
-    - name: Upload CPU Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: windows-${{ matrix.arch }}-cpu
-        path: dist\cpu
+      - name: Upload CPU Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ matrix.arch }}-cpu
+          path: dist\cpu
 
-    - name: Upload CUDA Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: windows-${{ matrix.arch }}-cuda
-        path: dist\cuda
+      - name: Upload CUDA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ matrix.arch }}-cuda
+          path: dist\cuda
