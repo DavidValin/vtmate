@@ -49,16 +49,20 @@ jobs:
             [ -f ~/.whisper-models/${model}.bin ] || curl -L -o ~/.whisper-models/${model}.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${model}.bin
           done
 
-      - name: Build Linux Variants
+      - name: Install CUDA SDK (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nvidia-cuda-toolkit
+
+      - name: Build Linux CPU (OpenBLAS)
         run: |
           chmod +x ./build_linux.sh
+          ./build_linux.sh --arch ${{ matrix.arch }} --features whisper-openblas
 
-          # CPU-only
-          ./build_linux.sh --arch ${{ matrix.arch }} --features "whisper-openblas" --output dist/cpu
-
-          # CUDA-enabled (ensure SDK present)
-          sudo apt-get update && sudo apt-get install -y nvidia-cuda-toolkit
-          ./build_linux.sh --arch ${{ matrix.arch }} --features "whisper-cuda" --output dist/cuda
+      - name: Build Linux GPU (CUDA)
+        run: |
+          chmod +x ./build_linux.sh
+          ./build_linux.sh --arch ${{ matrix.arch }} --features whisper-cuda
 
       - name: Upload Linux Artifacts
         uses: actions/upload-artifact@v4
@@ -85,20 +89,19 @@ jobs:
         with:
           arch: x64
 
-      - name: Install CUDA SDK
-        shell: powershell
+      - name: Install CUDA SDK (Windows)
+        shell: pwsh
         run: |
-          choco install cuda -y
+          choco install cuda --version=12.2 -y
           refreshenv
 
-      - name: Build Windows Variants
+      - name: Build Windows CPU (OpenBLAS)
         shell: cmd
-        run: |
-          REM CPU-only
-          build_windows.bat --features whisper-openblas --output dist\cpu
+        run: build_windows.bat --features whisper-openblas
 
-          REM CUDA-enabled
-          build_windows.bat --features whisper-cuda --output dist\cuda
+      - name: Build Windows GPU (CUDA)
+        shell: cmd
+        run: build_windows.bat --features whisper-cuda
 
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
