@@ -59,7 +59,7 @@ jobs:
           if [ ! -d /usr/local/cuda-12.2 ]; then
             echo "CUDA not cached, installing..."
             sudo apt-get update
-            sudo apt-get install -y wget gnupg software-properties-common
+            sudo apt-get install -y wget gnupg software-properties-common libtinfo5
 
             # Download & install the CUDA keyring
             wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.1-1_all.deb
