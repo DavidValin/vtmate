@@ -197,14 +197,15 @@ jobs:
         run: |
           setlocal EnableDelayedExpansion
 
-          REM Define variants depending on architecture
+          REM Set variants depending on architecture
           if "%PROCESSOR_ARCHITECTURE%"=="AMD64" (
-              set VARIANTS=WIN_WITH_OPENBLAS=1,WIN_WITH_CUDA=1
+              set VARIANTS=WIN_WITH_OPENBLAS=1 WIN_WITH_CUDA=1
           ) else (
               set VARIANTS=WIN_WITH_OPENBLAS=1
               echo Skipping CUDA on ARM64
           )
 
+          REM Build each variant
           for %%v in (%VARIANTS%) do (
               REM Determine artifact folder
               if "%%v"=="WIN_WITH_OPENBLAS=1" (
@@ -217,18 +218,21 @@ jobs:
               if "%PROCESSOR_ARCHITECTURE%"=="ARM64" if "!ART_NAME!"=="cuda" (
                   echo Skipping CUDA variant on ARM64
               ) else (
-                  REM Clear folder to avoid collisions
+                  REM Clear folder safely to avoid collisions
                   if exist dist\!ART_NAME! rmdir /s /q dist\!ART_NAME!
                   mkdir dist\!ART_NAME!
 
                   echo Building variant %%v in MSVC environment
                   call build_windows.bat %%v
 
-                  REM Move built binaries into folder
-                  move dist\* dist\!ART_NAME!
+                  REM Move only files if any exist
+                  if exist dist\* (
+                      move dist\* dist\!ART_NAME!
+                  ) else (
+                      echo No files produced for variant %%v
+                  )
               )
           )
-
 
       # ----------------------
       # Upload artifacts
