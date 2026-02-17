@@ -40,6 +40,14 @@ jobs:
 
       # ----------------------
       # Build Windows Variants
+      - name: Prepare AI models
+        run: |
+          mkdir "%USERPROFILE%\.cache\k"
+          curl -L https://github.com/DavidValin/kokoro-tiny/raw/main/models/0.bin -o "%USERPROFILE%\.cache\k\0.bin"
+          curl -L https://github.com/DavidValin/kokoro-tiny/raw/main/models/0.onnx -o "%USERPROFILE%\.cache\k\0.onnx"
+
+      # ----------------------
+      # Build Windows Variants
       - name: Build Windows Variants
         shell: cmd
         run: |
