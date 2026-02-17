@@ -59,24 +59,17 @@ You can run the models locally (by default) or remotely by configuring the base 
 
 Do you have GPU? (nvidia? an apple computer?) Great! then ai-mate speed is at lighting speed =)
 
+Here is a matrix table of hardware support per operating system:
+
 ```
-✅ MacOS - arm64 - CPU + Apple Metal acceleration
-✅ Linux - amd64 - (only CPU)
-✅ Linux - amd64 - CUDA (NVIDIA)
-⚠️ Windows - x64 - (only CPU) - Available but Untested
-✅ Windows - x64 - OpenBLAS (CPU acceleration)
-✅ Windows - x64 - CUDA (NVIDIA)
-❌ Windows - x64 - Vulkan - (still working on it)
-⚠️ Linux - amd64 - ROCm (AMD acceleration) - Available but Untested
-✅ Linux - amd64 - Openblas (CPU acceleration)
-✅ Linux - amd64 - Vulkan
-✅ Linux - arm64 - Openblas - (CPU acceleration)
-✅ Linux - arm64 - Vulkan
+Platform   Arch    CPU    OpenBLAS   CUDA   Metal   Vulkan
+--------   ----    ---    --------   ----   -----   ------
+macOS      ARM64   ✅    optional     ❌      ✅      ❌
+Linux      AMD64   ✅       ✅        ✅      n/a     ✅
+Linux      ARM64   ✅       ✅        ❌      n/a     ❌
+Windows    x86     ✅       ✅        ✅      n/a     ✅
+Windows    ARM64   ❌       ❌        ❌      n/a     ❌
 ```
-Legend:
-- ✅ = Release binary available
-- ⚠️ = Release binary available
-- ❌ = Release binary not yet built / unavailable
 
 ## Installation
 
