@@ -62,56 +62,25 @@ jobs:
           path: ./dist
 
   # ----------------------
-  # macOS Builds
-  # ----------------------
-  macos:
-    name: macOS Build
-    runs-on: macos-latest
-    strategy:
-      matrix:
-        arch: [x64]  # ARM64 builds must be done locally
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Build macOS
-        run: |
-          chmod +x ./build_macos.sh
-          ./build_macos.sh
-
-      - name: Upload macOS Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-${{ matrix.arch }}
-          path: ./dist
-
-  # ----------------------
   # Windows Builds
   # ----------------------
   windows:
     name: Windows Build
     runs-on: windows-latest
-    strategy:
-      matrix:
-        arch: [x64, arm64]
     steps:
       - uses: actions/checkout@v4
 
       - name: Prepare Directories
         run: |
-          New-Item -ItemType Directory -Force -Path dist
-          New-Item -ItemType Directory -Force -Path packages
+          mkdir dist
+          mkdir packages
 
       - name: Build Windows
         run: |
-          # Ensure the PS script exists and path is correct
-          if (-Not (Test-Path -Path "./build_windows.ps1")) {
-            Write-Error "build_windows.ps1 not found at repo root!"
-            exit 1
-          }
-          pwsh -NoProfile -ExecutionPolicy Bypass -File ./build_windows.ps1 -Arch ${{ matrix.arch }}
+          call build_windows.bat
 
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows-${{ matrix.arch }}
+          name: windows-x64
           path: ./dist
