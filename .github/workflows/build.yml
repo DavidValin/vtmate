@@ -10,56 +10,59 @@ on:
 
 jobs:
   # ----------------------
-  # Linux Builds
+  # Linux Builds (amd64 + arm64 via QEMU)
   # ----------------------
   linux:
-    name: Linux Build (${{ matrix.arch }})
+    name: Linux Build (amd64 + arm64)
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        arch: [amd64, arm64]
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # ----------------------
-      # Cache mounts
-      # ----------------------
-      - name: Cache K Directory
-        uses: actions/cache@v3
-        with:
-          path: /home/runner/.cache/k
-          key: linux-k-${{ matrix.arch }}-${{ hashFiles('**/build_linux.sh') }}
-      - name: Cache Whisper Models
-        uses: actions/cache@v3
-        with:
-          path: /home/runner/.whisper-models
-          key: linux-whisper-${{ matrix.arch }}-${{ hashFiles('**/build_linux.sh') }}
-
-      # ----------------------
-      # QEMU setup for cross-arch
-      # ----------------------
-      - name: Setup QEMU
+      # Setup QEMU for multi-arch
+      - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
+
+      # Cache Rust and Cargo targets
+      - name: Cache Cargo Registry
+        uses: actions/cache@v3
         with:
-          platforms: all
+          path: ~/.cargo/registry
+          key: cargo-registry-linux-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Cache Cargo Git
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/git
+          key: cargo-git-linux-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Make Linux Build Script Executable
-        run: chmod +x ./build_linux.sh
+      - name: Cache Cargo Target
+        uses: actions/cache@v3
+        with:
+          path: target
+          key: cargo-target-linux-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Install Dependencies
-        run: sudo apt-get update && sudo apt-get install -y curl xz-utils build-essential
+      # Prepare model assets
+      - name: Download Model Assets
+        run: |
+          mkdir -p ~/.cache/k ~/.whisper-models
+          for file in 0.bin 0.onnx; do
+            [ -f ~/.cache/k/$file ] || curl -L -o ~/.cache/k/$file https://github.com/DavidValin/kokoro-tiny/raw/main/models/$file
+          done
+          for model in ggml-small ggml-tiny; do
+            [ -f ~/.whisper-models/${model}.bin ] || curl -L -o ~/.whisper-models/${model}.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${model}.bin
+          done
 
-      - name: Build Linux (${{ matrix.arch }})
-        run: ./build_linux.sh --arch ${{ matrix.arch }}
+      - name: Build Linux (all archs)
+        run: |
+          chmod +x ./build_linux.sh
+          ./build_linux.sh --arch all
 
+      # Upload artifact
       - name: Upload Linux Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: linux-${{ matrix.arch }}
+          name: linux-all
           path: ./dist
 
   # ----------------------
@@ -72,28 +75,15 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # ----------------------
-      # Cache mounts for macOS
-      # ----------------------
-      - name: Cache K Directory
-        uses: actions/cache@v3
-        with:
-          path: ~/Library/Caches/k
-          key: macos-k-${{ hashFiles('**/build_macos.sh') }}
-      - name: Cache Whisper Models
-        uses: actions/cache@v3
-        with:
-          path: ~/Library/Caches/whisper-models
-          key: macos-whisper-${{ hashFiles('**/build_macos.sh') }}
-
+      # Install Sequoia
       - name: Install Sequoia
-        uses: sormy/sequoia-action@v1
+        uses: sequoia-io/sequoia-action@v1
 
-      - name: Make macOS Build Script Executable
-        run: chmod +x ./build_macos.sh
-
+      # Build macOS
       - name: Build macOS
-        run: ./build_macos.sh
+        run: |
+          chmod +x ./build_macos.sh
+          ./build_macos.sh
 
       - name: Upload macOS Artifacts
         uses: actions/upload-artifact@v4
@@ -105,7 +95,7 @@ jobs:
   # Windows Builds
   # ----------------------
   windows:
-    name: Windows Build (${{ matrix.arch }})
+    name: Windows Build (x64 + arm64)
     runs-on: windows-latest
     strategy:
       matrix:
@@ -114,15 +104,17 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Build Directory Setup
+      # Setup build directories
+      - name: Prepare Directories
         run: |
           New-Item -ItemType Directory -Force -Path dist
           New-Item -ItemType Directory -Force -Path packages
 
-      - name: Build Windows (${{ matrix.arch }})
-        shell: pwsh
-        run: ./build_windows.ps1 -Arch ${{ matrix.arch }}
+      # Build Windows
+      - name: Build Windows
+        run: pwsh -File ${{ github.workspace }}\build_windows.ps1 -Arch ${{ matrix.arch }}
 
+      # Upload Windows artifacts
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
         with:
