@@ -3,16 +3,13 @@
 // ------------------------------------------------------------------
 
 use crossbeam_channel::Receiver;
+use std::thread;
 use serde_json;
-use std::io::{BufRead, BufReader};
-use std::sync::{
-  Arc,
-  atomic::{AtomicU64, Ordering},
-};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 // API
 // ------------------------------------------------------------------
-
 
 // Compatibility Matrix for the unified streaming function
 //______________________________________________________________________________
@@ -27,7 +24,7 @@ use std::sync::{
 // - Streaming works for all supported endpoints.
 // - Roles supported in chat endpoints; legacy /completion needs manual prompt encoding.
 // - 'model' required for OpenAI/Ollama chat endpoints, ignored for legacy llama.cpp/Llamafile.
-pub fn llama_server_stream_response_into(
+pub async fn llama_server_stream_response_into(
     prompt: &str,
     llama_url: &str,
     llama_model: &str,
@@ -124,7 +121,19 @@ pub fn llama_server_stream_response_into(
       out.into_iter().filter(|(u, _)| seen.insert(u.clone())).collect()
     }
 
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::Client::new();
+
+    // Cancellation channel to abort HTTP request if stop signal received
+    let (cancel_tx, mut cancel_rx) = tokio::sync::broadcast::channel(1);
+    let stop_all_rx_thread = stop_all_rx.clone();
+    let stop_handle = thread::spawn(move || {
+      // Block on a cloned receiver to signal cancellation
+      let recv = stop_all_rx_thread;
+      while recv.recv().is_ok() {
+        let _ = cancel_tx.send(());
+        crate::log::log("info", "Cancelling LLM stream...");
+      }
+    });
     let tries = candidates(llama_url);
     let mut last_err: Option<String> = None;
 
@@ -189,11 +198,19 @@ pub fn llama_server_stream_response_into(
         }
       };
 
-      let resp = match req.send() {
-        Ok(r) => r,
-        Err(e) => {
-          last_err = Some(format!("Request to {url} failed: {e}"));
-          continue;
+      let resp = tokio::select! {
+        res = req.send() => {
+          match res {
+            Ok(r) => r,
+            Err(e) => {
+              last_err = Some(format!("Request to {url} failed: {e}"));
+              continue;
+            }
+          }
+        },
+        _ = cancel_rx.recv() => {
+          crate::log::log("info", "Cancelling LLM stream...");
+          return Ok(());
         }
       };
 
@@ -211,17 +228,21 @@ pub fn llama_server_stream_response_into(
       crate::log::log("info", &format!("Using endpoint: {url}"));
       crate::log::log("info", "Streaming response...");
 
-      let mut reader = BufReader::new(resp);
-      let mut line = String::new();
+      let resp_text = resp.text().await?;
+      let lines = resp_text.lines();
 
-      loop {
-        if stop_all_rx.try_recv().is_ok() || interrupt_counter.load(Ordering::SeqCst) != expected_interrupt {
+      for line in lines {
+        if cancel_rx.try_recv().is_ok() {
+          crate::log::log("info", "Cancelling LLM stream...");
           return Ok(());
         }
-
-        line.clear();
-        let n = reader.read_line(&mut line)?;
-        if n == 0 { break; }
+        if stop_all_rx.try_recv().is_ok() {
+          crate::log::log("info", "Cancelling LLM stream...");
+          return Ok(());
+        }
+        if interrupt_counter.load(Ordering::SeqCst) != expected_interrupt {
+          return Ok(());
+        }
 
         let trimmed = line.trim();
         if trimmed.is_empty() { continue; }
@@ -269,12 +290,14 @@ pub fn llama_server_stream_response_into(
           }
         }
       }
-
       return Ok(());
     }
 
+    // Ensure cancellation thread is joined before exiting
+    let _ = stop_handle.join();
+
     Err(last_err.unwrap_or_else(|| "No endpoint candidates succeeded".to_string()).into())
-}
+  }
 
 
 // PRIVATE
