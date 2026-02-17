@@ -165,21 +165,28 @@ jobs:
           if "%PROCESSOR_ARCHITECTURE%"=="AMD64" (
               set VARIANTS=WIN_WITH_OPENBLAS=1,WIN_WITH_CUDA=1
           ) else (
+              REM ARM64 builds are skipped or only CPU if script supports
+              echo Skipping CUDA on ARM64
               set VARIANTS=WIN_WITH_OPENBLAS=1
           )
 
           for %%v in (%VARIANTS%) do (
               if "%%v"=="WIN_WITH_OPENBLAS=1" (set ART_NAME=cpu) else (set ART_NAME=cuda)
 
-              REM Clear folder to avoid collisions
+              REM Skip ARM64 CUDA completely
+              if "%PROCESSOR_ARCHITECTURE%"=="ARM64" if "!ART_NAME!"=="cuda" (
+                  echo Skipping CUDA variant on ARM64
+                  goto :continue
+              )
+
               if exist dist\!ART_NAME! rmdir /s /q dist\!ART_NAME!
               mkdir dist\!ART_NAME!
-
               echo Building variant %%v in MSVC environment
               call build_windows.bat %%v
-
               move dist\* dist\!ART_NAME!
+              :continue
           )
+
 
       - name: Upload CPU Artifact
         uses: actions/upload-artifact@v4
