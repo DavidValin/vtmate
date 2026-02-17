@@ -49,11 +49,16 @@ jobs:
             [ -f ~/.whisper-models/${model}.bin ] || curl -L -o ~/.whisper-models/${model}.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${model}.bin
           done
 
-      - name: Build Linux
+      - name: Build Linux Variants
         run: |
           chmod +x ./build_linux.sh
-          # Remove --jobs because script does not support it
-          ./build_linux.sh --arch ${{ matrix.arch }}
+
+          # CPU-only
+          ./build_linux.sh --arch ${{ matrix.arch }} --features "whisper-openblas" --output dist/cpu
+
+          # CUDA-enabled (ensure SDK present)
+          sudo apt-get update && sudo apt-get install -y nvidia-cuda-toolkit
+          ./build_linux.sh --arch ${{ matrix.arch }} --features "whisper-cuda" --output dist/cuda
 
       - name: Upload Linux Artifacts
         uses: actions/upload-artifact@v4
@@ -80,9 +85,20 @@ jobs:
         with:
           arch: x64
 
-      - name: Build Windows (x64 MSVC)
+      - name: Install CUDA SDK
+        shell: powershell
+        run: |
+          choco install cuda -y
+          refreshenv
+
+      - name: Build Windows Variants
         shell: cmd
-        run: build_windows.bat
+        run: |
+          REM CPU-only
+          build_windows.bat --features whisper-openblas --output dist\cpu
+
+          REM CUDA-enabled
+          build_windows.bat --features whisper-cuda --output dist\cuda
 
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
