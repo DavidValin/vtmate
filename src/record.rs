@@ -2,6 +2,7 @@
 //  Record
 // ------------------------------------------------------------------
 
+use crate::state::GLOBAL_STATE;
 use crate::START_INSTANT;
 use cpal::traits::{DeviceTrait, StreamTrait};
 use crossbeam_channel::{Receiver, Sender};
@@ -27,7 +28,7 @@ pub fn record_thread(
   end_silence_ms: u64,
   playback_active: Arc<AtomicBool>,
   gate_until_ms: Arc<AtomicU64>,
-  stop_play_tx: Sender<()>,
+  stop_all_tx: Sender<()>,
   interrupt_counter: Arc<AtomicU64>,
   stop_all_rx: Receiver<()>,
   peak: Arc<Mutex<f32>>,
@@ -69,7 +70,7 @@ pub fn record_thread(
       hangover_ms,
       playback_active.clone(),
       gate_until_ms.clone(),
-      stop_play_tx.clone(),
+      stop_all_tx.clone(),
       interrupt_counter.clone(),
       utt_buf.clone(),
       user_speaking.clone(),
@@ -97,7 +98,7 @@ pub fn record_thread(
       hangover_ms,
       playback_active.clone(),
       gate_until_ms.clone(),
-      stop_play_tx.clone(),
+      stop_all_tx.clone(),
       interrupt_counter.clone(),
       utt_buf.clone(),
       user_speaking.clone(),
@@ -125,7 +126,7 @@ pub fn record_thread(
       hangover_ms,
       playback_active.clone(),
       gate_until_ms.clone(),
-      stop_play_tx.clone(),
+      stop_all_tx.clone(),
       interrupt_counter.clone(),
       utt_buf.clone(),
       user_speaking.clone(),
@@ -169,7 +170,7 @@ fn build_input_f32(
   hangover_ms: u64,
   playback_active: Arc<AtomicBool>,
   gate_until_ms: Arc<AtomicU64>,
-  stop_play_tx: Sender<()>,
+  stop_all_tx: Sender<()>,
   interrupt_counter: Arc<AtomicU64>,
   utt_buf: Arc<Mutex<Vec<f32>>>,
   user_speaking: Arc<AtomicBool>,
@@ -242,12 +243,19 @@ fn build_input_f32(
           b.extend_from_slice(data);
         }
 
-        if playback_active.load(Ordering::Relaxed) && !stop_sent.load(Ordering::Relaxed) {
+        let ui_thinking = GLOBAL_STATE
+          .get()
+          .unwrap()
+          .ui
+          .thinking
+          .load(Ordering::Relaxed);
+        if (playback_active.load(Ordering::Relaxed) || ui_thinking)
+          && !stop_sent.load(Ordering::Relaxed)
+        {
           // silence audio
           let mut vol = volume.lock().unwrap();
           *vol = 0.0;
-          let _ = stop_play_tx.try_send(());
-          // Signal conversation + TTS cancellation (user spoke over playback)
+          let _ = stop_all_tx.try_send(());
           interrupt_counter.fetch_add(1, Ordering::SeqCst);
           let _ = tx_ui.send("\n🛑 USER interrupted\n".to_string());
           stop_sent.store(true, Ordering::Relaxed);
@@ -331,7 +339,7 @@ fn build_input_i16(
   hangover_ms: u64,
   playback_active: Arc<AtomicBool>,
   gate_until_ms: Arc<AtomicU64>,
-  stop_play_tx: Sender<()>,
+  stop_all_tx: Sender<()>,
   interrupt_counter: Arc<AtomicU64>,
   utt_buf: Arc<Mutex<Vec<f32>>>,
   user_speaking: Arc<AtomicBool>,
@@ -408,11 +416,19 @@ fn build_input_i16(
           b.extend_from_slice(&tmp);
         }
 
-        if playback_active.load(Ordering::Relaxed) && !stop_sent.load(Ordering::Relaxed) {
+        let ui_thinking = GLOBAL_STATE
+          .get()
+          .unwrap()
+          .ui
+          .thinking
+          .load(Ordering::Relaxed);
+        if (playback_active.load(Ordering::Relaxed) || ui_thinking)
+          && !stop_sent.load(Ordering::Relaxed)
+        {
           // silence audio
           let mut vol = volume.lock().unwrap();
           *vol = 0.0;
-          let _ = stop_play_tx.try_send(());
+          let _ = stop_all_tx.try_send(());
           interrupt_counter.fetch_add(1, Ordering::SeqCst);
           let _ = tx_ui.send("\n🛑 USER interrupted\n".to_string());
           stop_sent.store(true, Ordering::Relaxed);
@@ -493,7 +509,7 @@ fn build_input_u16(
   hangover_ms: u64,
   playback_active: Arc<AtomicBool>,
   gate_until_ms: Arc<AtomicU64>,
-  stop_play_tx: Sender<()>,
+  stop_all_tx: Sender<()>,
   interrupt_counter: Arc<AtomicU64>,
   utt_buf: Arc<Mutex<Vec<f32>>>,
   user_speaking: Arc<AtomicBool>,
@@ -571,11 +587,19 @@ fn build_input_u16(
           b.extend_from_slice(&tmp);
         }
 
-        if playback_active.load(Ordering::Relaxed) && !stop_sent.load(Ordering::Relaxed) {
+        let ui_thinking = GLOBAL_STATE
+          .get()
+          .unwrap()
+          .ui
+          .thinking
+          .load(Ordering::Relaxed);
+        if (playback_active.load(Ordering::Relaxed) || ui_thinking)
+          && !stop_sent.load(Ordering::Relaxed)
+        {
           // silence audio
           let mut vol = volume.lock().unwrap();
           *vol = 0.0;
-          let _ = stop_play_tx.try_send(());
+          let _ = stop_all_tx.try_send(());
           interrupt_counter.fetch_add(1, Ordering::SeqCst);
           let _ = tx_ui.send("\n🛑 USER interrupted\n".to_string());
           stop_sent.store(true, Ordering::Relaxed);
