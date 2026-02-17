@@ -1,130 +1,87 @@
 name: Build All Platforms
 
 on:
-  pull_request:
-    branches:
-      - main
+  push:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
-  build-linux:
-    name: Build Linux
+  # ----------------------
+  # Linux Builds (amd64 + arm64 in parallel)
+  # ----------------------
+  linux:
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU (for cross-arch)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Linux Docker image
+        run: |
+          docker build \
+            --build-arg ARCH=${{ matrix.arch }} \
+            -f Dockerfile.linux.${{ matrix.arch }} \
+            -t ai-mate-linux-${{ matrix.arch }} .
+
+      - name: Save Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: dist/
+
+  # ----------------------
+  # Windows Builds
+  # ----------------------
+  windows:
     strategy:
       matrix:
-        arch: [amd64, arm64]
-    env:
-      BIN_NAME: ai-mate
-      DO_PACKAGE: 1
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          profile: minimal
-          override: true
-
-      - name: Cache Cargo
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: cargo-linux-${{ matrix.arch }}-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Prepare Artifacts Dir
-        run: mkdir -p dist packages
-
-      - name: Build Linux
-        run: |
-          chmod +x ./build_linux.sh
-          ./build_linux.sh --arch ${{ matrix.arch }}
-
-      - name: Upload Linux Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-${{ matrix.arch }}-binaries
-          path: dist/*
-
-  build-macos:
-    name: Build macOS
-    runs-on: macos-latest
-    env:
-      BIN_NAME: ai-mate
-      DO_PACKAGE: 1
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          profile: minimal
-          override: true
-
-      - name: Cache Cargo
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: cargo-macos-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Prepare Artifacts Dir
-        run: mkdir -p dist packages
-
-      - name: Build macOS
-        run: |
-          chmod +x ./build_macos.sh
-          ./build_macos.sh
-
-      - name: Upload macOS Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-universal-binaries
-          path: dist/*
-
-  build-windows:
-    name: Build Windows
+        arch: [x64, arm64]
     runs-on: windows-latest
-    strategy:
-      matrix:
-        arch: [amd64, arm64]
-    env:
-      BIN_NAME: ai-mate
-      DO_PACKAGE: 1
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          profile: minimal
-          override: true
-
-      - name: Cache Cargo
-        uses: actions/cache@v3
-        with:
-          path: |
-            C:\Users\runneradmin\.cargo\registry
-            C:\Users\runneradmin\.cargo\git
-          key: cargo-windows-${{ matrix.arch }}-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Prepare Artifacts Dir
-        run: mkdir dist packages
-
-      - name: Build Windows
+      - name: Prepare directories
         run: |
-          powershell ./build_windows.ps1 -Arch ${{ matrix.arch }}
+          New-Item -ItemType Directory -Force -Path dist
+          New-Item -ItemType Directory -Force -Path packages
 
-      - name: Upload Windows Artifacts
+      - name: Build Windows executable
+        run: .\build_windows.ps1 ${{ matrix.arch }}
+
+      - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows-${{ matrix.arch }}-binaries
-          path: dist/*
+          name: windows-${{ matrix.arch }}
+          path: dist/
+
+  # ----------------------
+  # macOS Universal (Intel + Apple Silicon) using Sequoia
+  # ----------------------
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Sequoia
+        run: |
+          curl -sSf https://install.sequoia.dev | sh
+
+      - name: Build macOS universal binary
+        run: |
+          sequoia build \
+            --build-type universal \
+            --min-macos-version 10.15 \
+            --output dist/
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-universal
+          path: dist/
