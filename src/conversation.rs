@@ -97,7 +97,7 @@ pub fn conversation_thread(
         ui.thinking.store(true, Ordering::Relaxed);
 
         // Snapshot interruption counter for this assistant turn.
-        let mut speaker = PhraseSpeaker::new();
+        let speaker_arc = std::sync::Arc::new(std::sync::Mutex::new(PhraseSpeaker::new()));
         let mut got_any_token = false;
 
         let _ = tx_ui.send("".to_string());
@@ -105,81 +105,103 @@ pub fn conversation_thread(
 
         let mut interrupted = false;
 
-        let stop_all_tx_clone = stop_all_tx.clone();
+        // clones for the on_piece closure
+        let stop_all_rx_cloned_for_closure = stop_all_rx.clone();
+        let stop_all_tx_cloned_for_closure = stop_all_tx.clone();
+        let speaker_arc_cloned_for_closure = speaker_arc.clone();
+        let tx_ui_cloned_for_closure = tx_ui.clone();
+        let tts_tx_cloned_for_closure = tts_tx.clone();
+        let ui_thinking_cloned_for_closure = ui.thinking.clone();
+        let conversation_history_cloned_for_closure = conversation_history.clone();
+        // clones for closure
+        let ui_thinking_for_closure = ui_thinking_cloned_for_closure.clone();
+        let conversation_history_for_closure_cloned = conversation_history_cloned_for_closure.clone();
 
         // called on every chunk received from llm
-        let mut on_piece = |piece: &str| {
+        let on_piece = move |piece: &str| { let hist = conversation_history_for_closure_cloned.clone();
           if interrupted {
-            let _ = stop_all_tx_clone.try_send(());
+            let _ = stop_all_tx_cloned_for_closure.try_send(());
             return;
           }
-
-          if stop_all_rx.try_recv().is_ok() {
+          if stop_all_rx_cloned_for_closure.try_recv().is_ok() {
             interrupted = true;
-            speaker.buf.clear();
+            speaker_arc_cloned_for_closure.lock().unwrap().buf.clear();
             return;
           }
-
           if !got_any_token && !piece.is_empty() {
             got_any_token = true;
-            ui.thinking.store(false, Ordering::Relaxed);
+            ui_thinking_for_closure.store(false, Ordering::Relaxed);
           }
-
-          // collect piece to see if there is a new phrase
-          if let Some(phrase) = speaker.push_text(piece) {
-            // Log time from utterance start to first phrase playback
+          if let Some(phrase) = speaker_arc_cloned_for_closure.lock().unwrap().push_text(piece) {
             if !first_phrase_logged {
               let elapsed_ms = crate::util::now_ms(&START_INSTANT) - speech_end_ms;
               crate::log::log("info", &format!("Time from speech end to first phrase playback: {:.2?}", elapsed_ms));
               first_phrase_logged = true;
-            };
-
+            }
             let ui_phrase = phrase.clone();
-            let _ = tx_ui.send(ui_phrase);
-            conversation_history.lock().unwrap().push_str(&format!("{}\n", phrase));
-              let _ = tts_tx.send((strip_special_chars(&phrase), my_interrupt));
+            let _ = tx_ui_cloned_for_closure.send(ui_phrase);
+            hist.lock().unwrap().push_str(&format!("{}\n", phrase));
+            let _ = tts_tx_cloned_for_closure.send((strip_special_chars(&phrase), my_interrupt));
           }
         };
 
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let stop_all_rx_cloned = stop_all_rx.clone();
+        let ollama_url = args.ollama_url.clone();
+        let interrupt_counter_cloned = interrupt_counter.clone();
+        let llama_url = args.llama_server_url.clone();
+        let model = args.model.clone();
+
         if args.llm == "llama-server" {
-          match crate::llm::llama_server_stream_response_into(
-            &cleaned_prompt,
-            args.llama_server_url.as_str(),
-            args.model.as_str(),
-            stop_all_rx.clone(),
-            interrupt_counter.clone(),
-            my_interrupt,
-            &mut on_piece
-          ) {
-            Ok(o) => o,
-            Err(e) => {
-              crate::log::log("error", &format!("llama server error: {e}. Make sure llama-server / llamafile is running"));
-              // skip this turn and continue
-              continue;
-            }
-          }
+          let on_piece_cloned = std::sync::Arc::new(std::sync::Mutex::new(on_piece));
+          let handle = std::thread::spawn(move || {
+            rt.block_on(async {
+              match crate::llm::llama_server_stream_response_into (
+                &cleaned_prompt,
+                llama_url.as_str(),
+                model.as_str(),
+                stop_all_rx_cloned,
+                interrupt_counter_cloned.clone(),
+                my_interrupt,
+                &mut *on_piece_cloned.lock().unwrap()
+              ).await {
+                Ok(_) => Ok(()),
+                Err(e) => {
+                  crate::log::log("error", &format!("llama server error: {e}. Make sure llama-server / llamafile is running"));
+                  Err(e)
+                }
+              }
+            })
+          });
+          handle.join().unwrap()?;
+
         } else {
-          match crate::llm::llama_server_stream_response_into(
-            &cleaned_prompt,
-            args.ollama_url.as_str(),
-            args.model.as_str(),
-            stop_all_rx.clone(),
-            interrupt_counter.clone(),
-            my_interrupt,
-            &mut on_piece
-          ) {
-            Ok(o) => o,
-            Err(e) => {
-              crate::log::log("error", &format!("ollama error. {e}. Make sure ollama is running"));
-              // skip this turn and continue
-              continue;
-            }
-          }
+          let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+          let on_piece_cloned = std::sync::Arc::new(std::sync::Mutex::new(on_piece));
+          let handle = std::thread::spawn(move || {
+            rt.block_on(async {
+              match crate::llm::llama_server_stream_response_into (
+                &cleaned_prompt,
+                ollama_url.as_str(),
+                model.as_str(),
+                stop_all_rx_cloned,
+                interrupt_counter_cloned.clone(),
+                my_interrupt,
+                &mut *on_piece_cloned.lock().unwrap()
+              ).await {
+                Ok(_) => Ok(()),
+                Err(e) => {
+                  crate::log::log("error", &format!("ollama error. {e}. Make sure ollama is running"));
+                  Err(e)
+                }
+              }
+            })
+          });
+          handle.join().unwrap()?;
         }
 
-        ui.thinking.store(false, Ordering::Relaxed);
-
-        if let Some(phrase) = speaker.flush() {
+        ui_thinking_cloned_for_closure.store(false, Ordering::Relaxed);
+        if let Some(phrase) = speaker_arc.lock().unwrap().flush() {
           let phrase_clone = phrase.clone();
           let _ = tx_ui.send(phrase_clone);
           conversation_history.lock().unwrap().push_str(&format!("{}\n", phrase));

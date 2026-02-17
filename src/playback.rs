@@ -285,7 +285,7 @@ pub fn playback_thread(
           // Drain any pending audio chunks from rx_audio
           while let Ok(_) = rx_audio.try_recv() {}
           // Allow CPAL buffer to flush
-          std::thread::sleep(std::time::Duration::from_millis(50));
+          std::thread::sleep(std::time::Duration::from_millis(10));
           break;
         }
         recv(rx_audio) -> msg => {
