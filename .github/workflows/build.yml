@@ -3,10 +3,10 @@ name: Build All Platforms
 on:
   push:
     branches:
-      - main
+      - '**'          # Trigger on any branch for testing
   pull_request:
     branches:
-      - main
+      - '**'          # Trigger on any PR for testing
 
 # ----------------------
 # Linux Builds
@@ -17,10 +17,11 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        arch: [amd64, arm64]  # Run in parallel
+        arch: [amd64, arm64]   # Run each Linux arch in parallel
     steps:
       - uses: actions/checkout@v4
 
+      # QEMU for multi-arch builds
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
         with:
@@ -40,6 +41,7 @@ jobs:
           path: target
           key: cargo-target-linux-${{ matrix.arch }}-${{ hashFiles('**/Cargo.lock') }}
 
+      # Download model assets
       - name: Download Model Assets
         run: |
           mkdir -p ~/.cache/k ~/.whisper-models
@@ -64,22 +66,26 @@ jobs:
 # ----------------------
 # macOS Builds
 # ----------------------
-macos:
-  name: macOS Build
-  runs-on: macos-latest
-  steps:
-    - uses: actions/checkout@v4
+  macos:
+    name: macOS Build
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        arch: [arm64]   # Only arm64 works reliably on GitHub runners
+    steps:
+      - uses: actions/checkout@v4
 
-    - name: Build macOS (x64 only on CI)
-      run: |
-        chmod +x ./build_macos.sh
-        ./build_macos.sh --arch x64
+      # Build macOS
+      - name: Build macOS
+        run: |
+          chmod +x ./build_macos.sh
+          ./build_macos.sh
 
-    - name: Upload macOS Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: macos-x64
-        path: ./dist
+      - name: Upload macOS Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: ./dist
 
 # ----------------------
 # Windows Builds
@@ -93,11 +99,13 @@ macos:
     steps:
       - uses: actions/checkout@v4
 
+      # Prepare directories
       - name: Prepare Directories
         run: |
           New-Item -ItemType Directory -Force -Path dist
           New-Item -ItemType Directory -Force -Path packages
 
+      # Build Windows
       - name: Build Windows
         run: pwsh -NoProfile -ExecutionPolicy Bypass -File "${{ github.workspace }}\build_windows.ps1" -Arch ${{ matrix.arch }}
 
