@@ -138,7 +138,15 @@ jobs:
           mkdir dist
           mkdir packages
 
-      - name: Install CUDA SDK
+      - name: Cache CUDA SDK
+        uses: actions/cache@v3
+        id: cuda-cache
+        with:
+          path: C:\ProgramData\chocolatey\lib\cuda
+          key: windows-cuda-12-2
+
+      - name: Install CUDA SDK (if not cached)
+        if: steps.cuda-cache.outputs.cache-hit != 'true'
         run: |
           choco install cuda -y
           refreshenv
@@ -180,7 +188,9 @@ jobs:
           path: dist\cpu
 
       - name: Upload CUDA Artifact
+        if: contains(steps.build-variants.outputs.variant-list, 'cuda')
         uses: actions/upload-artifact@v4
         with:
           name: windows-${{ matrix.arch }}-cuda
           path: dist\cuda
+
