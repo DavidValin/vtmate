@@ -161,7 +161,7 @@ jobs:
         run: |
           setlocal EnableDelayedExpansion
 
-          REM Use CPU+CUDA for x64, CPU only for ARM64
+          REM x64 builds: CPU + CUDA, ARM64 builds: CPU only
           if "%PROCESSOR_ARCHITECTURE%"=="AMD64" (
               set VARIANTS=WIN_WITH_OPENBLAS=1,WIN_WITH_CUDA=1
           ) else (
