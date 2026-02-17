@@ -33,10 +33,6 @@ jobs:
         with:
           path: ~/.cargo/git
           key: cargo-git-linux-amd64-${{ hashFiles('**/Cargo.lock') }}
-      - uses: actions/cache@v3
-        with:
-          path: target
-          key: cargo-target-linux-amd64-${{ hashFiles('**/Cargo.lock') }}
 
       # ----------------------
       # CUDA SDK cache & install
@@ -108,7 +104,7 @@ jobs:
           mkdir -p ./dist/cpu
           mv ./dist/* ./dist/cpu/
         env:
-          CARGO_BUILD_JOBS: 2
+          CARGO_BUILD_JOBS: 1
 
       - name: Upload CPU Artifact
         uses: actions/upload-artifact@v4
@@ -126,7 +122,7 @@ jobs:
           mkdir -p ./dist/cuda
           mv ./dist/* ./dist/cuda/
         env:
-          CARGO_BUILD_JOBS: 2
+          CARGO_BUILD_JOBS: 1
 
       - name: Upload CUDA Artifact
         uses: actions/upload-artifact@v4
