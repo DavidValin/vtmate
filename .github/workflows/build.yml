@@ -155,7 +155,7 @@ jobs:
     runs-on: windows-latest
     strategy:
       matrix:
-        arch: [x64, arm64]
+        arch: [x64]
     concurrency:
       group: windows-${{ matrix.arch }}
       cancel-in-progress: false
@@ -212,4 +212,4 @@ jobs:
           name: windows-${{ matrix.arch }}-cuda
           path: dist\cuda
 
-
+      
