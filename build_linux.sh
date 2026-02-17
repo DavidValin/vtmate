@@ -6,88 +6,121 @@ on:
   pull_request:
 
 jobs:
-  build:
+  # ---------------------------
+  # macOS build
+  # ---------------------------
+  build_macos:
+    name: macOS Build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Cache Cargo
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-registry-${{ runner.os }}-
+
+      - name: Build macOS
+        run: |
+          chmod +x build_macos.sh
+          ./build_macos.sh --skip-package
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: macos-artifacts
+          path: dist/*
+
+  # ---------------------------
+  # Linux amd64 build
+  # ---------------------------
+  build_linux_amd64:
+    name: Linux AMD64 Build
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        include:
-          - os: ubuntu-latest
-            arch: amd64
-          - os: ubuntu-latest
-            arch: arm64
-          - os: macos-latest
-            arch: native
-          - os: windows-latest
-            arch: x64
-          - os: windows-latest
-            arch: arm64
-
-    runs-on: ${{ matrix.os }}
-
-    env:
-      DIST_DIR: dist
-
+        arch: [amd64]
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # Cache Rust builds
-      - name: Cache Rust dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-
-      # Cache Docker layers for faster Linux builds
-      - name: Cache Docker
-        if: startsWith(matrix.os, 'ubuntu')
-        uses: actions/cache@v3
-        with:
-          path: /tmp/.docker-cache
-          key: docker-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('**/build_linux.sh') }}
-          restore-keys: |
-            docker-${{ runner.os }}-${{ matrix.arch }}-
-
-      # Setup QEMU for cross-arch Docker
-      - name: Setup QEMU
-        if: startsWith(matrix.os, 'ubuntu')
+      - name: Setup QEMU (optional for cross builds)
         uses: docker/setup-qemu-action@v2
-
-      # Build Linux
-      - name: Build Linux
-        if: matrix.os == 'ubuntu-latest'
-        shell: bash
-        run: |
-          ARCH=${{ matrix.arch }}
-          echo "Building Linux $ARCH"
-          curl -L -o build_linux.sh https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/build_linux.sh
-          chmod +x build_linux.sh
-          ./build_linux.sh --arch $ARCH --cache
-
-      # Build macOS
-      - name: Build macOS
-        if: matrix.os == 'macos-latest'
-        shell: bash
-        run: |
-          curl -L -o build_macos.sh https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/build_macos.sh
-          chmod +x build_macos.sh
-          ./build_macos.sh --skip-package=false
-
-      # Build Windows
-      - name: Build Windows
-        if: matrix.os == 'windows-latest'
-        shell: cmd
-        env:
-          ARCH: ${{ matrix.arch }}
-        run: |
-          curl -L -o build_windows.bat https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/build_windows.bat
-          set WIN_WITH_VULKAN=0
-          build_windows.bat --arch %ARCH%
-
-      # Upload artifacts
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
         with:
-          name: ai-mate-${{ matrix.os }}-${{ matrix.arch }}
-          path: dist
+          platforms: all
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Cache Cargo
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: cargo-registry-linux-amd64-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-registry-linux-amd64-
+
+      - name: Build Linux AMD64
+        run: |
+          chmod +x build_linux.sh
+          ./build_linux.sh --arch amd64 --cache
+
+      - name: Upload Linux AMD64 artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: linux-amd64-artifacts
+          path: dist/*
+
+  # ---------------------------
+  # Linux arm64 build
+  # ---------------------------
+  build_linux_arm64:
+    name: Linux ARM64 Build
+    runs-on: ubuntu-22.04-arm64
+    strategy:
+      matrix:
+        arch: [arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Cache Cargo
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: cargo-registry-linux-arm64-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-registry-linux-arm64-
+
+      - name: Build Linux ARM64
+        run: |
+          chmod +x build_linux.sh
+          ./build_linux.sh --arch arm64 --cache
+
+      - name: Upload Linux ARM64 artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: linux-arm64-artifacts
+          path: dist/*
