@@ -497,6 +497,31 @@ pub fn speak_via_opentts_stream(
 // PRIVATE
 // ------------------------------------------------------------------
 
+fn read_exact_in_chunks<R: std::io::Read>(
+  reader: &mut R,
+  total: usize,
+  stop_all_rx: &crossbeam_channel::Receiver<()>,
+  interrupt_counter: &std::sync::Arc<std::sync::atomic::AtomicU64>,
+  expected_interrupt: u64,
+) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+  let mut remaining = total;
+  let mut buf = vec![0u8; 8192];
+  let mut out = Vec::with_capacity(total);
+  while remaining > 0 {
+    if stop_all_rx.try_recv().is_ok() || interrupt_counter.load(std::sync::atomic::Ordering::SeqCst) != expected_interrupt {
+      return Err("Interrupted while reading wav data".into());
+    }
+    let to_read = std::cmp::min(remaining, buf.len());
+    let n = reader.read(&mut buf[..to_read])?;
+    if n == 0 {
+      return Err("Unexpected EOF while reading wav data".into());
+    }
+    out.extend_from_slice(&buf[..n]);
+    remaining -= n;
+  }
+  Ok(out)
+}
+
 fn stream_wav16le_over_http(
   url: &str,
   tx: Sender<crate::audio::AudioChunk>,
@@ -578,13 +603,13 @@ fn stream_wav16le_over_http(
   if channels == 0 || sample_rate == 0 {
     return Err("missing WAV fmt info".into());
   }
-  // crate::log::log(
-  //   "debug",
-  //   &format!(
-  //     "OpenTTS WAV: PCM16LE, {} ch @ {} Hz, data {} bytes (target {} Hz)",
-  //     channels, sample_rate, data_len, target_sr
-  //   ),
-  // );
+  crate::log::log(
+    "info",
+    &format!(
+      "OpenTTS WAV: PCM16LE, {} ch @ {} Hz, data {} bytes (target {} Hz)",
+      channels, sample_rate, data_len, target_sr
+    ),
+  );
 
   // IMPORTANT: Don't `read_exact(data_len)` in one shot.
   let samples_per_chunk = CHUNK_FRAMES * channels as usize;
@@ -623,8 +648,12 @@ fn stream_wav16le_over_http(
       remaining -= want;
 
       // Read all PCM data first
-      let mut pcm = Vec::new();
-      reader.read_to_end(&mut pcm)?;
+      let pcm = match read_exact_in_chunks(&mut reader, remaining, &stop_all_rx, &interrupt_counter, expected_interrupt) {
+        Ok(v) => v,
+        Err(e) => return Err(e),
+      };
+      // After reading the rest, no bytes left
+      remaining = 0;
       if stop_all_rx.try_recv().is_ok() {
         return Ok(SpeakOutcome::Interrupted);
       }
