@@ -8,41 +8,40 @@ on:
     branches:
       - main
 
+# ----------------------
+# Linux Builds
+# ----------------------
 jobs:
-  # ----------------------
-  # Linux Builds (amd64 + arm64 via QEMU)
-  # ----------------------
   linux:
-    name: Linux Build (amd64 + arm64)
+    name: Linux Build
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]   # Run each Linux arch in parallel
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # Setup QEMU for multi-arch
+      # QEMU for multi-arch
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
+        with:
+          platforms: all
 
-      # Cache Rust and Cargo targets
-      - name: Cache Cargo Registry
-        uses: actions/cache@v3
+      # Rust caching
+      - uses: actions/cache@v3
         with:
           path: ~/.cargo/registry
-          key: cargo-registry-linux-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache Cargo Git
-        uses: actions/cache@v3
+          key: cargo-registry-linux-${{ matrix.arch }}-${{ hashFiles('**/Cargo.lock') }}
+      - uses: actions/cache@v3
         with:
           path: ~/.cargo/git
-          key: cargo-git-linux-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache Cargo Target
-        uses: actions/cache@v3
+          key: cargo-git-linux-${{ matrix.arch }}-${{ hashFiles('**/Cargo.lock') }}
+      - uses: actions/cache@v3
         with:
           path: target
-          key: cargo-target-linux-${{ hashFiles('**/Cargo.lock') }}
+          key: cargo-target-linux-${{ matrix.arch }}-${{ hashFiles('**/Cargo.lock') }}
 
-      # Prepare model assets
+      # Download model assets
       - name: Download Model Assets
         run: |
           mkdir -p ~/.cache/k ~/.whisper-models
@@ -53,33 +52,29 @@ jobs:
             [ -f ~/.whisper-models/${model}.bin ] || curl -L -o ~/.whisper-models/${model}.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${model}.bin
           done
 
-      - name: Build Linux (all archs)
+      - name: Build Linux
         run: |
           chmod +x ./build_linux.sh
-          ./build_linux.sh --arch all
+          ./build_linux.sh --arch ${{ matrix.arch }}
 
-      # Upload artifact
       - name: Upload Linux Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: linux-all
+          name: linux-${{ matrix.arch }}
           path: ./dist
 
-  # ----------------------
-  # macOS Builds
-  # ----------------------
+# ----------------------
+# macOS Builds
+# ----------------------
   macos:
     name: macOS Build
     runs-on: macos-latest
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # Install Sequoia
       - name: Install Sequoia
-        uses: sequoia-io/sequoia-action@v1
+        run: brew install sequoia
 
-      # Build macOS
       - name: Build macOS
         run: |
           chmod +x ./build_macos.sh
@@ -91,30 +86,27 @@ jobs:
           name: macos
           path: ./dist
 
-  # ----------------------
-  # Windows Builds
-  # ----------------------
+# ----------------------
+# Windows Builds
+# ----------------------
   windows:
-    name: Windows Build (x64 + arm64)
+    name: Windows Build
     runs-on: windows-latest
     strategy:
       matrix:
         arch: [x64, arm64]
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # Setup build directories
       - name: Prepare Directories
         run: |
           New-Item -ItemType Directory -Force -Path dist
           New-Item -ItemType Directory -Force -Path packages
 
-      # Build Windows
       - name: Build Windows
-        run: pwsh -File ${{ github.workspace }}\build_windows.ps1 -Arch ${{ matrix.arch }}
+        working-directory: ${{ github.workspace }}
+        run: pwsh -File ./build_windows.ps1 -Arch ${{ matrix.arch }}
 
-      # Upload Windows artifacts
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
         with:
