@@ -161,7 +161,6 @@ DOCKERFILE
 
   docker build "${build_args[@]}" --platform=linux/amd64 -f "$df" -t "$img" "$tmp"
 
-  rm -f "${ESPEAK_ARCHIVE}"
   docker run --rm --platform=linux/amd64 \
     -v "${ASSETS_DIR}:/out" -w /out \
     "$img" \
@@ -193,6 +192,9 @@ linux_copy_out() {
   echo "✔ Built: $out"
 }
 
+# -----------------------------
+# AMD64 Docker Build
+# -----------------------------
 build_linux_amd64_docker_variants() {
   [[ "$docker_ok" -eq 1 ]] || { echo "Skipping linux/amd64: docker not found."; return 0; }
   [[ "${FORCE_AMD64_DOCKER}" -eq 1 ]] || { echo "Skipping linux/amd64: cannot run linux/amd64 containers."; return 0; }
@@ -323,6 +325,9 @@ DOCKERFILE
   rm -rf "$tmp" >/dev/null 2>&1 || true
 }
 
+# -----------------------------
+# ARM64 Docker Build (FIXED)
+# -----------------------------
 build_linux_arm64_docker_variants() {
   [[ "$docker_ok" -eq 1 ]] || { echo "Skipping linux/arm64: docker not found."; return 0; }
 
@@ -426,7 +431,9 @@ DOCKERFILE
   rm -rf "$tmp" >/dev/null 2>&1 || true
 }
 
+# -----------------------------
 # Run
+# -----------------------------
 ensure_espeak_data_archive
 
 if want_arch amd64; then build_linux_amd64_docker_variants; fi
