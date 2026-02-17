@@ -10,17 +10,17 @@ jobs:
     strategy:
       matrix:
         include:
-          # Linux
+          # Linux builds
           - os: ubuntu-latest
             arch: amd64
           - os: ubuntu-latest
             arch: arm64
 
-          # macOS
+          # macOS build
           - os: macos-latest
             arch: native
 
-          # Windows
+          # Windows builds
           - os: windows-latest
             arch: x64
           - os: windows-latest
@@ -33,13 +33,6 @@ jobs:
         uses: actions/checkout@v4
 
       # -------------------------
-      # Setup QEMU for cross-platform builds (Linux only)
-      # -------------------------
-      - name: Setup QEMU
-        if: matrix.os == 'ubuntu-latest' && matrix.arch == 'arm64'
-        uses: docker/setup-qemu-action@v2
-
-      # -------------------------
       # Linux build
       # -------------------------
       - name: Build Linux
@@ -48,12 +41,8 @@ jobs:
         run: |
           ARCH=${{ matrix.arch }}
           echo "Building Linux $ARCH"
-
-          # Download the Linux build script
           curl -L -o build_linux.sh https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/build_linux.sh
           chmod +x build_linux.sh
-
-          # Run the script
           ./build_linux.sh --arch $ARCH
 
       # -------------------------
