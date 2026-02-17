@@ -12,82 +12,82 @@ jobs:
   # ----------------------
   # Linux Builds
   # ----------------------
-linux:
-  name: Linux Build (${{ matrix.arch }})
-  runs-on: ubuntu-latest
-  strategy:
-    matrix:
-      arch: [amd64, arm64]
-  concurrency:
-    group: linux-${{ matrix.arch }}
-    cancel-in-progress: false
-  steps:
-    - uses: actions/checkout@v4
+  linux:
+    name: Linux Build (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    concurrency:
+      group: linux-${{ matrix.arch }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
 
-    - name: Set up QEMU
-      uses: docker/setup-qemu-action@v3
-      with:
-        platforms: all
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: all
 
-    - uses: actions/cache@v3
-      with:
-        path: ~/.cargo/registry
-        key: cargo-registry-linux-${{ matrix.arch }}-${{ hashFiles('**/Cargo.lock') }}
-    - uses: actions/cache@v3
-      with:
-        path: ~/.cargo/git
-        key: cargo-git-linux-${{ matrix.arch }}-${{ hashFiles('**/Cargo.lock') }}
-    - uses: actions/cache@v3
-      with:
-        path: target
-        key: cargo-target-linux-${{ matrix.arch }}-${{ hashFiles('**/Cargo.lock') }}
+      - uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: cargo-registry-linux-${{ matrix.arch }}-${{ hashFiles('**/Cargo.lock') }}
+      - uses: actions/cache@v3
+        with:
+          path: ~/.cargo/git
+          key: cargo-git-linux-${{ matrix.arch }}-${{ hashFiles('**/Cargo.lock') }}
+      - uses: actions/cache@v3
+        with:
+          path: target
+          key: cargo-target-linux-${{ matrix.arch }}-${{ hashFiles('**/Cargo.lock') }}
 
-    - name: Install CUDA SDK (amd64 only)
-      if: matrix.arch == 'amd64'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y wget gnupg software-properties-common
-        wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-ubuntu2004.pin
-        sudo mv cuda-ubuntu2004.pin /etc/apt/preferences.d/cuda-repository-pin-600
-        sudo apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/7fa2af80.pub
-        sudo add-apt-repository "deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/ /"
-        sudo apt-get update
-        sudo apt-get install -y cuda-toolkit-12-2
+      - name: Install CUDA SDK (amd64 only)
+        if: matrix.arch == 'amd64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget gnupg software-properties-common
+          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-ubuntu2004.pin
+          sudo mv cuda-ubuntu2004.pin /etc/apt/preferences.d/cuda-repository-pin-600
+          sudo apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/7fa2af80.pub
+          sudo add-apt-repository "deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/ /"
+          sudo apt-get update
+          sudo apt-get install -y cuda-toolkit-12-2
 
-    - name: Download Model Assets
-      run: |
-        mkdir -p ~/.cache/k ~/.whisper-models
-        for file in 0.bin 0.onnx; do
-          [ -f ~/.cache/k/$file ] || curl -L -o ~/.cache/k/$file https://github.com/DavidValin/kokoro-tiny/raw/main/models/$file
-        done
-        for model in ggml-small ggml-tiny; do
-          [ -f ~/.whisper-models/${model}.bin ] || curl -L -o ~/.whisper-models/${model}.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${model}.bin
-        done
+      - name: Download Model Assets
+        run: |
+          mkdir -p ~/.cache/k ~/.whisper-models
+          for file in 0.bin 0.onnx; do
+            [ -f ~/.cache/k/$file ] || curl -L -o ~/.cache/k/$file https://github.com/DavidValin/kokoro-tiny/raw/main/models/$file
+          done
+          for model in ggml-small ggml-tiny; do
+            [ -f ~/.whisper-models/${model}.bin ] || curl -L -o ~/.whisper-models/${model}.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${model}.bin
+          done
 
-    - name: Build CPU Variant (OpenBLAS statically linked)
-      run: |
-        chmod +x ./build_linux.sh
-        echo "Building CPU variant (OpenBLAS static)"
-        WITH_CUDA=0 WITH_ROCM=0 LINUX_WITH_OPENBLAS=1 LINUX_WITH_VULKAN=0 ./build_linux.sh --arch ${{ matrix.arch }}
-        mkdir -p ./dist/cpu
-        mv ./dist/* ./dist/cpu/
-        echo "Uploading CPU artifact"
-        gh workflow upload-artifact ./dist/cpu name=linux-${{ matrix.arch }}-cpu
-      env:
-        CARGO_BUILD_JOBS: 2
+      - name: Build CPU Variant (OpenBLAS statically linked)
+        run: |
+          chmod +x ./build_linux.sh
+          echo "Building CPU variant (OpenBLAS static)"
+          WITH_CUDA=0 WITH_ROCM=0 LINUX_WITH_OPENBLAS=1 LINUX_WITH_VULKAN=0 ./build_linux.sh --arch ${{ matrix.arch }}
+          mkdir -p ./dist/cpu
+          mv ./dist/* ./dist/cpu/
+          echo "Uploading CPU artifact"
+          gh workflow upload-artifact ./dist/cpu name=linux-${{ matrix.arch }}-cpu
+        env:
+          CARGO_BUILD_JOBS: 2
 
-    - name: Build CUDA Variant (amd64 only)
-      if: matrix.arch == 'amd64'
-      run: |
-        chmod +x ./build_linux.sh
-        echo "Building CUDA variant"
-        WITH_CUDA=1 WITH_ROCM=0 LINUX_WITH_OPENBLAS=1 LINUX_WITH_VULKAN=1 ./build_linux.sh --arch ${{ matrix.arch }}
-        mkdir -p ./dist/cuda
-        mv ./dist/* ./dist/cuda/
-        echo "Uploading CUDA artifact"
-        gh workflow upload-artifact ./dist/cuda name=linux-amd64-cuda
-      env:
-        CARGO_BUILD_JOBS: 2
+      - name: Build CUDA Variant (amd64 only)
+        if: matrix.arch == 'amd64'
+        run: |
+          chmod +x ./build_linux.sh
+          echo "Building CUDA variant"
+          WITH_CUDA=1 WITH_ROCM=0 LINUX_WITH_OPENBLAS=1 LINUX_WITH_VULKAN=1 ./build_linux.sh --arch ${{ matrix.arch }}
+          mkdir -p ./dist/cuda
+          mv ./dist/* ./dist/cuda/
+          echo "Uploading CUDA artifact"
+          gh workflow upload-artifact ./dist/cuda name=linux-amd64-cuda
+        env:
+          CARGO_BUILD_JOBS: 2
 
   # ----------------------
   # Windows Builds
