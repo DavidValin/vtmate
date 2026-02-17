@@ -147,7 +147,6 @@ jobs:
           name: linux-${{ matrix.arch }}-cpu
           path: dist/*-linux-${{ matrix.arch }}-cpu
 
-
   # ----------------------
   # Windows Builds
   # ----------------------
@@ -164,9 +163,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Prepare Directories
-        run: |
-          mkdir dist
-          mkdir packages
+        run: mkdir dist packages
 
       # ----------------------
       # Cache CUDA SDK
@@ -197,16 +194,12 @@ jobs:
         run: |
           setlocal EnableDelayedExpansion
 
-          REM ----- Define project directories -----
+          REM ----- Project directories -----
           set PROJECT_ROOT=%CD%
           set TARGET_DIR=%PROJECT_ROOT%\target-cross
           set DIST_DIR=%PROJECT_ROOT%\dist
 
-          REM ----- Set Rust target per architecture -----
-          if "%PROCESSOR_ARCHITECTURE%"=="AMD64" set RUST_TARGET=x86_64-pc-windows-msvc
-          if "%PROCESSOR_ARCHITECTURE%"=="ARM64" set RUST_TARGET=aarch64-pc-windows-msvc
-
-          REM ----- Define variants -----
+          REM ----- Define variants per architecture -----
           if "%PROCESSOR_ARCHITECTURE%"=="AMD64" (
               set VARIANTS=cpu cuda
           ) else (
@@ -218,35 +211,25 @@ jobs:
           for %%v in (%VARIANTS%) do (
               set ART_NAME=%%v
 
-              REM Set env vars for the batch script
+              REM ----- Set environment variables for batch -----
               set WIN_WITH_OPENBLAS=0
               set WIN_WITH_CUDA=0
               if "%%v"=="cpu" set WIN_WITH_OPENBLAS=1
               if "%%v"=="cuda" set WIN_WITH_CUDA=1
 
-              REM Skip CUDA entirely on ARM64
-              if "%PROCESSOR_ARCHITECTURE%"=="ARM64" if "!ART_NAME!"=="cuda" (
-                  echo Skipping CUDA variant on ARM64
+              REM ----- Build variant -----
+              echo Building variant %%v...
+              call build_windows.bat
+
+              REM ----- Copy output to dist -----
+              if exist "%TARGET_DIR%\%%v\*" (
+                  echo Copying built files for %%v...
+                  if not exist "%DIST_DIR%\%%v" mkdir "%DIST_DIR%\%%v"
+                  xcopy /Y /I /E "%TARGET_DIR%\%%v\*" "%DIST_DIR%\%%v\"
               ) else (
-                  REM Clear dist folder
-                  if exist %DIST_DIR%\!ART_NAME! rmdir /s /q %DIST_DIR%\!ART_NAME!
-                  mkdir %DIST_DIR%\!ART_NAME!
-
-                  REM Build variant
-                  echo Building variant %%v...
-                  call build_windows.bat
-
-                  REM Copy built binaries
-                  if exist "%TARGET_DIR%\!ART_NAME!\*" (
-                      echo Copying built files to dist\!ART_NAME!
-                      xcopy /Y /I /E "%TARGET_DIR%\!ART_NAME!\*" "%DIST_DIR%\!ART_NAME!\"
-                  ) else (
-                      echo WARNING: No files produced for variant %%v
-                  )
+                  echo WARNING: No files produced for variant %%v
               )
           )
-
-
 
       # ----------------------
       # Upload artifacts
@@ -262,4 +245,5 @@ jobs:
         with:
           name: windows-${{ matrix.arch }}-cuda
           path: dist\cuda
+
 
