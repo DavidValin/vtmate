@@ -14,7 +14,7 @@ jobs:
   # ----------------------
   linux:
     name: Linux Build (${{ matrix.arch }})
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         arch: [amd64, arm64]
@@ -45,7 +45,7 @@ jobs:
           key: cargo-target-linux-${{ matrix.arch }}-${{ hashFiles('**/Cargo.lock') }}
 
       # ----------------------
-      # CUDA cache
+      # CUDA SDK cache & install (amd64 only)
       - name: Cache CUDA SDK (amd64 only)
         if: matrix.arch == 'amd64'
         uses: actions/cache@v3
@@ -61,11 +61,9 @@ jobs:
             sudo apt-get update
             sudo apt-get install -y wget gnupg software-properties-common libtinfo6
 
-            # Download & install the NVIDIA keyring package
             wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.1-1_all.deb
             sudo dpkg -i cuda-keyring_1.1-1_all.deb
 
-            # Update apt and install CUDA toolkit
             sudo apt-get update
             sudo apt-get install -y cuda-toolkit-12-2
           else
@@ -92,20 +90,26 @@ jobs:
           done
 
       # ----------------------
-      # Build variants
-      - name: Build CPU Variant (OpenBLAS statically linked)
+      # Build CPU variant (OpenBLAS static)
+      - name: Build CPU Variant
         run: |
           chmod +x ./build_linux.sh
           echo "Building CPU variant (OpenBLAS static)"
           WITH_CUDA=0 WITH_ROCM=0 LINUX_WITH_OPENBLAS=1 LINUX_WITH_VULKAN=0 ./build_linux.sh --arch ${{ matrix.arch }}
           mkdir -p ./dist/cpu
           mv ./dist/* ./dist/cpu/
-          echo "Uploading CPU artifact"
-          gh workflow upload-artifact ./dist/cpu name=linux-${{ matrix.arch }}-cpu
         env:
           CARGO_BUILD_JOBS: 2
 
-      - name: Build CUDA Variant (amd64 only)
+      - name: Upload CPU Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}-cpu
+          path: ./dist/cpu
+
+      # ----------------------
+      # Build CUDA variant (amd64 only)
+      - name: Build CUDA Variant
         if: matrix.arch == 'amd64'
         run: |
           chmod +x ./build_linux.sh
@@ -113,14 +117,17 @@ jobs:
           WITH_CUDA=1 WITH_ROCM=0 LINUX_WITH_OPENBLAS=1 LINUX_WITH_VULKAN=1 ./build_linux.sh --arch ${{ matrix.arch }}
           mkdir -p ./dist/cuda
           mv ./dist/* ./dist/cuda/
-          echo "Uploading CUDA artifact"
-          gh workflow upload-artifact ./dist/cuda name=linux-amd64-cuda
-        env:
-          CARGO_BUILD_JOBS: 2
 
-# ----------------------
-# Windows Builds
-# ----------------------
+      - name: Upload CUDA Artifact
+        if: matrix.arch == 'amd64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-amd64-cuda
+          path: ./dist/cuda
+
+  # ----------------------
+  # Windows Builds
+  # ----------------------
   windows:
     name: Windows Build (${{ matrix.arch }})
     runs-on: windows-latest
@@ -138,6 +145,8 @@ jobs:
           mkdir dist
           mkdir packages
 
+      # ----------------------
+      # Cache CUDA SDK
       - name: Cache CUDA SDK
         uses: actions/cache@v3
         id: cuda-cache
@@ -151,11 +160,15 @@ jobs:
           choco install cuda -y
           refreshenv
 
+      # ----------------------
+      # Setup MSVC environment
       - name: Setup MSVC Developer Environment
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: ${{ matrix.arch }}
 
+      # ----------------------
+      # Build Windows Variants
       - name: Build Windows Variants
         shell: cmd
         run: |
@@ -165,9 +178,8 @@ jobs:
           if "%PROCESSOR_ARCHITECTURE%"=="AMD64" (
               set VARIANTS=WIN_WITH_OPENBLAS=1,WIN_WITH_CUDA=1
           ) else (
-              REM ARM64 builds are skipped or only CPU if script supports
-              echo Skipping CUDA on ARM64
               set VARIANTS=WIN_WITH_OPENBLAS=1
+              echo "Skipping CUDA on ARM64"
           )
 
           for %%v in (%VARIANTS%) do (
@@ -179,15 +191,19 @@ jobs:
                   goto :continue
               )
 
+              REM Clear folder to avoid collisions
               if exist dist\!ART_NAME! rmdir /s /q dist\!ART_NAME!
               mkdir dist\!ART_NAME!
+
               echo Building variant %%v in MSVC environment
               call build_windows.bat %%v
+
               move dist\* dist\!ART_NAME!
               :continue
           )
 
-
+      # ----------------------
+      # Upload artifacts
       - name: Upload CPU Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -195,9 +211,8 @@ jobs:
           path: dist\cpu
 
       - name: Upload CUDA Artifact
-        if: contains(steps.build-variants.outputs.variant-list, 'cuda')
+        if: matrix.arch == 'x64'
         uses: actions/upload-artifact@v4
         with:
           name: windows-${{ matrix.arch }}-cuda
           path: dist\cuda
-
