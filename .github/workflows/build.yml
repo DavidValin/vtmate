@@ -1,66 +1,84 @@
-name: Build AI-Mate Multi-Arch with Cache
+name: Build AI-Mate
 
 on:
   push:
     branches:
       - main
+      - ci-test
   pull_request:
 
 jobs:
   build:
-    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        arch: [x64, arm64]
+        include:
+          # Linux
+          - os: ubuntu-latest
+            arch: x64
+          - os: ubuntu-latest
+            arch: arm64
+
+          # macOS
+          - os: macos-latest
+            arch: native
+
+          # Windows
+          - os: windows-latest
+            arch: x64
+          - os: windows-latest
+            arch: arm64
+
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # -----------------------------
-      # Linux & MacOS: Ensure Docker
-      - name: Check Docker (Linux & MacOS)
-        if: matrix.os != 'windows-latest'
+      # -------------------------
+      # LINUX
+      # -------------------------
+      - name: Verify Docker (Linux)
+        if: matrix.os == 'ubuntu-latest'
         run: docker --version
 
-      # -----------------------------
-      # Restore cache for models
-      - name: Restore model cache
-        uses: actions/cache@v4
-        with:
-          path: ./models
-          key: ai-mate-models-${{ matrix.os }}-${{ matrix.arch }}
-          restore-keys: |
-            ai-mate-models-${{ matrix.os }}-
-
-      # -----------------------------
-      # Download build script
-      - name: Download build script
+      - name: Download Linux build script
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
         run: |
-          if [ "${{ matrix.os }}" == "ubuntu-latest" ]; then
-            curl -o build.sh https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/build_linux.sh
-            chmod +x build.sh
-          elif [ "${{ matrix.os }}" == "macos-latest" ]; then
-            curl -o build.sh https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/build_macos.sh
-            chmod +x build.sh
-          elif [ "${{ matrix.os }}" == "windows-latest" ]; then
-            curl -o build.bat https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/build_windows.bat
+          curl -L -o build_linux.sh https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/build_linux.sh
+          chmod +x build_linux.sh
 
-      # -----------------------------
-      # Run Linux build
       - name: Build on Linux
         if: matrix.os == 'ubuntu-latest'
-        run: ./build.sh --arch ${{ matrix.arch }}
+        shell: bash
+        run: |
+          ./build_linux.sh --arch ${{ matrix.arch }}
 
-      # -----------------------------
-      # Run MacOS build
-      - name: Build on MacOS
+      # -------------------------
+      # macOS
+      # -------------------------
+      - name: Download macOS build script
         if: matrix.os == 'macos-latest'
-        run: ./build.sh --arch ${{ matrix.arch }}
+        shell: bash
+        run: |
+          curl -L -o build_macos.sh https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/build_macos.sh
+          chmod +x build_macos.sh
 
-      # -----------------------------
-      # Run Windows build
+      - name: Build on macOS
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          ./build_macos.sh
+
+      # -------------------------
+      # WINDOWS
+      # -------------------------
+      - name: Download Windows build script
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          curl -L -o build_windows.bat https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/build_windows.bat
+
       - name: Build on Windows
         if: matrix.os == 'windows-latest'
         shell: cmd
@@ -70,18 +88,11 @@ jobs:
         env:
           ARCH: ${{ matrix.arch }}
 
-      # -----------------------------
-      # Save model cache after build
-      - name: Save model cache
-        uses: actions/cache@v4
-        with:
-          path: ./models
-          key: ai-mate-models-${{ matrix.os }}-${{ matrix.arch }}
-
-      # -----------------------------
-      # Upload artifacts per OS/arch
-      - name: Upload built binaries
+      # -------------------------
+      # Upload Artifacts
+      # -------------------------
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ai-mate-${{ matrix.os }}-${{ matrix.arch }}
-          path: ./dist
+          path: dist
