@@ -81,21 +81,26 @@ if exist "%ONNX_SRC%" (
     )
 )
 
-REM ===== Patch eSpeak NG for /MT and suppress warnings =====
+REM ===== Patch eSpeak NG for /MT and MSVC compatibility =====
 if exist "%ESPEAK_SRC%" (
     echo === Patching eSpeak NG for static /MT CRT and MSVC ===
     REM Remove GCC pragmas to prevent MSVC warnings
     for /R "%ESPEAK_SRC%" %%f in (*.c *.h) do (
         powershell -Command "(Get-Content '%%f') -replace '#pragma GCC.*','' | Set-Content '%%f'"
     )
+    REM Patch POSIX functions for MSVC
+    for /R "%ESPEAK_SRC%\src\include\compat" %%f in (*.h) do (
+        powershell -Command "(Get-Content '%%f') -replace 'strdup','_strdup' | Set-Content '%%f'"
+        powershell -Command "(Get-Content '%%f') -replace 'stricmp','_stricmp' | Set-Content '%%f'"
+    )
     REM Define _CRT_SECURE_NO_WARNINGS globally
     set "CMAKE_C_FLAGS=-D_CRT_SECURE_NO_WARNINGS"
     set "CMAKE_CXX_FLAGS=-D_CRT_SECURE_NO_WARNINGS"
 )
 
-REM ===== eSpeak NG Build (Static /MT) =====
+REM ===== eSpeak NG Build (Static /MT, skip building espeak-ng.exe) =====
 if not exist "%ESPEAK_INSTALL%\lib\espeak-ng.lib" (
-    echo === Building eSpeak NG (MSVC /MT) ===
+    echo === Building eSpeak NG library only (MSVC /MT) ===
     if not exist "%ESPEAK_SRC%" (
         git clone https://github.com/espeak-ng/espeak-ng "%ESPEAK_SRC%"
         if errorlevel 1 exit /b 1
@@ -111,10 +116,11 @@ if not exist "%ESPEAK_INSTALL%\lib\espeak-ng.lib" (
           -DBUILD_SHARED_LIBS=OFF ^
           -DESPEAKNG_BUILD_TESTS=OFF ^
           -DESPEAKNG_BUILD_EXAMPLES=OFF ^
+          -DESPEAKNG_BUILD_PROGRAM=OFF ^
           -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded ^
-          -DCMAKE_EXE_LINKER_FLAGS="/NODEFAULTLIB:MSVCRT libcmt.lib oldnames.lib legacy_stdio_definitions.lib" ^
           -DCMAKE_C_FLAGS="%CMAKE_C_FLAGS%" ^
-          -DCMAKE_CXX_FLAGS="%CMAKE_CXX_FLAGS%"
+          -DCMAKE_CXX_FLAGS="%CMAKE_CXX_FLAGS%" ^
+          -DCMAKE_EXE_LINKER_FLAGS="/NODEFAULTLIB:MSVCRT libcmt.lib legacy_stdio_definitions.lib"
     if errorlevel 1 exit /b 1
     cmake --build "%ESPEAK_BUILD%" --config Release --target INSTALL
     if errorlevel 1 exit /b 1
@@ -185,7 +191,7 @@ if not exist "%ONNX_BUILD%\Release\onnxruntime.lib" (
       -DBUILD_TESTING=OFF ^
       -Donnxruntime_MSVC_STATIC_RUNTIME=ON ^
       -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded ^
-      -DCMAKE_EXE_LINKER_FLAGS="/NODEFAULTLIB:MSVCRT libcmt.lib oldnames.lib legacy_stdio_definitions.lib" ^
+      -DCMAKE_EXE_LINKER_FLAGS="/NODEFAULTLIB:MSVCRT libcmt.lib legacy_stdio_definitions.lib" ^
       -DONNX_CUSTOM_PROTOC_EXECUTABLE="" ^
       -DONNX_DISABLE_CONTRIB_OPS=ON ^
       "%ONNX_SRC%\cmake"
