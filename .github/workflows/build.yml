@@ -13,16 +13,9 @@ jobs:
     name: Windows Build (x64)
     runs-on: windows-latest
     steps:
-      # ----------------------
-      # Checkout repository with submodules
-      - name: Checkout repo
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
+      - uses: actions/checkout@v4
 
-      # ----------------------
-      # Prepare Directories
-      - name: Prepare directories
+      - name: Prepare Directories
         run: |
           mkdir dist
           mkdir packages
@@ -42,8 +35,6 @@ jobs:
           choco install cuda -y
           refreshenv
 
-      # ----------------------
-      # Prepare AI models
       - name: Prepare AI models
         run: |
           mkdir "%USERPROFILE%\.cache\k"
@@ -51,31 +42,25 @@ jobs:
           curl -L https://github.com/DavidValin/kokoro-tiny/raw/main/models/0.onnx -o "%USERPROFILE%\.cache\k\0.onnx"
 
       # ----------------------
-      # Windows CPU Build
+      # Build Variants
       - name: Build Windows CPU
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
           call "%CD%\build_windows.bat" cpu
 
-      # ----------------------
-      # Windows OpenBLAS Build
       - name: Build Windows OpenBLAS
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
           call "%CD%\build_windows.bat" openblas
 
-      # ----------------------
-      # Windows Vulkan Build
       - name: Build Windows Vulkan
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
           call "%CD%\build_windows.bat" vulkan
 
-      # ----------------------
-      # Windows CUDA Build
       - name: Build Windows CUDA
         shell: cmd
         run: |
