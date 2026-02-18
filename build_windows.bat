@@ -32,7 +32,7 @@ where powershell >nul 2>nul || (echo ERROR: powershell not found & exit /b 1)
 where cargo >nul 2>nul || (echo ERROR: cargo not found & exit /b 1)
 
 REM ===== Force static MSVC runtime for Rust =====
-set "RUSTFLAGS=-Ctarget-feature=+crt-static -C link-arg=/MT -C link-arg=/WX -C link-arg=/ignore:4217 -C link-arg=/ignore:4286 -C link-arg=libcmt.lib -C link-arg=legacy_stdio_definitions.lib"
+set "RUSTFLAGS=-Ctarget-feature=+crt-static -C link-arg=/MT -C link-arg=/WX -C link-arg=/ignore:4217 -C link-arg=/ignore:4286 -C link-arg=libcmt.lib -C link-arg=legacy_stdio_definitions.lib -C link-arg=oldnames.lib"
 set "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS=%RUSTFLAGS%"
 
 REM ===== Determine Variant =====
@@ -107,6 +107,10 @@ if not exist "%ESPEAK_INSTALL%\lib\espeak-ng.lib" (
     )
     pushd "%ESPEAK_SRC%"
     mkdir "%ESPEAK_BUILD%" >nul 2>nul
+
+    REM Additional linker flags for MSVC static CRT
+    set "ESPEAK_LINK_FLAGS=/NODEFAULTLIB:libucrt.lib /NODEFAULTLIB:msvcrt.lib legacy_stdio_definitions.lib oldnames.lib"
+
     cmake -S . ^
           -B "%ESPEAK_BUILD%" ^
           -G "Visual Studio 17 2022" ^
@@ -120,7 +124,7 @@ if not exist "%ESPEAK_INSTALL%\lib\espeak-ng.lib" (
           -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded ^
           -DCMAKE_C_FLAGS="%CMAKE_C_FLAGS%" ^
           -DCMAKE_CXX_FLAGS="%CMAKE_CXX_FLAGS%" ^
-          -DCMAKE_EXE_LINKER_FLAGS="/NODEFAULTLIB:MSVCRT libcmt.lib legacy_stdio_definitions.lib"
+          -DCMAKE_EXE_LINKER_FLAGS="%ESPEAK_LINK_FLAGS%"
     if errorlevel 1 exit /b 1
     cmake --build "%ESPEAK_BUILD%" --config Release --target INSTALL
     if errorlevel 1 exit /b 1
@@ -143,7 +147,7 @@ if "%WIN_WITH_OPENBLAS%"=="1" (
               -DBUILD_SHARED_LIBS=OFF ^
               -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded ^
               -DCMAKE_INSTALL_PREFIX="%OPENBLAS_INSTALL%" ^
-              -DCMAKE_EXE_LINKER_FLAGS="/NODEFAULTLIB:MSVCRT libcmt.lib legacy_stdio_definitions.lib" ^
+              -DCMAKE_EXE_LINKER_FLAGS="/NODEFAULTLIB:MSVCRT libcmt.lib legacy_stdio_definitions.lib oldnames.lib" ^
               "%OPENBLAS_SRC%"
         if errorlevel 1 exit /b 1
         cmake --build . --config Release --target INSTALL
@@ -191,7 +195,7 @@ if not exist "%ONNX_BUILD%\Release\onnxruntime.lib" (
       -DBUILD_TESTING=OFF ^
       -Donnxruntime_MSVC_STATIC_RUNTIME=ON ^
       -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded ^
-      -DCMAKE_EXE_LINKER_FLAGS="/NODEFAULTLIB:MSVCRT libcmt.lib legacy_stdio_definitions.lib" ^
+      -DCMAKE_EXE_LINKER_FLAGS="/NODEFAULTLIB:MSVCRT libcmt.lib legacy_stdio_definitions.lib oldnames.lib" ^
       -DONNX_CUSTOM_PROTOC_EXECUTABLE="" ^
       -DONNX_DISABLE_CONTRIB_OPS=ON ^
       "%ONNX_SRC%\cmake"
