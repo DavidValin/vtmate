@@ -14,9 +14,15 @@ set "ESPEAK_INSTALL=%ESPEAK_BUILD%\install"
 set "OPENBLAS_SRC=%VENDOR_DIR%\openblas-src"
 set "OPENBLAS_BUILD=%OPENBLAS_SRC%\build-msvc"
 set "OPENBLAS_INSTALL=%OPENBLAS_BUILD%\install"
-set "OPENBLAS_URL=https://github.com/xianyi/OpenBLAS.git"
 set "ONNX_SRC=%VENDOR_DIR%\onnxruntime"
 set "ONNX_BUILD=%ONNX_SRC%\build-static"
+
+REM ===== Clean old builds =====
+rmdir /s /q "%ESPEAK_BUILD%"
+rmdir /s /q "%OPENBLAS_BUILD%"
+rmdir /s /q "%ONNX_BUILD%"
+rmdir /s /q "%PROJECT_ROOT%target"
+rmdir /s /q "%PROJECT_ROOT%target-cross"
 
 REM ===== Check required tools =====
 where cl.exe >nul 2>nul || (echo ERROR: Open "x64 Native Tools Command Prompt for VS" first & exit /b 1)
@@ -26,8 +32,8 @@ where powershell >nul 2>nul || (echo ERROR: powershell not found & exit /b 1)
 where cargo >nul 2>nul || (echo ERROR: cargo not found & exit /b 1)
 
 REM ===== Force static MSVC runtime for Rust =====
-set "RUSTFLAGS=-Ctarget-feature=+crt-static"
-set "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS=-Ctarget-feature=+crt-static"
+set "RUSTFLAGS=-Ctarget-feature=+crt-static -C link-arg=/MT -C link-arg=/WX- -C link-arg=/ignore:4217 -C link-arg=/ignore:4286 -C link-arg=libcmt.lib -C link-arg=legacy_stdio_definitions.lib"
+set "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS=%RUSTFLAGS%"
 
 REM ===== Determine Variant =====
 set "VARIANT=%~1"
@@ -66,6 +72,15 @@ mkdir "%TARGET_DIR%\%VARIANT%" >nul 2>nul
 mkdir "%DIST_DIR%" >nul 2>nul
 mkdir "%VENDOR_DIR%" >nul 2>nul
 
+REM ===== Patch ONNX Runtime for /MT =====
+if exist "%ONNX_SRC%" (
+    echo === Patching ONNX Runtime for static /MT CRT ===
+    for /R "%ONNX_SRC%" %%f in (*.cmake *.txt) do (
+        powershell -Command "(Get-Content '%%f') -replace '/MD','/MT' | Set-Content '%%f'"
+        powershell -Command "(Get-Content '%%f') -replace '/MDd','/MTd' | Set-Content '%%f'"
+    )
+)
+
 REM ===== eSpeak NG Build (Static /MT) =====
 if not exist "%ESPEAK_INSTALL%\lib\espeak-ng.lib" (
     echo === Building eSpeak NG (MSVC /MT) ===
@@ -84,7 +99,8 @@ if not exist "%ESPEAK_INSTALL%\lib\espeak-ng.lib" (
           -DBUILD_SHARED_LIBS=OFF ^
           -DESPEAKNG_BUILD_TESTS=OFF ^
           -DESPEAKNG_BUILD_EXAMPLES=OFF ^
-          -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded ^
+          -DCMAKE_EXE_LINKER_FLAGS="/NODEFAULTLIB:MSVCRT libcmt.lib legacy_stdio_definitions.lib"
     if errorlevel 1 exit /b 1
     cmake --build "%ESPEAK_BUILD%" --config Release --target INSTALL
     if errorlevel 1 exit /b 1
@@ -107,6 +123,7 @@ if "%WIN_WITH_OPENBLAS%"=="1" (
               -DBUILD_SHARED_LIBS=OFF ^
               -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded ^
               -DCMAKE_INSTALL_PREFIX="%OPENBLAS_INSTALL%" ^
+              -DCMAKE_EXE_LINKER_FLAGS="/NODEFAULTLIB:MSVCRT libcmt.lib legacy_stdio_definitions.lib" ^
               "%OPENBLAS_SRC%"
         if errorlevel 1 exit /b 1
         cmake --build . --config Release --target INSTALL
@@ -148,6 +165,7 @@ if not exist "%ONNX_BUILD%\Release\onnxruntime.lib" (
       -DBUILD_TESTING=OFF ^
       -Donnxruntime_MSVC_STATIC_RUNTIME=ON ^
       -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded ^
+      -DCMAKE_EXE_LINKER_FLAGS="/NODEFAULTLIB:MSVCRT libcmt.lib legacy_stdio_definitions.lib" ^
       -DONNX_CUSTOM_PROTOC_EXECUTABLE="" ^
       -DONNX_DISABLE_CONTRIB_OPS=ON ^
       "%ONNX_SRC%\cmake"
@@ -168,10 +186,6 @@ set "ONNXRUNTIME_INCLUDE_DIR=%ONNX_SRC%\include"
 REM ===== Build Rust target fully static =====
 set "TARGET=x86_64-pc-windows-msvc"
 set "DST_BIN=%TARGET_DIR%\%VARIANT%\%BIN_BASE%-%VARIANT%.exe"
-
-REM ===== Ensure linker does NOT treat warnings as errors =====
-set "RUSTFLAGS=-Ctarget-feature=+crt-static -C link-arg=/WX- -C link-arg=/ignore:4217 -C link-arg=/ignore:4286"
-set "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS=%RUSTFLAGS%"
 
 cargo build --release --target %TARGET%
 if errorlevel 1 exit /b 1
