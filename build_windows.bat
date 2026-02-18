@@ -42,10 +42,10 @@ where git >nul 2>nul || (echo ERROR: git not found & exit /b 1)
 where cargo >nul 2>nul || (echo ERROR: cargo not found & exit /b 1)
 
 REM ==========================================================
-REM  RUST STATIC CRT
+REM  RUST CRT (Dynamic, NOT /MT)
 REM ==========================================================
 
-set "RUSTFLAGS=-C target-feature=+crt-static"
+set "RUSTFLAGS="
 
 REM ==========================================================
 REM  DETERMINE VARIANT
@@ -86,12 +86,12 @@ mkdir "%DIST_DIR%" >nul 2>nul
 mkdir "%VENDOR_DIR%" >nul 2>nul
 
 REM ==========================================================
-REM  BUILD ESPEAK NG (STATIC)
+REM  BUILD ESPEAK NG (STATIC, Dynamic CRT)
 REM ==========================================================
 
 if not exist "%ESPEAK_INSTALL%\lib\espeak-ng.lib" (
 
-    echo === Building eSpeak NG (Static /MT) ===
+    echo === Building eSpeak NG (Static, Dynamic CRT /MD) ===
 
     if not exist "%ESPEAK_SRC%" (
         git clone https://github.com/espeak-ng/espeak-ng "%ESPEAK_SRC%" || exit /b 1
@@ -107,21 +107,21 @@ if not exist "%ESPEAK_INSTALL%\lib\espeak-ng.lib" (
           -DESPEAKNG_BUILD_TESTS=OFF ^
           -DESPEAKNG_BUILD_EXAMPLES=OFF ^
           -DESPEAKNG_BUILD_PROGRAM=OFF ^
-          -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded ^
+          -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL ^
           || exit /b 1
 
     cmake --build "%ESPEAK_BUILD%" --config Release --target INSTALL || exit /b 1
 )
 
 REM ==========================================================
-REM  BUILD OPENBLAS (OPTIONAL STATIC)
+REM  BUILD OPENBLAS (OPTIONAL STATIC, Dynamic CRT)
 REM ==========================================================
 
 if "%WIN_WITH_OPENBLAS%"=="1" (
 
     if not exist "%OPENBLAS_INSTALL%\lib\libopenblas.lib" (
 
-        echo === Building OpenBLAS (Static /MT) ===
+        echo === Building OpenBLAS (Static, Dynamic CRT /MD) ===
 
         if not exist "%OPENBLAS_SRC%" (
             git clone --branch v0.3.30 --single-branch ^
@@ -134,7 +134,7 @@ if "%WIN_WITH_OPENBLAS%"=="1" (
               -A x64 ^
               -DCMAKE_BUILD_TYPE=Release ^
               -DBUILD_SHARED_LIBS=OFF ^
-              -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded ^
+              -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL ^
               -DCMAKE_INSTALL_PREFIX="%OPENBLAS_INSTALL%" ^
               || exit /b 1
 
@@ -143,12 +143,12 @@ if "%WIN_WITH_OPENBLAS%"=="1" (
 )
 
 REM ==========================================================
-REM  BUILD ONNX RUNTIME (STATIC)
+REM  BUILD ONNX RUNTIME (STATIC, Dynamic CRT)
 REM ==========================================================
 
 if not exist "%ONNX_BUILD%\Release\onnxruntime.lib" (
 
-    echo === Building ONNX Runtime (Static /MT) ===
+    echo === Building ONNX Runtime (Static, Dynamic CRT /MD) ===
 
     if not exist "%ONNX_SRC%" (
         git clone --recursive https://github.com/microsoft/onnxruntime "%ONNX_SRC%" || exit /b 1
@@ -171,7 +171,7 @@ if not exist "%ONNX_BUILD%\Release\onnxruntime.lib" (
           -DCMAKE_BUILD_TYPE=Release ^
           -DBUILD_SHARED_LIBS=OFF ^
           -Donnxruntime_BUILD_SHARED_LIB=OFF ^
-          -Donnxruntime_MSVC_STATIC_RUNTIME=ON ^
+          -Donnxruntime_MSVC_STATIC_RUNTIME=OFF ^
           -Donnxruntime_USE_CUDA=%ONNX_CUDA_FLAG% ^
           -Donnxruntime_USE_VULKAN=%ONNX_VULKAN_FLAG% ^
           -Donnxruntime_BUILD_UNIT_TESTS=OFF ^
@@ -197,7 +197,7 @@ set "ONNXRUNTIME_INCLUDE_DIR=%ONNX_SRC%\include"
 set "ONNXRUNTIME_LIB_DIR=%ONNX_BUILD%\Release"
 
 REM ==========================================================
-REM  BUILD RUST (STATIC)
+REM  BUILD RUST (DYNAMIC CRT)
 REM ==========================================================
 
 set "TARGET=x86_64-pc-windows-msvc"
@@ -219,5 +219,8 @@ echo ============================================
 echo SUCCESS: %DST_BIN%
 echo ============================================
 echo.
+echo NOTE: This binary depends on ucrtbase.dll and vcruntime140.dll
+echo       which are included in Windows 10+. Users must have them.
+echo ============================================
 
 exit /b 0
