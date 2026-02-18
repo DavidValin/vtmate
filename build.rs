@@ -19,9 +19,11 @@ fn find_url_for_file(file_name: &str) -> Option<String> {
 
 // Use HOME on Unix, USERPROFILE on Windows
 fn get_home_dir() -> String {
-    env::var("HOME")
+    // Use KOKORO_CACHE if set, otherwise fallback to HOME or USERPROFILE
+    env::var("KOKORO_CACHE")
+        .or_else(|_| env::var("HOME"))
         .or_else(|_| env::var("USERPROFILE"))
-        .expect("Neither HOME nor USERPROFILE environment variable is set")
+        .expect("Neither KOKORO_CACHE, HOME nor USERPROFILE environment variable is set")
 }
 
 fn main() {
