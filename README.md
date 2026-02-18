@@ -65,7 +65,7 @@ Platform   Arch    CPU    OpenBLAS   CUDA   Metal   Vulkan
 macOS      ARM64   ✅    optional     n/a     ✅      ❌
 Linux      AMD64   ✅       ✅        ✅      n/a     ✅
 Linux      ARM64   ✅       ✅        ❌      n/a     ✅
-Windows    x86     ✅       ✅        ✅      n/a     ✅
+Windows    x86     ⚠️       ⚠️        ⚠️      n/a     ⚠️
 Windows    ARM64   ⚠️       ⚠️        ⚠️      n/a     ⚠️
 ```
 
