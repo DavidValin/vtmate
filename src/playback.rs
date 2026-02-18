@@ -270,12 +270,11 @@ pub fn playback_thread(
     loop {
       select! {
         recv(stop_all_rx) -> _ => {
-          // Interrupt: pause and clear, ignore incoming audio
+          // Interrupt: pause and clear, reset flag to allow new audio
           stream.pause()?;
           queue.lock().unwrap().clear();
-          // Set flag to drop any new audio until restart
           interrupted = true;
-          // continue loop
+          break;
         }
         recv(stop_play_rx) -> _ => {
           // Stop current stream, drop it, and let outer loop recreate
