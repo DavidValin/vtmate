@@ -9,9 +9,6 @@ on:
       - main
 
 jobs:
-  # ----------------------
-  # Windows x64
-  # ----------------------
   windows-x64:
     name: Windows Build (x64)
     runs-on: windows-latest
@@ -38,8 +35,6 @@ jobs:
           choco install cuda -y
           refreshenv
 
-      # ----------------------
-      # Build Windows Variants
       - name: Prepare AI models
         run: |
           mkdir "%USERPROFILE%\.cache\k"
@@ -47,21 +42,47 @@ jobs:
           curl -L https://github.com/DavidValin/kokoro-tiny/raw/main/models/0.onnx -o "%USERPROFILE%\.cache\k\0.onnx"
 
       # ----------------------
-      # Build Windows Variants
-      - name: Build Windows Variants
+      # Build Windows CPU Variant
+      - name: Build Windows CPU
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
-      
-          REM ---- Extreme memory reduction for large embedded binaries ----
-          set RUSTFLAGS=-C codegen-units=1 -C opt-level=2 -C link-arg=/OPT:REF -C link-arg=/OPT:ICF
-          set CARGO_PROFILE_RELEASE_LTO=false
-          set CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
-          set CARGO_PROFILE_RELEASE_DEBUG=false
-          set CARGO_PROFILE_RELEASE_STRIP=symbols
-          set CARGO_PROFILE_RELEASE_INCREMENTAL=false
-      
-          set WIN_ARCH=x64
+          set WIN_WITH_OPENBLAS=0
+          set WIN_WITH_CUDA=0
+          set WIN_WITH_VULKAN=0
+          call "%CD%\build_windows.bat"
+
+      # ----------------------
+      # Build Windows OpenBLAS Variant
+      - name: Build Windows OpenBLAS
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
+          set WIN_WITH_OPENBLAS=1
+          set WIN_WITH_CUDA=0
+          set WIN_WITH_VULKAN=0
+          call "%CD%\build_windows.bat"
+
+      # ----------------------
+      # Build Windows Vulkan Variant
+      - name: Build Windows Vulkan
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
+          set WIN_WITH_OPENBLAS=0
+          set WIN_WITH_CUDA=0
+          set WIN_WITH_VULKAN=1
+          call "%CD%\build_windows.bat"
+
+      # ----------------------
+      # Build Windows CUDA Variant
+      - name: Build Windows CUDA
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
+          set WIN_WITH_OPENBLAS=0
+          set WIN_WITH_CUDA=1
+          set WIN_WITH_VULKAN=0
           call "%CD%\build_windows.bat"
 
       # ----------------------
@@ -71,6 +92,18 @@ jobs:
         with:
           name: windows-x64-cpu
           path: dist\cpu
+
+      - name: Upload OpenBLAS Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-openblas
+          path: dist\openblas
+
+      - name: Upload Vulkan Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-vulkan
+          path: dist\vulkan
 
       - name: Upload CUDA Artifact
         uses: actions/upload-artifact@v4
