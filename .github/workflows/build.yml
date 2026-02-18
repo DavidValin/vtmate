@@ -38,8 +38,11 @@ jobs:
       - name: Prepare AI models
         run: |
           mkdir "%USERPROFILE%\.cache\k"
+          mkdir "%USERPROFILE%\.whisper-models"
           curl -L https://github.com/DavidValin/kokoro-tiny/raw/main/models/0.bin -o "%USERPROFILE%\.cache\k\0.bin"
           curl -L https://github.com/DavidValin/kokoro-tiny/raw/main/models/0.onnx -o "%USERPROFILE%\.cache\k\0.onnx"
+          curl -L https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin -o "%USERPROFILE%\.whisper-models\ggml-small.bin"
+          curl -L https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin -o "%USERPROFILE%\.whisper-models\ggml-tiny.bin"
 
       # ----------------------
       # Build Windows CPU Variant
