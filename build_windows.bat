@@ -114,10 +114,8 @@ if not exist "%ONNX_BUILD%\Release\onnxruntime.lib" (
         if errorlevel 1 exit /b 1
     )
 
-    REM Ensure submodules are initialized
+    REM Initialize submodules safely (without fetch/reset)
     pushd "%ONNX_SRC%"
-    git fetch --all
-    git reset --hard origin/master
     git submodule sync
     git submodule update --init --recursive --force
     if errorlevel 1 exit /b 1
