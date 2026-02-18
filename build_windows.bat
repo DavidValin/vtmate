@@ -107,15 +107,15 @@ REM ===== ONNX Runtime Static Build =====
 if not exist "%ONNX_BUILD%\Release\onnxruntime.lib" (
     echo === Building ONNX Runtime (Static, MultiThreaded) ===
 
-    REM Clone ONNX Runtime if missing
+    REM Clone or update ONNX Runtime
     if not exist "%ONNX_SRC%\CMakeLists.txt" (
         echo Cloning ONNX Runtime repository...
         git clone --recursive https://github.com/microsoft/onnxruntime "%ONNX_SRC%"
         if errorlevel 1 exit /b 1
     )
-
-    REM Update submodules to ensure everything is present
     pushd "%ONNX_SRC%"
+    git fetch --all
+    git reset --hard origin/master
     git submodule update --init --recursive
     if errorlevel 1 exit /b 1
     popd
