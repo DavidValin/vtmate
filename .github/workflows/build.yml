@@ -2,9 +2,11 @@ name: Build All Platforms
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   pull_request:
-    branches: [main]
+    branches:
+      - main
 
 jobs:
   windows-x64:
@@ -13,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Prepare Directories
+      - name: Prepare directories
         run: |
           mkdir dist
           mkdir packages
@@ -33,33 +35,44 @@ jobs:
           choco install cuda -y
           refreshenv
 
+      # ----------------------
+      # Prepare AI models
       - name: Prepare AI models
         run: |
           mkdir "%USERPROFILE%\.cache\k"
           curl -L https://github.com/DavidValin/kokoro-tiny/raw/main/models/0.bin -o "%USERPROFILE%\.cache\k\0.bin"
           curl -L https://github.com/DavidValin/kokoro-tiny/raw/main/models/0.onnx -o "%USERPROFILE%\.cache\k\0.onnx"
+          mkdir "%USERPROFILE%\.whisper-models"
+          curl -L https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin -o "%USERPROFILE%\.whisper-models\ggml-small.bin"
+          curl -L https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin -o "%USERPROFILE%\.whisper-models\ggml-tiny.bin"
 
       # ----------------------
-      # Build variants
-      - name: Build CPU
+      # Build Windows CPU Variant
+      - name: Build Windows CPU
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
           call "%CD%\build_windows.bat" cpu
 
-      - name: Build OpenBLAS
+      # ----------------------
+      # Build Windows OpenBLAS Variant
+      - name: Build Windows OpenBLAS
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
           call "%CD%\build_windows.bat" openblas
 
-      - name: Build Vulkan
+      # ----------------------
+      # Build Windows Vulkan Variant
+      - name: Build Windows Vulkan
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
           call "%CD%\build_windows.bat" vulkan
 
-      - name: Build CUDA
+      # ----------------------
+      # Build Windows CUDA Variant
+      - name: Build Windows CUDA
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
