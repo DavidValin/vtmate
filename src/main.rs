@@ -303,7 +303,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let tx_utt_for_rec = tx_utt.clone();
   let playback_active_for_rec = playback_active.clone();
   let gate_until_ms_for_rec = gate_until_ms.clone();
-  let stop_play_tx_for_rec = stop_play_tx.clone();
+  let stop_all_tx_for_rec = stop_all_tx.clone();
   let interrupt_counter_for_rec = interrupt_counter.clone();
   let stop_all_rx_for_record_for_rec = stop_all_rx_for_record.clone();
   let ui_peak_for_rec = ui.peak.clone();
@@ -327,7 +327,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
           end_silence_ms,
           playback_active_for_rec.clone(),
           gate_until_ms_for_rec.clone(),
-          stop_play_tx_for_rec.clone(),
+          stop_all_tx_for_rec.clone(),
           interrupt_counter_for_rec.clone(),
           stop_all_rx_for_record_for_rec.clone(),
           ui_peak_for_rec.clone(),
