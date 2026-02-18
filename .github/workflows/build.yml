@@ -2,11 +2,9 @@ name: Build All Platforms
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
-    branches:
-      - main
+    branches: [main]
 
 jobs:
   windows-x64:
@@ -38,39 +36,30 @@ jobs:
       - name: Prepare AI models
         run: |
           mkdir "%USERPROFILE%\.cache\k"
-          mkdir "%USERPROFILE%\.whisper-models"
           curl -L https://github.com/DavidValin/kokoro-tiny/raw/main/models/0.bin -o "%USERPROFILE%\.cache\k\0.bin"
           curl -L https://github.com/DavidValin/kokoro-tiny/raw/main/models/0.onnx -o "%USERPROFILE%\.cache\k\0.onnx"
-          curl -L https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin -o "%USERPROFILE%\.whisper-models\ggml-small.bin"
-          curl -L https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin -o "%USERPROFILE%\.whisper-models\ggml-tiny.bin"
 
       # ----------------------
-      # Build Windows CPU Variant
-      - name: Build Windows CPU
+      # Build variants
+      - name: Build CPU
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
           call "%CD%\build_windows.bat" cpu
 
-      # ----------------------
-      # Build Windows OpenBLAS Variant
-      - name: Build Windows OpenBLAS
+      - name: Build OpenBLAS
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
           call "%CD%\build_windows.bat" openblas
 
-      # ----------------------
-      # Build Windows Vulkan Variant
-      - name: Build Windows Vulkan
+      - name: Build Vulkan
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
           call "%CD%\build_windows.bat" vulkan
 
-      # ----------------------
-      # Build Windows CUDA Variant
-      - name: Build Windows CUDA
+      - name: Build CUDA
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64

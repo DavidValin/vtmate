@@ -94,14 +94,15 @@ if not exist "%ESPEAK_INSTALL%\lib\espeak-ng.lib" (
     pushd "%ESPEAK_SRC%"
 
     cmake -S . ^
-          -B "%ESPEAK_BUILD%" ^
-          -G "Visual Studio 17 2022" ^
-          -A x64 ^
-          -DCMAKE_BUILD_TYPE=Release ^
-          -DCMAKE_INSTALL_PREFIX="%ESPEAK_INSTALL%" ^
-          -DBUILD_SHARED_LIBS=OFF ^
-          -DESPEAKNG_BUILD_TESTS=OFF ^
-          -DESPEAKNG_BUILD_EXAMPLES=OFF
+      -B "%ESPEAK_BUILD%" ^
+      -G "Visual Studio 17 2022" ^
+      -A x64 ^
+      -DCMAKE_BUILD_TYPE=Release ^
+      -DCMAKE_INSTALL_PREFIX="%ESPEAK_INSTALL%" ^
+      -DBUILD_SHARED_LIBS=OFF ^
+      -DESPEAKNG_BUILD_TESTS=OFF ^
+      -DESPEAKNG_BUILD_EXAMPLES=OFF ^
+      -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
 
     if errorlevel 1 exit /b 1
 
