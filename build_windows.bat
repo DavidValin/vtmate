@@ -107,22 +107,26 @@ REM ===== ONNX Runtime Static Build =====
 if not exist "%ONNX_BUILD%\Release\onnxruntime.lib" (
     echo === Building ONNX Runtime (Static, MultiThreaded) ===
 
+    REM Clone ONNX Runtime if missing
     if not exist "%ONNX_SRC%\CMakeLists.txt" (
         echo Cloning ONNX Runtime repository...
-        git clone https://github.com/microsoft/onnxruntime "%ONNX_SRC%"
+        git clone --recursive https://github.com/microsoft/onnxruntime "%ONNX_SRC%"
         if errorlevel 1 exit /b 1
-        pushd "%ONNX_SRC%"
-        git submodule update --init --recursive
-        if errorlevel 1 exit /b 1
-        popd
     )
 
-    REM Dynamic CUDA/Vulkan flags
+    REM Update submodules to ensure everything is present
+    pushd "%ONNX_SRC%"
+    git submodule update --init --recursive
+    if errorlevel 1 exit /b 1
+    popd
+
+    REM Set dynamic CUDA/Vulkan flags
     set "ONNX_CUDA_FLAG=OFF"
     set "ONNX_VULKAN_FLAG=OFF"
     if "%WIN_WITH_CUDA%"=="1" set "ONNX_CUDA_FLAG=ON"
     if "%WIN_WITH_VULKAN%"=="1" set "ONNX_VULKAN_FLAG=ON"
 
+    REM Build ONNX Runtime
     mkdir "%ONNX_BUILD%" >nul 2>nul
     pushd "%ONNX_BUILD%"
     cmake -G "Visual Studio 17 2022" ^
