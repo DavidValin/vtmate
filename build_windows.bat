@@ -32,7 +32,7 @@ where powershell >nul 2>nul || (echo ERROR: powershell not found & exit /b 1)
 where cargo >nul 2>nul || (echo ERROR: cargo not found & exit /b 1)
 
 REM ===== Force static MSVC runtime for Rust =====
-set "RUSTFLAGS=-Ctarget-feature=+crt-static -C link-arg=/MT -C link-arg=/WX- -C link-arg=/ignore:4217 -C link-arg=/ignore:4286 -C link-arg=libcmt.lib -C link-arg=legacy_stdio_definitions.lib"
+set "RUSTFLAGS=-Ctarget-feature=+crt-static -C link-arg=/MT -C link-arg=/WX -C link-arg=/ignore:4217 -C link-arg=/ignore:4286 -C link-arg=libcmt.lib -C link-arg=legacy_stdio_definitions.lib"
 set "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS=%RUSTFLAGS%"
 
 REM ===== Determine Variant =====
@@ -72,13 +72,25 @@ mkdir "%TARGET_DIR%\%VARIANT%" >nul 2>nul
 mkdir "%DIST_DIR%" >nul 2>nul
 mkdir "%VENDOR_DIR%" >nul 2>nul
 
-REM ===== Patch ONNX Runtime for /MT =====
+REM ===== Patch ONNX Runtime for static /MT =====
 if exist "%ONNX_SRC%" (
     echo === Patching ONNX Runtime for static /MT CRT ===
     for /R "%ONNX_SRC%" %%f in (*.cmake *.txt) do (
         powershell -Command "(Get-Content '%%f') -replace '/MD','/MT' | Set-Content '%%f'"
         powershell -Command "(Get-Content '%%f') -replace '/MDd','/MTd' | Set-Content '%%f'"
     )
+)
+
+REM ===== Patch eSpeak NG for /MT and suppress warnings =====
+if exist "%ESPEAK_SRC%" (
+    echo === Patching eSpeak NG for static /MT CRT and MSVC ===
+    REM Remove GCC pragmas to prevent MSVC warnings
+    for /R "%ESPEAK_SRC%" %%f in (*.c *.h) do (
+        powershell -Command "(Get-Content '%%f') -replace '#pragma GCC.*','' | Set-Content '%%f'"
+    )
+    REM Define _CRT_SECURE_NO_WARNINGS globally
+    set "CMAKE_C_FLAGS=-D_CRT_SECURE_NO_WARNINGS"
+    set "CMAKE_CXX_FLAGS=-D_CRT_SECURE_NO_WARNINGS"
 )
 
 REM ===== eSpeak NG Build (Static /MT) =====
@@ -100,7 +112,9 @@ if not exist "%ESPEAK_INSTALL%\lib\espeak-ng.lib" (
           -DESPEAKNG_BUILD_TESTS=OFF ^
           -DESPEAKNG_BUILD_EXAMPLES=OFF ^
           -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded ^
-          -DCMAKE_EXE_LINKER_FLAGS="/NODEFAULTLIB:MSVCRT libcmt.lib legacy_stdio_definitions.lib"
+          -DCMAKE_EXE_LINKER_FLAGS="/NODEFAULTLIB:MSVCRT libcmt.lib oldnames.lib legacy_stdio_definitions.lib" ^
+          -DCMAKE_C_FLAGS="%CMAKE_C_FLAGS%" ^
+          -DCMAKE_CXX_FLAGS="%CMAKE_CXX_FLAGS%"
     if errorlevel 1 exit /b 1
     cmake --build "%ESPEAK_BUILD%" --config Release --target INSTALL
     if errorlevel 1 exit /b 1
@@ -145,6 +159,12 @@ if not exist "%ONNX_BUILD%\Release\onnxruntime.lib" (
     if errorlevel 1 exit /b 1
     popd
 
+    REM Make sure all MSVC runtime references are /MT
+    for /R "%ONNX_SRC%" %%f in (*.cmake *.txt) do (
+        powershell -Command "(Get-Content '%%f') -replace '/MD','/MT' | Set-Content '%%f'"
+        powershell -Command "(Get-Content '%%f') -replace '/MDd','/MTd' | Set-Content '%%f'"
+    )
+
     set "ONNX_CUDA_FLAG=OFF"
     set "ONNX_VULKAN_FLAG=OFF"
     if "%WIN_WITH_CUDA%"=="1" set "ONNX_CUDA_FLAG=ON"
@@ -165,7 +185,7 @@ if not exist "%ONNX_BUILD%\Release\onnxruntime.lib" (
       -DBUILD_TESTING=OFF ^
       -Donnxruntime_MSVC_STATIC_RUNTIME=ON ^
       -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded ^
-      -DCMAKE_EXE_LINKER_FLAGS="/NODEFAULTLIB:MSVCRT libcmt.lib legacy_stdio_definitions.lib" ^
+      -DCMAKE_EXE_LINKER_FLAGS="/NODEFAULTLIB:MSVCRT libcmt.lib oldnames.lib legacy_stdio_definitions.lib" ^
       -DONNX_CUSTOM_PROTOC_EXECUTABLE="" ^
       -DONNX_DISABLE_CONTRIB_OPS=ON ^
       "%ONNX_SRC%\cmake"
