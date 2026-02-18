@@ -37,6 +37,8 @@ sha2 = "0.10"
 hex = "0.4"
 once_cell = "1"
 
+[build]
+rustflags = ["-C", "target-feature=+crt-static"]
 
 [features]
 whisper-openblas = ["whisper-rs/openblas"]

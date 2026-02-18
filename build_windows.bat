@@ -137,11 +137,15 @@ if not exist "%ONNX_BUILD%\Release\onnxruntime.lib" (
       -A x64 ^
       -DCMAKE_BUILD_TYPE=Release ^
       -DBUILD_SHARED_LIBS=OFF ^
+      -Donnxruntime_BUILD_SHARED_LIB=OFF ^
       -Donnxruntime_USE_CUDA=%ONNX_CUDA_FLAG% ^
       -Donnxruntime_USE_VULKAN=%ONNX_VULKAN_FLAG% ^
-      -Donnxruntime_BUILD_SHARED_LIB=OFF ^
       -Donnxruntime_BUILD_UNIT_TESTS=OFF ^
       -Donnxruntime_BUILD_TESTS=OFF ^
+      -Donnxruntime_ENABLE_TESTING=OFF ^
+      -DBUILD_TESTING=OFF ^
+      -Donnxruntime_MSVC_STATIC_RUNTIME=ON ^
+      -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded ^
       "%ONNX_CMAKE_SRC%"
     if errorlevel 1 exit /b 1
     cmake --build . --config Release
