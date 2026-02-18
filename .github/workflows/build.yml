@@ -47,10 +47,7 @@ jobs:
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
-          set WIN_WITH_OPENBLAS=0
-          set WIN_WITH_CUDA=0
-          set WIN_WITH_VULKAN=0
-          call "%CD%\build_windows.bat"
+          call "%CD%\build_windows.bat" cpu
 
       # ----------------------
       # Build Windows OpenBLAS Variant
@@ -58,10 +55,7 @@ jobs:
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
-          set WIN_WITH_OPENBLAS=1
-          set WIN_WITH_CUDA=0
-          set WIN_WITH_VULKAN=0
-          call "%CD%\build_windows.bat"
+          call "%CD%\build_windows.bat" openblas
 
       # ----------------------
       # Build Windows Vulkan Variant
@@ -69,10 +63,7 @@ jobs:
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
-          set WIN_WITH_OPENBLAS=0
-          set WIN_WITH_CUDA=0
-          set WIN_WITH_VULKAN=1
-          call "%CD%\build_windows.bat"
+          call "%CD%\build_windows.bat" vulkan
 
       # ----------------------
       # Build Windows CUDA Variant
@@ -80,10 +71,7 @@ jobs:
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
-          set WIN_WITH_OPENBLAS=0
-          set WIN_WITH_CUDA=1
-          set WIN_WITH_VULKAN=0
-          call "%CD%\build_windows.bat"
+          call "%CD%\build_windows.bat" cuda
 
       # ----------------------
       # Upload artifacts
@@ -91,22 +79,22 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-x64-cpu
-          path: dist\cpu
+          path: target-cross\cpu
 
       - name: Upload OpenBLAS Artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-x64-openblas
-          path: dist\openblas
+          path: target-cross\openblas
 
       - name: Upload Vulkan Artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-x64-vulkan
-          path: dist\vulkan
+          path: target-cross\vulkan
 
       - name: Upload CUDA Artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-x64-cuda
-          path: dist\cuda
+          path: target-cross\cuda
