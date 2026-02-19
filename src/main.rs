@@ -136,7 +136,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   );
 
   // broadcast stop signal to all threads
-  let (stop_all_tx, stop_all_rx) = bounded::<()>(1);
+  let (stop_all_tx, stop_all_rx) = unbounded::<()>();
   // channel for utterance audio chunks
   let (tx_utt, rx_utt) = unbounded::<audio::AudioChunk>();
   // channel for tts phrases

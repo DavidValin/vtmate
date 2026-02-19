@@ -274,7 +274,6 @@ pub fn playback_thread(
           stream.pause()?;
           queue.lock().unwrap().clear();
           interrupted = true;
-          break;
         }
         recv(stop_play_rx) -> _ => {
           // Stop current stream, drop it, and let outer loop recreate
