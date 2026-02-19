@@ -2,7 +2,7 @@
 //  Keyboard handling
 // ------------------------------------------------------------------
 
-use crate::state::{decrease_voice_speed, increase_voice_speed, GLOBAL_STATE};
+use crate::state::{GLOBAL_STATE, decrease_voice_speed, increase_voice_speed};
 use crate::tts;
 use crossbeam_channel::{Receiver, Sender};
 use crossterm::{
@@ -10,8 +10,8 @@ use crossterm::{
   terminal,
 };
 use std::sync::{
-  atomic::{AtomicBool, AtomicU64, Ordering},
   Arc, Mutex,
+  atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::time::{Duration, Instant};
 

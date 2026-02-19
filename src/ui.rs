@@ -2,7 +2,7 @@
 //  UI (two regions: top scrollable, bottom fixed bar)
 // ------------------------------------------------------------------
 
-use crate::state::{get_speed, get_voice, GLOBAL_STATE};
+use crate::state::{GLOBAL_STATE, get_speed, get_voice};
 use crossbeam_channel::Receiver;
 use crossterm::{
   cursor::{Hide, MoveTo, position},
@@ -11,12 +11,12 @@ use crossterm::{
   terminal::{self, Clear, ClearType},
 };
 use std::io::{self, Write};
-use std::sync::{atomic::Ordering, Arc, Mutex};
+use std::sync::{Arc, Mutex, atomic::Ordering};
 use std::thread;
-use std::time::{Duration};
+use std::time::Duration;
 
 // ANSI label styling
-pub const USER_LABEL: &str = "\x1b[47;30mUSER:\x1b[0m";       // white bg, black text
+pub const USER_LABEL: &str = "\x1b[47;30mUSER:\x1b[0m"; // white bg, black text
 pub const ASSIST_LABEL: &str = "\x1b[48;5;22;37mASSISTANT:\x1b[0m"; // dark green bg, white text
 
 pub fn spawn_ui_thread(
@@ -81,27 +81,65 @@ pub fn spawn_ui_thread(
 
       let internal_status = format!(
         "{}{}{}{}",
-        if recording_paused { "\x1b[47m█\x1b[0m" } else { "\x1b[100m█\x1b[0m" },
-        if conversation_paused { "\x1b[47m█\x1b[0m" } else { "\x1b[100m█\x1b[0m" },
-        if state.playback.paused.load(Ordering::Relaxed) { "\x1b[100m█\x1b[0m" } else { "\x1b[47m█\x1b[0m" },
-        if state.playback.playback_active.load(Ordering::Relaxed) { "\x1b[47m█\x1b[0m" } else { "\x1b[100m█\x1b[0m" }
+        if recording_paused {
+          "\x1b[47m█\x1b[0m"
+        } else {
+          "\x1b[100m█\x1b[0m"
+        },
+        if conversation_paused {
+          "\x1b[47m█\x1b[0m"
+        } else {
+          "\x1b[100m█\x1b[0m"
+        },
+        if state.playback.paused.load(Ordering::Relaxed) {
+          "\x1b[100m█\x1b[0m"
+        } else {
+          "\x1b[47m█\x1b[0m"
+        },
+        if state.playback.playback_active.load(Ordering::Relaxed) {
+          "\x1b[47m█\x1b[0m"
+        } else {
+          "\x1b[100m█\x1b[0m"
+        }
       );
       let combined_status = format!("{} {} ", voice_str, internal_status);
 
       let available = cols.saturating_sub(
-          get_visible_len_for(&status) + 2 + get_visible_len_for(&combined_status) + 1 + get_visible_len_for(&speed_str) + recording_paused_vis_len,
+        get_visible_len_for(&status)
+          + 2
+          + get_visible_len_for(&combined_status)
+          + 1
+          + get_visible_len_for(&speed_str)
+          + recording_paused_vis_len,
       );
       let max_bar_len = if available > 10 { 10 } else { available };
       let mut bar_len = ((peak_val * (max_bar_len as f32)).round() as usize).min(max_bar_len);
-      if recording_paused { bar_len = 0; }
-      let bar_color = if recording_paused { "\x1b[37m" } else if speak { "\x1b[31m" } else { "\x1b[37m" };
+      if recording_paused {
+        bar_len = 0;
+      }
+      let bar_color = if recording_paused {
+        "\x1b[37m"
+      } else if speak {
+        "\x1b[31m"
+      } else {
+        "\x1b[37m"
+      };
       let bar = format!("{}{}\x1b[0m", bar_color, "█".repeat(bar_len));
 
-      let spaces = cols
-        .saturating_sub(get_visible_len_for(&status) + 2 + bar_len + get_visible_len_for(&speed_str) + get_visible_len_for(&combined_status) + recording_paused_vis_len);
+      let spaces = cols.saturating_sub(
+        get_visible_len_for(&status)
+          + 2
+          + bar_len
+          + get_visible_len_for(&speed_str)
+          + get_visible_len_for(&combined_status)
+          + recording_paused_vis_len,
+      );
 
       let status_without_speed = format!("{} {}{}", status, bar, " ".repeat(spaces));
-      let full_bar = format!("{}{} {}{}", status_without_speed, speed_str, combined_status, recording_paused_str);
+      let full_bar = format!(
+        "{}{} {}{}",
+        status_without_speed, speed_str, combined_status, recording_paused_str
+      );
 
       if let Ok(mut st) = status_line.lock() {
         *st = full_bar.clone();
@@ -119,9 +157,15 @@ pub fn spawn_ui_thread(
           match msg_type {
             "line" => {
               let (label, body) = if msg_str.starts_with(USER_LABEL) {
-                (USER_LABEL, msg_str.strip_prefix(USER_LABEL).unwrap_or("").trim())
+                (
+                  USER_LABEL,
+                  msg_str.strip_prefix(USER_LABEL).unwrap_or("").trim(),
+                )
               } else if msg_str.starts_with(ASSIST_LABEL) {
-                (ASSIST_LABEL, msg_str.strip_prefix(ASSIST_LABEL).unwrap_or("").trim())
+                (
+                  ASSIST_LABEL,
+                  msg_str.strip_prefix(ASSIST_LABEL).unwrap_or("").trim(),
+                )
               } else {
                 ("", msg_str)
               };
@@ -202,7 +246,6 @@ fn print_inline_chunk<W: Write>(
   }
 }
 
-
 fn redraw_top_region<W: Write>(out: &mut W, buffer: &[String], max_height: u16) {
   let draw_height = max_height as usize;
 
@@ -221,17 +264,11 @@ fn redraw_top_region<W: Write>(out: &mut W, buffer: &[String], max_height: u16) 
 
   // Fill remaining lines if buffer is shorter than draw_height
   for i in buffer[start..].len()..draw_height {
-    execute!(
-      out,
-      MoveTo(0, i as u16),
-      Clear(ClearType::CurrentLine)
-    )
-    .unwrap();
+    execute!(out, MoveTo(0, i as u16), Clear(ClearType::CurrentLine)).unwrap();
   }
 
   out.flush().unwrap();
 }
-
 
 fn print_bottom_bar<W: Write>(out: &mut W, status: &str) -> std::io::Result<()> {
   let (prev_x, prev_y) = position().unwrap_or((0, 0));
@@ -239,12 +276,17 @@ fn print_bottom_bar<W: Write>(out: &mut W, status: &str) -> std::io::Result<()> 
   let last_y = terminal_height.saturating_sub(1);
 
   execute!(out, MoveTo(0, last_y), Clear(ClearType::CurrentLine))?;
-  execute!(out, MoveTo(0, last_y), ResetColor, Print(status), ResetColor)?;
+  execute!(
+    out,
+    MoveTo(0, last_y),
+    ResetColor,
+    Print(status),
+    ResetColor
+  )?;
   execute!(out, MoveTo(prev_x, prev_y))?;
   out.flush()?;
   Ok(())
 }
-
 
 fn get_visible_len_for(s: &str) -> usize {
   let mut len = 0usize;

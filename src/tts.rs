@@ -85,7 +85,7 @@ pub fn tts_thread(
   args: crate::config::Args,
   rx_tts: Receiver<(String, u64)>,
   stop_play_tx: Sender<()>,
- ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   loop {
     // Wait for either a new phrase or a stop signal
     crossbeam_channel::select! {
@@ -508,7 +508,9 @@ fn read_exact_in_chunks<R: std::io::Read>(
   let mut buf = vec![0u8; 8192];
   let mut out = Vec::with_capacity(total);
   while remaining > 0 {
-    if stop_all_rx.try_recv().is_ok() || interrupt_counter.load(std::sync::atomic::Ordering::SeqCst) != expected_interrupt {
+    if stop_all_rx.try_recv().is_ok()
+      || interrupt_counter.load(std::sync::atomic::Ordering::SeqCst) != expected_interrupt
+    {
       return Err("Interrupted while reading wav data".into());
     }
     let to_read = std::cmp::min(remaining, buf.len());
@@ -532,7 +534,9 @@ fn stream_wav16le_over_http(
 ) -> Result<SpeakOutcome, Box<dyn std::error::Error + Send + Sync>> {
   let resp = reqwest::blocking::get(url)?;
   // Check for early cancellation after receiving response
-  if stop_all_rx.try_recv().is_ok() || interrupt_counter.load(Ordering::SeqCst) != expected_interrupt {
+  if stop_all_rx.try_recv().is_ok()
+    || interrupt_counter.load(Ordering::SeqCst) != expected_interrupt
+  {
     return Ok(SpeakOutcome::Interrupted);
   }
   if !resp.status().is_success() {
@@ -648,7 +652,13 @@ fn stream_wav16le_over_http(
       remaining -= want;
 
       // Read all PCM data first
-      let pcm = match read_exact_in_chunks(&mut reader, remaining, &stop_all_rx, &interrupt_counter, expected_interrupt) {
+      let pcm = match read_exact_in_chunks(
+        &mut reader,
+        remaining,
+        &stop_all_rx,
+        &interrupt_counter,
+        expected_interrupt,
+      ) {
         Ok(v) => v,
         Err(e) => return Err(e),
       };
