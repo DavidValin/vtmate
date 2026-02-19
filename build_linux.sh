@@ -55,6 +55,9 @@ list_has() {
 }
 want_arch() { [[ "${SEL_ARCH}" == "all" ]] && return 0; list_has "${SEL_ARCH}" "$1"; }
 
+# -----------------------------
+# FIX: ignore unknown args (like --enable-container-swap)
+# -----------------------------
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --arch) SEL_ARCH="$(normalize_list "${2-}")"; shift 2 ;;
@@ -62,7 +65,10 @@ while [[ $# -gt 0 ]]; do
     --cache) DOCKER_NO_CACHE=0; shift ;;
     --no-cache) DOCKER_NO_CACHE=1; shift ;;
     -h|--help) usage; exit 0 ;;
-    *) echo "Unknown arg: $1"; usage; exit 1 ;;
+    *) 
+       echo "⚠ Ignoring unknown arg: $1"
+       shift
+       ;;
   esac
 done
 
@@ -161,7 +167,6 @@ DOCKERFILE
 
   docker build "${build_args[@]}" --platform=linux/amd64 -f "$df" -t "$img" "$tmp"
 
-  rm -f "${ESPEAK_ARCHIVE}"
   docker run --rm --platform=linux/amd64 \
     -v "${ASSETS_DIR}:/out" -w /out \
     "$img" \
@@ -193,6 +198,9 @@ linux_copy_out() {
   echo "✔ Built: $out"
 }
 
+# -----------------------------
+# AMD64 Docker Build
+# -----------------------------
 build_linux_amd64_docker_variants() {
   [[ "$docker_ok" -eq 1 ]] || { echo "Skipping linux/amd64: docker not found."; return 0; }
   [[ "${FORCE_AMD64_DOCKER}" -eq 1 ]] || { echo "Skipping linux/amd64: cannot run linux/amd64 containers."; return 0; }
@@ -269,14 +277,26 @@ DOCKERFILE
     "$img" \
     bash -lc '
       set -euo pipefail
+
+      ARCH=amd64
       target=x86_64-unknown-linux-gnu
 
       build_variant() {
         local variant="$1"
         local feats="$2"
-        local ctd="/work/target-cross/linux-amd64-${variant}"
-        echo "---- Building linux/amd64 [$variant] features: $feats"
-        CARGO_TARGET_DIR="$ctd" cargo build --release --target "$target" --no-default-features --features "$feats"
+        local ctd="/work/target-cross/linux-${ARCH}-${variant}"
+
+        echo "---- Building linux/${ARCH} [$variant] features: $feats"
+
+        export RUSTFLAGS="-C codegen-units=1 -C opt-level=2 -C link-arg=-Wl,--gc-sections -C link-arg=-Wl,--icf=safe"
+        export CARGO_PROFILE_RELEASE_LTO=false
+        export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+        export CARGO_PROFILE_RELEASE_DEBUG=false
+        export CARGO_PROFILE_RELEASE_STRIP=symbols
+        export CARGO_PROFILE_RELEASE_INCREMENTAL=false
+
+        CARGO_TARGET_DIR="$ctd" \
+        cargo build --release --target "$target" --no-default-features --features "$feats"
       }
 
       build_variant cpu "'"${FEATURES_CPU}"'"
@@ -294,12 +314,8 @@ DOCKERFILE
         build_variant openblas "'"${FEATURES_OPENBLAS}"'"
       fi
 
-      if [ "${LINUX_WITH_VULKAN}" = "1" ]; then
-        if command -v glslc >/dev/null 2>&1; then
-          build_variant vulkan "'"${FEATURES_VULKAN}"'"
-        else
-          echo "WARN: glslc missing; skipping linux/amd64 vulkan variant"
-        fi
+      if [ "${LINUX_WITH_VULKAN}" = "1" ] && command -v glslc >/dev/null 2>&1; then
+        build_variant vulkan "'"${FEATURES_VULKAN}"'"
       fi
 
       if [ "${WITH_CUDA}" = "1" ]; then
@@ -310,6 +326,7 @@ DOCKERFILE
         build_variant rocm "'"${FEATURES_ROCM}"'"
       fi
     '
+
 
   linux_copy_out "amd64" "x86_64-unknown-linux-gnu" "cpu"
   [[ "${LINUX_WITH_OPENBLAS}" == "1" ]] && linux_copy_out "amd64" "x86_64-unknown-linux-gnu" "openblas"
@@ -323,6 +340,9 @@ DOCKERFILE
   rm -rf "$tmp" >/dev/null 2>&1 || true
 }
 
+# -----------------------------
+# ARM64 Docker Build (FIXED)
+# -----------------------------
 build_linux_arm64_docker_variants() {
   [[ "$docker_ok" -eq 1 ]] || { echo "Skipping linux/arm64: docker not found."; return 0; }
 
@@ -380,41 +400,50 @@ DOCKERFILE
     -e LINUX_WITH_OPENBLAS="${LINUX_WITH_OPENBLAS}" \
     -e LINUX_WITH_VULKAN="${LINUX_WITH_VULKAN}" \
     "$img" \
-    bash -lc '
-      set -euo pipefail
-      target=aarch64-unknown-linux-gnu
+      bash -lc '
+        set -euo pipefail
 
-      build_variant() {
-        local variant="$1"
-        local feats="$2"
-        local ctd="/work/target-cross/linux-arm64-${variant}"
-        echo "---- Building linux/arm64 [$variant] features: $feats"
-        CARGO_TARGET_DIR="$ctd" cargo build --release --target "$target" --no-default-features --features "$feats"
-      }
+        ARCH=arm64
+        target=aarch64-unknown-linux-gnu
 
-      build_variant cpu "'"${FEATURES_CPU}"'"
+        build_variant() {
+          local variant="$1"
+          local feats="$2"
+          local ctd="/work/target-cross/linux-${ARCH}-${variant}"
 
-      if [ "${LINUX_WITH_OPENBLAS}" = "1" ]; then
-        if [ -d /usr/include/aarch64-linux-gnu/openblas-pthread ]; then
-          export BLAS_INCLUDE_DIRS=/usr/include/aarch64-linux-gnu/openblas-pthread
-        elif [ -d /usr/include/aarch64-linux-gnu/openblas ]; then
-          export BLAS_INCLUDE_DIRS=/usr/include/aarch64-linux-gnu/openblas
-        elif [ -d /usr/include/openblas ]; then
-          export BLAS_INCLUDE_DIRS=/usr/include/openblas
-        else
-          export BLAS_INCLUDE_DIRS=/usr/include
+          echo "---- Building linux/${ARCH} [$variant] features: $feats"
+
+          export RUSTFLAGS="-C codegen-units=1 -C opt-level=2 -C link-arg=-Wl,--gc-sections"
+          export CARGO_PROFILE_RELEASE_LTO=false
+          export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+          export CARGO_PROFILE_RELEASE_DEBUG=false
+          export CARGO_PROFILE_RELEASE_STRIP=symbols
+          export CARGO_PROFILE_RELEASE_INCREMENTAL=false
+
+          CARGO_TARGET_DIR="$ctd" \
+          cargo build --release --target "$target" \
+            --no-default-features --features "$feats"
+        }
+
+        build_variant cpu "'"${FEATURES_CPU}"'"
+
+        if [ "${LINUX_WITH_OPENBLAS}" = "1" ]; then
+          if [ -d /usr/include/aarch64-linux-gnu/openblas-pthread ]; then
+            export BLAS_INCLUDE_DIRS=/usr/include/aarch64-linux-gnu/openblas-pthread
+          elif [ -d /usr/include/aarch64-linux-gnu/openblas ]; then
+            export BLAS_INCLUDE_DIRS=/usr/include/aarch64-linux-gnu/openblas
+          elif [ -d /usr/include/openblas ]; then
+            export BLAS_INCLUDE_DIRS=/usr/include/openblas
+          else
+            export BLAS_INCLUDE_DIRS=/usr/include
+          fi
+          build_variant openblas "'"${FEATURES_OPENBLAS}"'"
         fi
-        build_variant openblas "'"${FEATURES_OPENBLAS}"'"
-      fi
 
-      if [ "${LINUX_WITH_VULKAN}" = "1" ]; then
-        if command -v glslc >/dev/null 2>&1; then
+        if [ "${LINUX_WITH_VULKAN}" = "1" ] && command -v glslc >/dev/null 2>&1; then
           build_variant vulkan "'"${FEATURES_VULKAN}"'"
-        else
-          echo "WARN: glslc missing; skipping linux/arm64 vulkan variant"
         fi
-      fi
-    '
+      '
 
   linux_copy_out "arm64" "aarch64-unknown-linux-gnu" "cpu"
   [[ "${LINUX_WITH_OPENBLAS}" == "1" ]] && linux_copy_out "arm64" "aarch64-unknown-linux-gnu" "openblas"
@@ -426,7 +455,9 @@ DOCKERFILE
   rm -rf "$tmp" >/dev/null 2>&1 || true
 }
 
+# -----------------------------
 # Run
+# -----------------------------
 ensure_espeak_data_archive
 
 if want_arch amd64; then build_linux_amd64_docker_variants; fi

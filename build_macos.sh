@@ -141,7 +141,15 @@ add_artifact() { [[ -f "$1" ]] && ARTIFACTS+=("$1"); }
 
 arch="$(uname -m)"
 
+# --- Build Metal variant ---
 echo "== macOS build [metal] features: ${FEATURES_MACOS_METAL} =="
+export RUSTFLAGS="-C codegen-units=1 -C opt-level=2 -C link-arg=-Wl,-dead_strip"
+export CARGO_PROFILE_RELEASE_LTO=false
+export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+export CARGO_PROFILE_RELEASE_DEBUG=false
+export CARGO_PROFILE_RELEASE_STRIP=symbols
+export CARGO_PROFILE_RELEASE_INCREMENTAL=false
+
 cargo build --release --no-default-features --features "${FEATURES_MACOS_METAL}"
 out="${DIST_DIR}/${BIN_NAME}-${VERSION}-macos-${arch}-metal"
 cp "${PROJECT_ROOT}/target/release/${BIN_NAME}" "$out"
@@ -149,10 +157,22 @@ chmod +x "$out" || true
 add_artifact "$out"
 echo "✔ Built: $out"
 
+# --- Build Metal + OpenBLAS variant (optional) ---
 if [[ "${MAC_WITH_OPENBLAS}" == "1" ]]; then
   echo "== macOS build [metal-openblas] features: ${FEATURES_MACOS_METAL_OPENBLAS} =="
+
+  # Detect OpenBLAS include path
+  if [ -d /opt/homebrew/include/openblas ]; then
+    export BLAS_INCLUDE_DIRS=/opt/homebrew/include/openblas
+  elif [ -d /usr/local/include/openblas ]; then
+    export BLAS_INCLUDE_DIRS=/usr/local/include/openblas
+  else
+    export BLAS_INCLUDE_DIRS=/usr/include
+  fi
+
   CARGO_TARGET_DIR="${PROJECT_ROOT}/target-cross/macos-${arch}-metal-openblas" \
     cargo build --release --no-default-features --features "${FEATURES_MACOS_METAL_OPENBLAS}"
+
   out="${DIST_DIR}/${BIN_NAME}-${VERSION}-macos-${arch}-metal-openblas"
   cp "${PROJECT_ROOT}/target-cross/macos-${arch}-metal-openblas/release/${BIN_NAME}" "$out"
   chmod +x "$out" || true
@@ -160,6 +180,7 @@ if [[ "${MAC_WITH_OPENBLAS}" == "1" ]]; then
   echo "✔ Built: $out"
 fi
 
+# --- Package ---
 if [[ "${DO_PACKAGE}" -eq 1 ]]; then
   echo "== Packaging tar.gz + SHA256 =="
   for f in "${ARTIFACTS[@]}"; do
