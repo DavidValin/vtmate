@@ -2,16 +2,16 @@
 //  UI
 // ------------------------------------------------------------------
 
-use crate::state::{get_speed, get_voice, GLOBAL_STATE};
+use crate::state::{GLOBAL_STATE, get_speed, get_voice};
 use crossbeam_channel::Receiver;
 use crossterm::{
-  cursor::{position, Hide, MoveTo},
+  cursor::{Hide, MoveTo, position},
   execute,
   style::{Print, ResetColor},
   terminal::{self, Clear, ClearType},
 };
 use std::io::{self, Write};
-use std::sync::{atomic::Ordering, Arc, Mutex};
+use std::sync::{Arc, Mutex, atomic::Ordering};
 use std::thread;
 use std::time::Duration;
 
