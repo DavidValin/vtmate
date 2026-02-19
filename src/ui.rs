@@ -2,16 +2,16 @@
 //  UI (two regions: top scrollable, bottom fixed bar)
 // ------------------------------------------------------------------
 
-use crate::state::{GLOBAL_STATE, get_speed, get_voice};
+use crate::state::{get_speed, get_voice, GLOBAL_STATE};
 use crossbeam_channel::Receiver;
 use crossterm::{
-  cursor::{Hide, MoveTo, position},
+  cursor::{position, Hide, MoveTo},
   execute,
   style::{Print, ResetColor},
   terminal::{self, Clear, ClearType},
 };
 use std::io::{self, Write};
-use std::sync::{Arc, Mutex, atomic::Ordering};
+use std::sync::{atomic::Ordering, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -27,11 +27,32 @@ pub fn spawn_ui_thread(
   ui_rx: Receiver<String>,
 ) -> thread::JoinHandle<()> {
   thread::spawn(move || {
+    let mut out = io::stdout();
+    let mut out_for_closure = io::stdout();
+
     let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     let mut i = 0usize;
 
+    let ui_for_bg = ui.clone();
+    let status_line_for_bg = status_line.clone();
+    let peak_for_bg = peak.clone();
+    thread::spawn(move || {
+      let mut i_for_bg = i;
+      loop {
+        i_for_bg = (i_for_bg + 1) % spinner.len();
+        let full_bar = update_bottom_bar(
+          &ui_for_bg,
+          &status_line_for_bg,
+          &peak_for_bg,
+          &spinner,
+          &mut i_for_bg,
+        );
+        print_bottom_bar(&mut out_for_closure, &full_bar).unwrap();
+        thread::sleep(Duration::from_millis(35));
+      }
+    });
+
     // Hide cursor
-    let mut out = io::stdout();
     execute!(out, Hide).unwrap();
 
     // buffer for top region
@@ -42,111 +63,12 @@ pub fn spawn_ui_thread(
         break;
       }
 
-      // status
       let state = GLOBAL_STATE.get().expect("AppState not initialized");
-      let speak = state.ui.agent_speaking.load(Ordering::Relaxed);
-      let think = ui.thinking.load(Ordering::Relaxed);
-      let play = state.ui.playing.load(Ordering::Relaxed);
-      let recording_paused = state.recording_paused.load(Ordering::Relaxed);
       let conversation_paused = state.conversation_paused.load(Ordering::Relaxed);
-
-      let status = if recording_paused {
-        "⏸️".to_string()
-      } else if think {
-        format!("🤔 {}", spinner[i % spinner.len()])
-      } else if speak {
-        format!("🎤 {}", spinner[i % spinner.len()])
-      } else if play {
-        format!("🔊 {}", spinner[i % spinner.len()])
-      } else {
-        format!("🎤 {}", spinner[i % spinner.len()])
-      };
-
-      let (cols_raw, _x) = terminal::size().unwrap_or((80, 24));
-      let cols = cols_raw as usize;
-
-      let peak_val = match peak.lock() {
-        Ok(v) => *v,
-        Err(_) => 0.0,
-      };
-      let speed_str = format!("[{:.1}x]", get_speed());
-      let voice_str = format!("({})", get_voice());
-
-      let recording_paused_str = if recording_paused {
-        "\x1b[43m\x1b[30m  paused  \x1b[0m"
-      } else {
-        "\x1b[41m\x1b[37m listening \x1b[0m"
-      };
-      let recording_paused_vis_len = get_visible_len_for(recording_paused_str);
-
-      let internal_status = format!(
-        "{}{}{}{}",
-        if recording_paused {
-          "\x1b[47m█\x1b[0m"
-        } else {
-          "\x1b[100m█\x1b[0m"
-        },
-        if conversation_paused {
-          "\x1b[47m█\x1b[0m"
-        } else {
-          "\x1b[100m█\x1b[0m"
-        },
-        if state.playback.paused.load(Ordering::Relaxed) {
-          "\x1b[100m█\x1b[0m"
-        } else {
-          "\x1b[47m█\x1b[0m"
-        },
-        if state.playback.playback_active.load(Ordering::Relaxed) {
-          "\x1b[47m█\x1b[0m"
-        } else {
-          "\x1b[100m█\x1b[0m"
-        }
-      );
-      let combined_status = format!("{} {} ", voice_str, internal_status);
-
-      let available = cols.saturating_sub(
-        get_visible_len_for(&status)
-          + 2
-          + get_visible_len_for(&combined_status)
-          + 1
-          + get_visible_len_for(&speed_str)
-          + recording_paused_vis_len,
-      );
-      let max_bar_len = if available > 10 { 10 } else { available };
-      let mut bar_len = ((peak_val * (max_bar_len as f32)).round() as usize).min(max_bar_len);
-      if recording_paused {
-        bar_len = 0;
-      }
-      let bar_color = if recording_paused {
-        "\x1b[37m"
-      } else if speak {
-        "\x1b[31m"
-      } else {
-        "\x1b[37m"
-      };
-      let bar = format!("{}{}\x1b[0m", bar_color, "█".repeat(bar_len));
-
-      let spaces = cols.saturating_sub(
-        get_visible_len_for(&status)
-          + 2
-          + bar_len
-          + get_visible_len_for(&speed_str)
-          + get_visible_len_for(&combined_status)
-          + recording_paused_vis_len,
-      );
-
-      let status_without_speed = format!("{} {}{}", status, bar, " ".repeat(spaces));
-      let full_bar = format!(
-        "{}{} {}{}",
-        status_without_speed, speed_str, combined_status, recording_paused_str
-      );
-
-      if let Ok(mut st) = status_line.lock() {
-        *st = full_bar.clone();
-      }
 
       let (cols_raw, terminal_height) = terminal::size().unwrap_or((80, 24));
       let cols = cols_raw as usize;
+      let mut full_bar = String::new();
 
       while let Ok(msg) = ui_rx.try_recv() {
         let mut parts = msg.splitn(2, '|');
@@ -185,10 +107,6 @@ pub fn spawn_ui_thread(
           }
         }
       }
-
-      print_bottom_bar(&mut out, &full_bar).unwrap();
-      i = i.wrapping_add(1);
-      thread::sleep(Duration::from_millis(5));
     }
   })
 }
@@ -305,4 +223,106 @@ fn get_visible_len_for(s: &str) -> usize {
     }
   }
   len
+}
+
+fn update_bottom_bar(
+  ui: &crate::state::UiState,
+  status_line: &Arc<Mutex<String>>,
+  peak: &Arc<Mutex<f32>>,
+  spinner: &[&str],
+  i: &mut usize,
+) -> String {
+  let state = GLOBAL_STATE.get().expect("AppState not initialized");
+  let speak = state.ui.agent_speaking.load(Ordering::Relaxed);
+  let think = ui.thinking.load(Ordering::Relaxed);
+  let play = state.ui.playing.load(Ordering::Relaxed);
+  let recording_paused = state.recording_paused.load(Ordering::Relaxed);
+  let conversation_paused = state.conversation_paused.load(Ordering::Relaxed);
+  let status = if recording_paused {
+    "⏸️".to_string()
+  } else if think {
+    format!("🤔 {}", spinner[*i % spinner.len()])
+  } else if speak {
+    format!("🎤 {}", spinner[*i % spinner.len()])
+  } else if play {
+    format!("🔊 {}", spinner[*i % spinner.len()])
+  } else {
+    format!("🎤 {}", spinner[*i % spinner.len()])
+  };
+  let (cols_raw, _x) = terminal::size().unwrap_or((80, 24));
+  let cols = cols_raw as usize;
+  let peak_val = match peak.lock() {
+    Ok(v) => *v,
+    Err(_) => 0.0,
+  };
+  let speed_str = format!("[{:.1}x]", get_speed());
+  let voice_str = format!("({})", get_voice());
+  let recording_paused_str = if recording_paused {
+    "\x1b[43m\x1b[30m  paused  \x1b[0m"
+  } else {
+    "\x1b[41m\x1b[37m listening \x1b[0m"
+  };
+  let recording_paused_vis_len = get_visible_len_for(recording_paused_str);
+  let internal_status = format!(
+    "{}{}{}{}",
+    if recording_paused {
+      "\x1b[47m█\x1b[0m"
+    } else {
+      "\x1b[100m█\x1b[0m"
+    },
+    if conversation_paused {
+      "\x1b[47m█\x1b[0m"
+    } else {
+      "\x1b[100m█\x1b[0m"
+    },
+    if state.playback.paused.load(Ordering::Relaxed) {
+      "\x1b[100m█\x1b[0m"
+    } else {
+      "\x1b[47m█\x1b[0m"
+    },
+    if state.playback.playback_active.load(Ordering::Relaxed) {
+      "\x1b[47m█\x1b[0m"
+    } else {
+      "\x1b[100m█\x1b[0m"
+    }
+  );
+  let combined_status = format!("{} {} ", voice_str, internal_status);
+  let available = cols.saturating_sub(
+    get_visible_len_for(&status)
+      + 2
+      + get_visible_len_for(&combined_status)
+      + 1
+      + get_visible_len_for(&speed_str)
+      + recording_paused_vis_len,
+  );
+  let max_bar_len = if available > 10 { 10 } else { available };
+  let mut bar_len = ((peak_val * (max_bar_len as f32)).round() as usize).min(max_bar_len);
+  if recording_paused {
+    bar_len = 0;
+  }
+  let bar_color = if recording_paused {
+    "\x1b[37m"
+  } else if speak {
+    "\x1b[31m"
+  } else {
+    "\x1b[37m"
+  };
+  let bar = format!("{}{}\x1b[0m", bar_color, "█".repeat(bar_len));
+  let spaces = cols.saturating_sub(
+    get_visible_len_for(&status)
+      + 2
+      + bar_len
+      + get_visible_len_for(&speed_str)
+      + get_visible_len_for(&combined_status)
+      + recording_paused_vis_len,
+  );
+  let status_without_speed = format!("{} {}{}", status, bar, " ".repeat(spaces));
+  let full_bar = format!(
+    "{}{} {}{}",
+    status_without_speed, speed_str, combined_status, recording_paused_str
+  );
+  if let Ok(mut st) = status_line.lock() {
+    *st = full_bar.clone();
+  }
+  full_bar
 }
