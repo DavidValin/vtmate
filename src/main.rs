@@ -217,7 +217,10 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   if args.llm == "ollama" {
     log::log("info", &format!("ollama base url: {}", args.ollama_url));
   } else {
-    log::log("info", &format!("llama-server url: {}", args.llama_server_url));
+    log::log(
+      "info",
+      &format!("llama-server url: {}", args.llama_server_url),
+    );
   }
   // initialize state after voice_selected
   let state = Arc::new(state::AppState::new_with_voice(voice_selected.clone()));
@@ -269,7 +272,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         args,
         rx_tts,
         stop_play_tx_for_tts,
-      ).unwrap();
+      )
+      .unwrap();
     }
   });
 
