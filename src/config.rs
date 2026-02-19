@@ -4,8 +4,8 @@
 
 use crate::util::get_user_home_path;
 use clap::Parser;
-use cpal::traits::DeviceTrait;
 use cpal::Device;
+use cpal::traits::DeviceTrait;
 
 // API
 // ------------------------------------------------------------------
