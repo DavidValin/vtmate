@@ -136,7 +136,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   );
 
   // broadcast stop signal to all threads
-  let (stop_all_tx, stop_all_rx) = bounded::<()>(1);
+  let (stop_all_tx, stop_all_rx) = unbounded::<()>();
   // channel for utterance audio chunks
   let (tx_utt, rx_utt) = unbounded::<audio::AudioChunk>();
   // channel for tts phrases
@@ -217,7 +217,10 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   if args.llm == "ollama" {
     log::log("info", &format!("ollama base url: {}", args.ollama_url));
   } else {
-    log::log("info", &format!("llama-server url: {}", args.llama_server_url));
+    log::log(
+      "info",
+      &format!("llama-server url: {}", args.llama_server_url),
+    );
   }
   // initialize state after voice_selected
   let state = Arc::new(state::AppState::new_with_voice(voice_selected.clone()));
@@ -269,7 +272,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         args,
         rx_tts,
         stop_play_tx_for_tts,
-      ).unwrap();
+      )
+      .unwrap();
     }
   });
 
@@ -303,7 +307,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let tx_utt_for_rec = tx_utt.clone();
   let playback_active_for_rec = playback_active.clone();
   let gate_until_ms_for_rec = gate_until_ms.clone();
-  let stop_all_tx_for_rec = stop_all_tx.clone();
   let interrupt_counter_for_rec = interrupt_counter.clone();
   let stop_all_rx_for_record_for_rec = stop_all_rx_for_record.clone();
   let ui_peak_for_rec = ui.peak.clone();
@@ -327,7 +330,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
           end_silence_ms,
           playback_active_for_rec.clone(),
           gate_until_ms_for_rec.clone(),
-          stop_all_tx_for_rec.clone(),
           interrupt_counter_for_rec.clone(),
           stop_all_rx_for_record_for_rec.clone(),
           ui_peak_for_rec.clone(),
