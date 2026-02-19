@@ -80,14 +80,14 @@ pub fn spawn_ui_thread(
 
       let (cols_raw, terminal_height) = terminal::size().unwrap_or((80, 24));
       let cols = cols_raw as usize;
-      let mut full_bar = String::new();
+      let full_bar = String::new();
 
       while let Ok(msg) = ui_rx.try_recv() {
         if stop_all_rx.try_recv().is_ok() {
           // drain ui_rx messages before exiting
           while let Ok(_) = ui_rx.try_recv() {}
           break;
-}
+        }
 
         let mut parts = msg.splitn(2, '|');
         let msg_type = parts.next().unwrap_or("");
@@ -176,7 +176,7 @@ fn print_inline_chunk<W: Write>(
     // Redraw in batches
     chars_since_redraw += 1;
     if chars_since_redraw >= 5 {
-      redraw_top_region(out, buffer, terminal_height - 1);
+      redraw_top_region(out, buffer, terminal_height);
       chars_since_redraw = 0;
     }
 
@@ -184,7 +184,7 @@ fn print_inline_chunk<W: Write>(
   }
 
   if chars_since_redraw > 0 {
-    redraw_top_region(out, buffer, terminal_height - 1);
+    redraw_top_region(out, buffer, terminal_height);
   }
 }
 
@@ -225,7 +225,7 @@ fn print_bottom_bar<W: Write>(out: &mut W, status: &str) -> std::io::Result<()> 
     Print(status),
     ResetColor
   )?;
-  execute!(out, MoveTo(prev_x, prev_y))?;
+  // keep cursor at bottom line
   out.flush()?;
   Ok(())
 }
