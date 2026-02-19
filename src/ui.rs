@@ -1,5 +1,5 @@
 // ------------------------------------------------------------------
-//  UI (two regions: top scrollable, bottom fixed bar)
+//  UI
 // ------------------------------------------------------------------
 
 use crate::state::{get_speed, get_voice, GLOBAL_STATE};
@@ -15,6 +15,9 @@ use std::sync::{atomic::Ordering, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+// API
+// ------------------------------------------------------------------
+
 // ANSI label styling
 pub const USER_LABEL: &str = "\x1b[47;30mUSER:\x1b[0m"; // white bg, black text
 pub const ASSIST_LABEL: &str = "\x1b[48;5;22;37mASSISTANT:\x1b[0m"; // dark green bg, white text
@@ -26,16 +29,19 @@ pub fn spawn_ui_thread(
   peak: Arc<Mutex<f32>>,
   ui_rx: Receiver<String>,
 ) -> thread::JoinHandle<()> {
+  // separate thread for bottom bar update + render
   thread::spawn(move || {
     let mut out = io::stdout();
-    let mut out_for_closure = io::stdout();
-
     let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     let mut i = 0usize;
 
     let ui_for_bg = ui.clone();
     let status_line_for_bg = status_line.clone();
     let peak_for_bg = peak.clone();
+
+    let mut out_for_closure = io::stdout();
+    let mut ui_rx_for_closure = ui_rx.clone();
+    let mut stop_all_rx_for_closure = stop_all_rx.clone();
     thread::spawn(move || {
       let mut i_for_bg = i;
       loop {
@@ -48,11 +54,15 @@ pub fn spawn_ui_thread(
           &mut i_for_bg,
         );
         print_bottom_bar(&mut out_for_closure, &full_bar).unwrap();
+
+        if stop_all_rx_for_closure.try_recv().is_ok() {
+          while let Ok(_) = ui_rx_for_closure.try_recv() {}
+        }
         thread::sleep(Duration::from_millis(35));
       }
     });
 
-    // Hide cursor
+    // hide cursor
     execute!(out, Hide).unwrap();
 
     // buffer for top region
@@ -60,6 +70,8 @@ pub fn spawn_ui_thread(
 
     loop {
       if stop_all_rx.try_recv().is_ok() {
+        // drain ui_rx messages before exiting
+        while let Ok(_) = ui_rx.try_recv() {}
         break;
       }
 
@@ -71,6 +83,12 @@ pub fn spawn_ui_thread(
       let mut full_bar = String::new();
 
       while let Ok(msg) = ui_rx.try_recv() {
+        if stop_all_rx.try_recv().is_ok() {
+          // drain ui_rx messages before exiting
+          while let Ok(_) = ui_rx.try_recv() {}
+          break;
+}
+
         let mut parts = msg.splitn(2, '|');
         let msg_type = parts.next().unwrap_or("");
         let msg_str = parts.next().unwrap_or(msg.as_str());
@@ -106,10 +124,16 @@ pub fn spawn_ui_thread(
             _ => {}
           }
         }
+        if stop_all_rx.try_recv().is_ok() {
+          break;
+        }
       }
     }
   })
 }
+
+// PRIVATE
+// ------------------------------------------------------------------
 
 // delay per character for smooth typing
 const STREAM_DELAY_MS: u64 = 10;
@@ -295,7 +319,7 @@ fn update_bottom_bar(
       + get_visible_len_for(&speed_str)
       + recording_paused_vis_len,
   );
-  let max_bar_len = if available > 10 { 10 } else { available };
+  let max_bar_len = if available > 40 { 40 } else { available };
   let mut bar_len = ((peak_val * (max_bar_len as f32)).round() as usize).min(max_bar_len);
   if recording_paused {
     bar_len = 0;

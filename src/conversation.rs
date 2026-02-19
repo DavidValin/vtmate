@@ -2,14 +2,14 @@
 //  Conversation
 // ------------------------------------------------------------------
 
-use crate::START_INSTANT;
 use crate::state::GLOBAL_STATE;
-use crossbeam_channel::{Receiver, Sender, select};
+use crate::START_INSTANT;
+use crossbeam_channel::{select, Receiver, Sender};
 use std::cell::Cell;
 use std::sync::OnceLock;
 use std::sync::{
-  Arc, Mutex,
   atomic::{AtomicU64, Ordering},
+  Arc, Mutex,
 };
 
 static WHISPER_CTX: OnceLock<whisper_rs::WhisperContext> = OnceLock::new();
@@ -235,12 +235,20 @@ impl PhraseSpeaker {
     self.buf.push_str(s);
     // cap phrases by new lines or dots
     let trigger = self.buf.contains('\n') || self.buf.ends_with('.');
-    if trigger { self.flush() } else { None }
+    if trigger {
+      self.flush()
+    } else {
+      None
+    }
   }
   fn flush(&mut self) -> Option<String> {
     let out = self.buf.trim().to_string();
     self.buf.clear();
-    if out.is_empty() { None } else { Some(out) }
+    if out.is_empty() {
+      None
+    } else {
+      Some(out)
+    }
   }
 }
 
@@ -248,7 +256,6 @@ thread_local! {
   static IN_CODE_BLOCK: Cell<bool> = Cell::new(false);
 }
 
-// Helper to centralize interruption handling
 fn handle_interruption(
   interrupt_counter: &Arc<AtomicU64>,
   current: u64,
@@ -256,7 +263,6 @@ fn handle_interruption(
   conversation_history: &Arc<Mutex<String>>,
 ) -> bool {
   if interrupt_counter.load(Ordering::SeqCst) != current {
-    let _ = stop_all_tx.try_send(());
     conversation_history.lock().unwrap().clear();
     true
   } else {
