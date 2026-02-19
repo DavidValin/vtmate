@@ -9,7 +9,7 @@ use std::cell::Cell;
 use std::sync::OnceLock;
 use std::sync::{
   atomic::{AtomicU64, Ordering},
-  Arc, Mutex,
+  Arc,
 };
 
 static WHISPER_CTX: OnceLock<whisper_rs::WhisperContext> = OnceLock::new();
@@ -87,12 +87,15 @@ pub fn conversation_thread(
 
         // Print user line (keep spinner/emojis only on the latest bottom line).
         let my_interrupt = interrupt_counter.load(Ordering::SeqCst);
-        if handle_interruption(&interrupt_counter, my_interrupt, &stop_all_tx, &conversation_history) {
+        if handle_interruption(&interrupt_counter, my_interrupt) {
           interrupt_counter.store(my_interrupt, Ordering::SeqCst);
           continue;
         }
-        let _ = tx_ui.send("".to_string());
-        let _ = tx_ui.send(format!("{} {user_text}", crate::ui::USER_LABEL));
+        let _ = tx_ui.send("line|\n".to_string());
+        let _ = tx_ui.send(format!("line|{}", crate::ui::USER_LABEL));
+        let _ = tx_ui.send(format!("line|{}", user_text));
+        let _ = tx_ui.send("line|\n".to_string());
+
         conversation_history.lock().unwrap().push_str(&format!("{}\n", user_text));
         ui.thinking.store(true, Ordering::Relaxed);
 
@@ -100,8 +103,8 @@ pub fn conversation_thread(
         let speaker_arc = std::sync::Arc::new(std::sync::Mutex::new(PhraseSpeaker::new()));
         let mut got_any_token = false;
 
-        let _ = tx_ui.send("".to_string());
-        let _ = tx_ui.send(crate::ui::ASSIST_LABEL.to_string());
+        let _ = tx_ui.send("line| ".to_string());
+        let _ = tx_ui.send(format!("line|{}", crate::ui::ASSIST_LABEL));
 
         let mut interrupted = false;
 
@@ -118,7 +121,8 @@ pub fn conversation_thread(
         let conversation_history_for_closure_cloned = conversation_history_cloned_for_closure.clone();
 
         // called on every chunk received from llm
-        let on_piece = move |piece: &str| { let hist = conversation_history_for_closure_cloned.clone();
+        let on_piece = move |piece: &str| {
+          let hist = conversation_history_for_closure_cloned.clone();
           if interrupted {
             let _ = stop_all_tx_cloned_for_closure.try_send(());
             return;
@@ -138,11 +142,13 @@ pub fn conversation_thread(
               crate::log::log("info", &format!("Time from speech end to first phrase playback: {:.2?}", elapsed_ms));
               first_phrase_logged = true;
             }
-            let ui_phrase = phrase.clone();
-            let _ = tx_ui_cloned_for_closure.send(ui_phrase);
             hist.lock().unwrap().push_str(&format!("{}\n", phrase));
+            // send the complete phrase to tts
             let _ = tts_tx_cloned_for_closure.send((strip_special_chars(&phrase), my_interrupt));
           }
+
+          // send raw piece immediately
+          let _ = tx_ui_cloned_for_closure.send(format!("stream|{}", piece));
         };
 
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
@@ -250,16 +256,11 @@ thread_local! {
   static IN_CODE_BLOCK: Cell<bool> = Cell::new(false);
 }
 
-// Helper to centralize interruption handling
 fn handle_interruption(
   interrupt_counter: &Arc<AtomicU64>,
   current: u64,
-  stop_all_tx: &Sender<()>,
-  conversation_history: &Arc<Mutex<String>>,
 ) -> bool {
   if interrupt_counter.load(Ordering::SeqCst) != current {
-    let _ = stop_all_tx.try_send(());
-    conversation_history.lock().unwrap().clear();
     true
   } else {
     false
