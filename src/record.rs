@@ -3,7 +3,6 @@
 // ------------------------------------------------------------------
 
 use crate::START_INSTANT;
-use crate::state::GLOBAL_STATE;
 use cpal::traits::{DeviceTrait, StreamTrait};
 use crossbeam_channel::{Receiver, Sender};
 use std::sync::OnceLock;
@@ -28,7 +27,6 @@ pub fn record_thread(
   end_silence_ms: u64,
   playback_active: Arc<AtomicBool>,
   gate_until_ms: Arc<AtomicU64>,
-  stop_all_tx: Sender<()>,
   interrupt_counter: Arc<AtomicU64>,
   stop_all_rx: Receiver<()>,
   peak: Arc<Mutex<f32>>,
@@ -70,7 +68,6 @@ pub fn record_thread(
       hangover_ms,
       playback_active.clone(),
       gate_until_ms.clone(),
-      stop_all_tx.clone(),
       interrupt_counter.clone(),
       utt_buf.clone(),
       user_speaking.clone(),
@@ -98,7 +95,6 @@ pub fn record_thread(
       hangover_ms,
       playback_active.clone(),
       gate_until_ms.clone(),
-      stop_all_tx.clone(),
       interrupt_counter.clone(),
       utt_buf.clone(),
       user_speaking.clone(),
@@ -126,7 +122,6 @@ pub fn record_thread(
       hangover_ms,
       playback_active.clone(),
       gate_until_ms.clone(),
-      stop_all_tx.clone(),
       interrupt_counter.clone(),
       utt_buf.clone(),
       user_speaking.clone(),
@@ -170,7 +165,6 @@ fn build_input_f32(
   hangover_ms: u64,
   playback_active: Arc<AtomicBool>,
   gate_until_ms: Arc<AtomicU64>,
-  stop_all_tx: Sender<()>,
   interrupt_counter: Arc<AtomicU64>,
   utt_buf: Arc<Mutex<Vec<f32>>>,
   user_speaking: Arc<AtomicBool>,
@@ -330,7 +324,6 @@ fn build_input_i16(
   hangover_ms: u64,
   playback_active: Arc<AtomicBool>,
   gate_until_ms: Arc<AtomicU64>,
-  stop_all_tx: Sender<()>,
   interrupt_counter: Arc<AtomicU64>,
   utt_buf: Arc<Mutex<Vec<f32>>>,
   user_speaking: Arc<AtomicBool>,
@@ -491,7 +484,6 @@ fn build_input_u16(
   hangover_ms: u64,
   playback_active: Arc<AtomicBool>,
   gate_until_ms: Arc<AtomicU64>,
-  stop_all_tx: Sender<()>,
   interrupt_counter: Arc<AtomicU64>,
   utt_buf: Arc<Mutex<Vec<f32>>>,
   user_speaking: Arc<AtomicBool>,

@@ -87,7 +87,7 @@ pub fn conversation_thread(
 
         // Print user line (keep spinner/emojis only on the latest bottom line).
         let my_interrupt = interrupt_counter.load(Ordering::SeqCst);
-        if handle_interruption(&interrupt_counter, my_interrupt, &stop_all_tx, &conversation_history) {
+        if handle_interruption(&interrupt_counter, my_interrupt, &conversation_history) {
           interrupt_counter.store(my_interrupt, Ordering::SeqCst);
           continue;
         }
@@ -251,7 +251,6 @@ thread_local! {
 fn handle_interruption(
   interrupt_counter: &Arc<AtomicU64>,
   current: u64,
-  stop_all_tx: &Sender<()>,
   conversation_history: &Arc<Mutex<String>>,
 ) -> bool {
   if interrupt_counter.load(Ordering::SeqCst) != current {

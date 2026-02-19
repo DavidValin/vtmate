@@ -4,8 +4,7 @@
 
 use crate::state::{GLOBAL_STATE, get_speed, get_voice};
 use crossbeam_channel::Receiver;
-use crossterm::{
-  cursor::{Hide, MoveTo, position},
+use crossterm::{cursor::{Hide, MoveTo},
   execute,
   style::{Print, ResetColor},
   terminal::{self, Clear, ClearType},
@@ -33,15 +32,15 @@ pub fn spawn_ui_thread(
   thread::spawn(move || {
     let mut out = io::stdout();
     let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-    let mut i = 0usize;
+    let i = 0usize;
 
     let ui_for_bg = ui.clone();
     let status_line_for_bg = status_line.clone();
     let peak_for_bg = peak.clone();
 
     let mut out_for_closure = io::stdout();
-    let mut ui_rx_for_closure = ui_rx.clone();
-    let mut stop_all_rx_for_closure = stop_all_rx.clone();
+    let ui_rx_for_closure = ui_rx.clone();
+    let stop_all_rx_for_closure = stop_all_rx.clone();
     thread::spawn(move || {
       let mut i_for_bg = i;
       loop {
@@ -80,7 +79,6 @@ pub fn spawn_ui_thread(
 
       let (cols_raw, terminal_height) = terminal::size().unwrap_or((80, 24));
       let cols = cols_raw as usize;
-      let full_bar = String::new();
 
       while let Ok(msg) = ui_rx.try_recv() {
         if stop_all_rx.try_recv().is_ok() {
@@ -213,7 +211,6 @@ fn redraw_top_region<W: Write>(out: &mut W, buffer: &[String], max_height: u16) 
 }
 
 fn print_bottom_bar<W: Write>(out: &mut W, status: &str) -> std::io::Result<()> {
-  let (prev_x, prev_y) = position().unwrap_or((0, 0));
   let (_, terminal_height) = terminal::size()?;
   let last_y = terminal_height.saturating_sub(1);
 
