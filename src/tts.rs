@@ -121,8 +121,8 @@ pub fn tts_thread(
               continue;
             }
           }
-          Err(e) => {
-            crate::log::log("error", &format!("TTS error. Can't play audio speech. {}", e));
+          Err(_e) => {
+            crate::log::log("error", &format!("TTS error. Can't play audio speech. Make sure OpenTTS is running: docker run --rm -p 5500:5500 synesthesiam/opentts:all"));
             break;
           }
         }

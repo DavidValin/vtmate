@@ -2,14 +2,14 @@
 //  Conversation
 // ------------------------------------------------------------------
 
-use crate::START_INSTANT;
 use crate::state::GLOBAL_STATE;
-use crossbeam_channel::{Receiver, Sender, select};
+use crate::START_INSTANT;
+use crossbeam_channel::{select, Receiver, Sender};
 use std::cell::Cell;
 use std::sync::OnceLock;
 use std::sync::{
-  Arc, Mutex,
   atomic::{AtomicU64, Ordering},
+  Arc,
 };
 
 static WHISPER_CTX: OnceLock<whisper_rs::WhisperContext> = OnceLock::new();
@@ -87,7 +87,7 @@ pub fn conversation_thread(
 
         // Print user line (keep spinner/emojis only on the latest bottom line).
         let my_interrupt = interrupt_counter.load(Ordering::SeqCst);
-        if handle_interruption(&interrupt_counter, my_interrupt, &conversation_history) {
+        if handle_interruption(&interrupt_counter, my_interrupt) {
           interrupt_counter.store(my_interrupt, Ordering::SeqCst);
           continue;
         }
@@ -235,12 +235,20 @@ impl PhraseSpeaker {
     self.buf.push_str(s);
     // cap phrases by new lines or dots
     let trigger = self.buf.contains('\n') || self.buf.ends_with('.');
-    if trigger { self.flush() } else { None }
+    if trigger {
+      self.flush()
+    } else {
+      None
+    }
   }
   fn flush(&mut self) -> Option<String> {
     let out = self.buf.trim().to_string();
     self.buf.clear();
-    if out.is_empty() { None } else { Some(out) }
+    if out.is_empty() {
+      None
+    } else {
+      Some(out)
+    }
   }
 }
 
@@ -251,10 +259,8 @@ thread_local! {
 fn handle_interruption(
   interrupt_counter: &Arc<AtomicU64>,
   current: u64,
-  conversation_history: &Arc<Mutex<String>>,
 ) -> bool {
   if interrupt_counter.load(Ordering::SeqCst) != current {
-    conversation_history.lock().unwrap().clear();
     true
   } else {
     false

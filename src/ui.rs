@@ -2,19 +2,26 @@
 //  UI
 // ------------------------------------------------------------------
 
-use crate::state::{GLOBAL_STATE, get_speed, get_voice};
+use crate::log;
+use crate::state::{get_speed, get_voice, GLOBAL_STATE};
 use crossbeam_channel::Receiver;
-use crossterm::{cursor::{Hide, MoveTo},
+use crossterm::{
+  cursor::{Hide, MoveTo},
   execute,
   style::{Print, ResetColor},
   terminal::{self, Clear, ClearType},
 };
 use std::io::{self, Write};
-use std::sync::{Arc, Mutex, atomic::Ordering};
+use std::sync::{
+  atomic::{AtomicBool, Ordering},
+  Arc, Mutex,
+};
 use std::thread;
 use std::time::Duration;
 
 // API
+
+pub static STOP_STREAM: AtomicBool = AtomicBool::new(false);
 // ------------------------------------------------------------------
 
 // ANSI label styling
@@ -66,14 +73,13 @@ pub fn spawn_ui_thread(
 
     // buffer for top region
     let mut top_lines: Vec<String> = Vec::new();
+    let mut exit_ui = false;
 
     loop {
       if stop_all_rx.try_recv().is_ok() {
-        // drain ui_rx messages before exiting
         while let Ok(_) = ui_rx.try_recv() {}
         break;
       }
-
       let state = GLOBAL_STATE.get().expect("AppState not initialized");
       let conversation_paused = state.conversation_paused.load(Ordering::Relaxed);
 
@@ -82,7 +88,6 @@ pub fn spawn_ui_thread(
 
       while let Ok(msg) = ui_rx.try_recv() {
         if stop_all_rx.try_recv().is_ok() {
-          // drain ui_rx messages before exiting
           while let Ok(_) = ui_rx.try_recv() {}
           break;
         }
@@ -115,16 +120,36 @@ pub fn spawn_ui_thread(
               if !body.is_empty() {
                 print_inline_chunk(&mut out, &mut top_lines, body, terminal_height - 1, cols);
               }
+              // skip_stream = false;
             }
+
             "stream" => {
+              if STOP_STREAM.load(Ordering::Relaxed) {
+                break;
+              }
               print_inline_chunk(&mut out, &mut top_lines, msg_str, terminal_height - 1, cols);
+            }
+            "stop_ui" => {
+              print_line(&mut top_lines, "");
+              print_line(&mut top_lines, "🛑 USER interrupted");
+              while let Ok(_) = ui_rx.try_recv() {}
+              exit_ui = true;
+              STOP_STREAM.store(true, Ordering::Relaxed);
+              break;
             }
             _ => {}
           }
         }
         if stop_all_rx.try_recv().is_ok() {
+          while let Ok(_) = ui_rx.try_recv() {}
           break;
         }
+      }
+      if exit_ui {
+        // Reset flags and clear stream stop
+        STOP_STREAM.store(false, Ordering::Relaxed);
+        exit_ui = false;
+        continue;
       }
     }
   })
@@ -134,7 +159,7 @@ pub fn spawn_ui_thread(
 // ------------------------------------------------------------------
 
 // delay per character for smooth typing
-const STREAM_DELAY_MS: u64 = 10;
+const STREAM_DELAY_MS: u64 = 2;
 
 fn print_line(buffer: &mut Vec<String>, line: &str) {
   buffer.push(line.to_string());
@@ -156,7 +181,14 @@ fn print_inline_chunk<W: Write>(
   }
 
   for ch in chunk.chars() {
+    // Stop early if interrupted
+    if STOP_STREAM.load(Ordering::Relaxed) {
+      STOP_STREAM.store(false, Ordering::Relaxed);
+      return;
+    }
+
     // Wrap line if exceeds terminal width
+
     if get_visible_len_for(buffer.last().unwrap()) >= cols {
       buffer.push(String::new());
     }
@@ -187,7 +219,12 @@ fn print_inline_chunk<W: Write>(
 }
 
 fn redraw_top_region<W: Write>(out: &mut W, buffer: &[String], max_height: u16) {
-  let draw_height = max_height as usize;
+  let draw_height = if log::is_verbose() {
+    // keep space in verbose mode to see the logs
+    ((max_height as f32) / 1.6).round() as usize
+  } else {
+    max_height as usize
+  };
 
   // Determine the start line so the bottom of the buffer is visible
   let start = buffer.len().saturating_sub(draw_height);
@@ -261,12 +298,12 @@ fn update_bottom_bar(
   let conversation_paused = state.conversation_paused.load(Ordering::Relaxed);
   let status = if recording_paused {
     "⏸️".to_string()
-  } else if think {
-    format!("🤔 {}", spinner[*i % spinner.len()])
-  } else if speak {
-    format!("🎤 {}", spinner[*i % spinner.len()])
   } else if play {
     format!("🔊 {}", spinner[*i % spinner.len()])
+  } else if speak {
+    format!("🎤 {}", spinner[*i % spinner.len()])
+  } else if think {
+    format!("🤔 {}", spinner[*i % spinner.len()])
   } else {
     format!("🎤 {}", spinner[*i % spinner.len()])
   };

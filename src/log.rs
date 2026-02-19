@@ -14,8 +14,12 @@ pub fn set_verbose(v: bool) {
   VERBOSE.store(v, Ordering::Relaxed);
 }
 
+pub fn is_verbose() -> bool {
+  VERBOSE.load(Ordering::Relaxed)
+}
+
 pub fn log(msg_type: &str, msg: &str) {
-  if !VERBOSE.load(Ordering::Relaxed) && msg_type != "error" {
+  if !is_verbose() && msg_type != "error" {
     return;
   }
   let mut out = std::io::stdout();
