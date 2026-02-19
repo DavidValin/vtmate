@@ -3,8 +3,8 @@
 // ------------------------------------------------------------------
 
 use std::io::IsTerminal;
-use std::sync::atomic::AtomicU64;
 use std::sync::OnceLock;
+use std::sync::atomic::AtomicU64;
 use std::time::Instant;
 
 /// Global timestamp of last speech end (in ms since program start).
