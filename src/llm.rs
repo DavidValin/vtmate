@@ -2,63 +2,38 @@
 //  LLM handling
 // ------------------------------------------------------------------
 
+use std::sync::{Arc, atomic::AtomicU64};
 use crossbeam_channel::Receiver;
-use serde_json;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::thread;
+use reqwest::StatusCode;
+use futures_util::StreamExt;
+use bytes::Bytes;
 
-// API
-// ------------------------------------------------------------------
-
-// Compatibility Matrix for the unified streaming function
-//______________________________________________________________________________
-// Server       | Very Old        | Old                  | New                  |
-// ------------ | --------------- | -------------------- | -------------------- |
-// Ollama       | ❌ Pre-chat     | ✅ /api/chat         | ✅ /api+OpenAI       |
-// llama.cpp    | ❌ Legacy only  | ⚠ /completion only   | ✅ /v1/chat          |
-// Llamafile    | ❌ Legacy only  | ⚠ /completion only   | ✅ /completion+chat  |
-// OpenAI prox. | N/A             | ✅ /v1/chat          | ✅ /v1/chat          |
-//______________________________________________________________________________|
-// Notes:
-// - Streaming works for all supported endpoints.
-// - Roles supported in chat endpoints; legacy /completion needs manual prompt encoding.
-// - 'model' required for OpenAI/Ollama chat endpoints, ignored for legacy llama.cpp/Llamafile.
+/// Stream response from Llama/Ollama endpoints, fallback if one fails, and mid-stream cancellation support
 pub async fn llama_server_stream_response_into(
   prompt: &str,
-  llama_url: &str,
+  llama_host: &str,
   llama_model: &str,
-  stop_all_rx: Receiver<()>,
+  server_type: &str,
+  stop_all_rx: &Receiver<()>,
   interrupt_counter: Arc<AtomicU64>,
   expected_interrupt: u64,
   on_piece: &mut dyn FnMut(&str),
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+
   #[derive(Clone, Copy, Debug)]
-  enum ApiKind {
-    OaiChat,          // /v1/chat/completions
-    OllamaChat,       // /api/chat
-    LegacyCompletion, // llamafile /completion
-  }
+  enum ApiKind { OaiChat, OllamaGenerate, OllamaChat, LegacyCompletion }
 
   #[derive(serde::Serialize)]
-  struct ChatMessage<'a> {
-    role: &'a str,
-    content: &'a str,
-  }
+  struct ChatMessage<'a> { role: &'a str, content: &'a str }
 
   #[derive(serde::Serialize)]
-  struct OaiChatReq<'a> {
-    model: &'a str,
-    messages: Vec<ChatMessage<'a>>,
-    stream: bool,
-  }
+  struct OaiChatReq<'a> { model: &'a str, messages: Vec<ChatMessage<'a>>, stream: bool }
 
   #[derive(serde::Serialize)]
-  struct OllamaChatReq<'a> {
-    model: &'a str,
-    messages: Vec<ChatMessage<'a>>,
-    stream: bool,
-  }
+  struct OllamaGenerateReq<'a> { model: &'a str, prompt: &'a str, stream: bool, #[serde(skip_serializing_if = "Option::is_none")] max_tokens: Option<u32> }
+
+  #[derive(serde::Serialize)]
+  struct OllamaChatReq<'a> { model: &'a str, messages: Vec<ChatMessage<'a>>, stream: bool }
 
   #[derive(serde::Serialize)]
   struct LegacyCompletionReq<'a> {
@@ -88,289 +63,191 @@ pub async fn llama_server_stream_response_into(
     slot_id: i32,
   }
 
-  fn guess_kind_from_url(u: &str) -> ApiKind {
-    if u.contains("/completion") {
-      ApiKind::LegacyCompletion
-    } else if u.contains("/api/chat") {
-      ApiKind::OllamaChat
-    } else {
-      ApiKind::OaiChat
-    }
+  fn should_fallback_status(code: StatusCode) -> bool {
+    matches!(
+      code,
+      StatusCode::NOT_FOUND
+      | StatusCode::METHOD_NOT_ALLOWED
+      | StatusCode::UNPROCESSABLE_ENTITY
+      | StatusCode::BAD_REQUEST
+      | StatusCode::UNSUPPORTED_MEDIA_TYPE
+    )
   }
 
-  fn should_fallback_status(code: reqwest::StatusCode) -> bool {
-    code == reqwest::StatusCode::NOT_FOUND
-      || code == reqwest::StatusCode::METHOD_NOT_ALLOWED
-      || code == reqwest::StatusCode::UNPROCESSABLE_ENTITY
-      || code == reqwest::StatusCode::BAD_REQUEST
-      || code == reqwest::StatusCode::UNSUPPORTED_MEDIA_TYPE
-  }
-
-  fn candidates(url: &str) -> Vec<(String, ApiKind)> {
+  fn candidates(host: &str, server_type: &str) -> Vec<(String, ApiKind)> {
+    let base = host.trim_start_matches("http://").trim_start_matches("https://").trim_end_matches('/');
     let mut out = Vec::new();
-    out.push((url.to_string(), guess_kind_from_url(url)));
-
-    let base = base_from_full_url(url);
-
-    out.push((format!("{}/v1/chat/completions", base), ApiKind::OaiChat));
-    out.push((format!("{}/api/chat", base), ApiKind::OllamaChat));
-    out.push((format!("{}/completion", base), ApiKind::LegacyCompletion));
-
-    let mut seen = std::collections::HashSet::<String>::new();
+    match server_type {
+      "llama-server" => {
+        out.push((format!("http://{}/completion", base), ApiKind::LegacyCompletion));
+        out.push((format!("http://{}/api/chat", base), ApiKind::OllamaChat));
+      }
+      "ollama" => {
+        out.push((format!("http://{}/v1/generate", base), ApiKind::OllamaGenerate));
+        out.push((format!("http://{}/api/chat", base), ApiKind::OllamaChat));
+        out.push((format!("http://{}/v1/chat/completions", base), ApiKind::OaiChat));
+        out.push((format!("http://{}/completion", base), ApiKind::LegacyCompletion));
+      }
+      _ => {
+        out.push((format!("http://{}/v1/generate", base), ApiKind::OllamaGenerate));
+        out.push((format!("http://{}/api/chat", base), ApiKind::OllamaChat));
+        out.push((format!("http://{}/v1/chat/completions", base), ApiKind::OaiChat));
+        out.push((format!("http://{}/completion", base), ApiKind::LegacyCompletion));
+      }
+    }
     out
-      .into_iter()
-      .filter(|(u, _)| seen.insert(u.clone()))
-      .collect()
   }
 
   let client = reqwest::Client::new();
-
-  // Cancellation channel to abort HTTP request if stop signal received
-  let (cancel_tx, mut cancel_rx) = tokio::sync::broadcast::channel(1);
-  let stop_all_rx_thread = stop_all_rx.clone();
-  let stop_handle = thread::spawn(move || {
-    // Block on a cloned receiver to signal cancellation
-    let recv = stop_all_rx_thread;
-    while recv.recv().is_ok() {
-      let _ = cancel_tx.send(());
-      crate::log::log("info", "Cancelling LLM stream...");
-    }
-  });
-  let tries = candidates(llama_url);
+  let tries = candidates(llama_host, server_type);
   let mut last_err: Option<String> = None;
 
-  crate::log::log(
-    "info",
-    &format!("Calling endpoint (auto-detect) starting at {llama_url}"),
-  );
-
   for (url, kind) in tries {
-    if stop_all_rx.try_recv().is_ok()
-      || interrupt_counter.load(Ordering::SeqCst) != expected_interrupt
-    {
-      return Ok(());
+    if stop_all_rx.try_recv().is_ok() ||
+      interrupt_counter.load(std::sync::atomic::Ordering::SeqCst) != expected_interrupt {
+        return Ok(());
     }
+
+    crate::log::log("info", &format!("Trying endpoint: {}", url));
 
     let req = match kind {
       ApiKind::OaiChat => {
         let messages = vec![
-          ChatMessage {
-            role: "system",
-            content: "You are a helpful assistant.",
-          },
-          ChatMessage {
-            role: "user",
-            content: prompt,
-          },
+          ChatMessage { role: "system", content: "You are a helpful assistant." },
+          ChatMessage { role: "user", content: prompt },
         ];
-        client
-          .post(url.clone())
-          .header(reqwest::header::CONTENT_TYPE, "application/json")
-          .json(&OaiChatReq {
-            model: llama_model,
-            messages,
-            stream: true,
-          })
+        client.post(&url).json(&OaiChatReq { model: llama_model, messages, stream: true })
       }
-
+      ApiKind::OllamaGenerate => {
+        client.post(&url).json(&OllamaGenerateReq { model: llama_model, prompt, stream: true, max_tokens: Some(1024) })
+      }
       ApiKind::OllamaChat => {
         let messages = vec![
-          ChatMessage {
-            role: "system",
-            content: "You are a helpful assistant.",
-          },
-          ChatMessage {
-            role: "user",
-            content: prompt,
-          },
+          ChatMessage { role: "system", content: "You are a helpful assistant." },
+          ChatMessage { role: "user", content: prompt },
         ];
-        client
-          .post(url.clone())
-          .header(reqwest::header::CONTENT_TYPE, "application/json")
-          .json(&OllamaChatReq {
-            model: llama_model,
-            messages,
-            stream: true,
-          })
+        client.post(&url).json(&OllamaChatReq { model: llama_model, messages, stream: true })
       }
-
       ApiKind::LegacyCompletion => {
-        // Llamafile legacy payload
-        client
-          .post(url.clone())
-          .header(reqwest::header::CONTENT_TYPE, "application/json")
-          .json(&LegacyCompletionReq {
-            prompt,
-            stream: true,
-            n_predict: 400,
-            temperature: 0.7,
-            stop: vec!["</s>", "Assistant:", "User:"],
-            repeat_last_n: 256,
-            repeat_penalty: 1.18,
-            top_k: 40,
-            top_p: 0.95,
-            min_p: 0.05,
-            tfs_z: 1.0,
-            typical_p: 1.0,
-            presence_penalty: 0.0,
-            frequency_penalty: 0.0,
-            mirostat: 0,
-            mirostat_tau: 5.0,
-            mirostat_eta: 0.1,
-            grammar: "",
-            n_probs: 0,
-            min_keep: 0,
-            image_data: vec![],
-            cache_prompt: true,
-            api_key: "",
-            slot_id: -1,
-          })
+        client.post(&url).json(&LegacyCompletionReq {
+          prompt,
+          stream: true,
+          n_predict: 400,
+          temperature: 0.7,
+          stop: vec!["</s>", "Assistant:", "User:"],
+          repeat_last_n: 256,
+          repeat_penalty: 1.18,
+          top_k: 40,
+          top_p: 0.95,
+          min_p: 0.05,
+          tfs_z: 1.0,
+          typical_p: 1.0,
+          presence_penalty: 0.0,
+          frequency_penalty: 0.0,
+          mirostat: 0,
+          mirostat_tau: 5.0,
+          mirostat_eta: 0.1,
+          grammar: "",
+          n_probs: 0,
+          min_keep: 0,
+          image_data: vec![],
+          cache_prompt: true,
+          api_key: "",
+          slot_id: -1,
+        })
       }
     };
 
-    let resp = tokio::select! {
-      res = req.send() => {
-        match res {
-          Ok(r) => r,
-          Err(e) => {
-            last_err = Some(format!("Request to {url} failed: {e}"));
-            continue;
-          }
-        }
-      },
-      _ = cancel_rx.recv() => {
-        crate::log::log("info", "Cancelling LLM stream...");
-        return Ok(());
+    let resp = match tokio::time::timeout(std::time::Duration::from_secs(3), req.send()).await {
+      Ok(Ok(r)) => r,
+      Ok(Err(e)) => {
+        last_err = Some(format!("Request to {} failed: {}", url, e));
+        log::warn!("{}", last_err.as_ref().unwrap());
+        continue;
+      }
+      Err(_) => {
+        last_err = Some(format!("Request to {} timed out", url));
+        log::warn!("{}", last_err.as_ref().unwrap());
+        continue;
       }
     };
 
     if !resp.status().is_success() {
       let status = resp.status();
-      let msg = format!("Endpoint {url} returned HTTP {status}");
-      last_err = Some(msg.clone());
-      if should_fallback_status(status) {
-        continue;
-      } else {
-        return Err(msg.into());
-      }
+      last_err = Some(format!("Endpoint {} returned HTTP {}", url, status));
+      log::warn!("{}", last_err.as_ref().unwrap());
+      if should_fallback_status(status) { continue; } else { return Err(last_err.clone().unwrap().into()); }
     }
 
-    crate::log::log("info", &format!("Using endpoint: {url}"));
-    crate::log::log("info", "Streaming response...");
+    crate::log::log("info", &format!("Streaming response from: {}", url));
+    // inside your endpoint loop
+    let mut stream = resp.bytes_stream();
 
-    let resp_text = resp.text().await?;
-    let lines = resp_text.lines();
-
-    for line in lines {
-      if cancel_rx.try_recv().is_ok() {
-        crate::log::log("info", "Cancelling LLM stream...");
-        return Ok(());
-      }
-      if stop_all_rx.try_recv().is_ok() {
-        crate::log::log("info", "Cancelling LLM stream...");
-        return Ok(());
-      }
-      if interrupt_counter.load(Ordering::SeqCst) != expected_interrupt {
+    while let Some(chunk_result) = stream.next().await {
+      // check stop signal mid-stream
+      if stop_all_rx.try_recv().is_ok() ||
+        interrupt_counter.load(std::sync::atomic::Ordering::SeqCst) != expected_interrupt
+      {
         return Ok(());
       }
 
-      let trimmed = line.trim();
-      if trimmed.is_empty() {
-        continue;
-      }
-
-      let payload = trimmed.strip_prefix("data:").unwrap_or(trimmed).trim();
-      if payload == "[DONE]" {
-        return Ok(());
-      }
-
-      let v: serde_json::Value = match serde_json::from_str(payload) {
-        Ok(v) => v,
-        Err(_) => continue,
+      let chunk: Bytes = match chunk_result {
+        Ok(b) => b,
+        Err(e) => {
+          crate::log::log("error", &format!("Streaming error at {}: {}", url, e));
+          break; // fallback to next endpoint
+        }
       };
 
-      match kind {
-        ApiKind::OaiChat | ApiKind::OllamaChat => {
-          if let Some(choices) = v.get("choices").and_then(|c| c.as_array()) {
-            for choice in choices {
-              if let Some(delta) = choice.get("delta") {
-                if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
-                  if !content.is_empty() {
-                    on_piece(content);
+      if let Ok(text) = std::str::from_utf8(&chunk) {
+        // crate::log::log("debug", &format!("chunk: {}", text));
+        for line in text.lines() {
+          let payload = line.trim().strip_prefix("data:").unwrap_or(line).trim();
+          if payload == "[DONE]" { return Ok(()); }
+
+          // parse JSON safely
+          if let Ok(v) = serde_json::from_str::<serde_json::Value>(payload) {
+            // Handle new Llama3.2 style: {"message":{"content":...}}
+            if let Some(message) = v.get("message") {
+              if let Some(content) = message.get("content").and_then(|c| c.as_str()) {
+                if !content.is_empty() { on_piece(content); }
+              }
+            } else {
+              match kind {
+                ApiKind::OaiChat | ApiKind::OllamaChat | ApiKind::OllamaGenerate => {
+                  if let Some(choices) = v.get("choices").and_then(|c| c.as_array()) {
+                    for choice in choices {
+                      if let Some(delta) = choice.get("delta") {
+                        if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
+                          if !content.is_empty() { on_piece(content); }
+                        }
+                      }
+                      if choice.get("finish_reason").and_then(|r| r.as_str()) == Some("stop") {
+                        return Ok(());
+                      }
+                    }
+                  }
+                  if v.get("done").and_then(|x| x.as_bool()) == Some(true)
+                    || v.get("status").and_then(|x| x.as_str()) == Some("completed")
+                  {
+                    return Ok(());
                   }
                 }
-              }
-              if choice.get("finish_reason").and_then(|r| r.as_str()) == Some("stop") {
-                return Ok(());
-              }
-            }
-          }
-          if let Some(msg) = v.get("message").and_then(|m| m.as_object()) {
-            if let Some(content) = msg.get("content").and_then(|c| c.as_str()) {
-              if !content.is_empty() {
-                on_piece(content);
+                ApiKind::LegacyCompletion => {
+                  if let Some(content) = v.get("content").and_then(|c| c.as_str()) { on_piece(content); }
+                  if v.get("stop").and_then(|s| s.as_bool()) == Some(true) { return Ok(()); }
+                }
               }
             }
-          }
-          if v.get("done").and_then(|x| x.as_bool()) == Some(true)
-            || v.get("status").and_then(|x| x.as_str()) == Some("completed")
-          {
-            return Ok(());
-          }
-        }
-
-        ApiKind::LegacyCompletion => {
-          if let Some(content) = v.get("content").and_then(|c| c.as_str()) {
-            if !content.is_empty() {
-              on_piece(content);
-            }
-          }
-          if v.get("stop").and_then(|s| s.as_bool()) == Some(true) {
-            return Ok(());
           }
         }
       }
     }
+
+    // success streaming completed
     return Ok(());
   }
 
-  // Ensure cancellation thread is joined before exiting
-  let _ = stop_handle.join();
-
-  Err(
-    last_err
-      .unwrap_or_else(|| "No endpoint candidates succeeded".to_string())
-      .into(),
-  )
-}
-
-// PRIVATE
-// ------------------------------------------------------------------
-
-fn strip_trailing_slash(s: &str) -> &str {
-  s.strip_suffix('/').unwrap_or(s)
-}
-
-pub fn base_from_full_url(u: &str) -> String {
-  let u = strip_trailing_slash(u);
-
-  for suffix in [
-    // Ollama native
-    "/api/generate",
-    "/api/chat",
-    "/api",
-    // OpenAI-compatible
-    "/v1/chat/completions",
-    "/v1/completions",
-    "/v1/responses",
-    "/v1",
-    // llama.cpp legacy
-    "/completion",
-  ] {
-    if u.ends_with(suffix) {
-      return u[..u.len() - suffix.len()].to_string();
-    }
-  }
-
-  u.to_string()
+  // all endpoints failed
+  Err(last_err.unwrap_or_else(|| "No endpoint candidates succeeded".to_string()).into())
 }
