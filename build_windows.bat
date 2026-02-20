@@ -139,8 +139,9 @@ if not exist "%ESPEAK_INSTALL%\lib\espeak-ng.lib" (
           -DCMAKE_C_FLAGS="/MD" ^
           -DCMAKE_CXX_FLAGS="/MD"
 
+    REM Disable delayed expansion only for the install step to avoid ! in filenames
     endlocal
-    cmake --build "%ESPEAK_BUILD%" --config Release --target INSTALL || exit /b 1
+    cmd /V:OFF /C cmake --build "%ESPEAK_BUILD%" --config Release --target INSTALL || exit /b 1
     setlocal EnableDelayedExpansion
 )
 
