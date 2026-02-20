@@ -52,7 +52,7 @@ pub struct Args {
   pub language: String,
 
   /// Voice to use for TTS
-  #[arg(long, value_name = "VOICE")]
+  #[arg(long, env = "VOICE")]
   pub voice: Option<String>,
 
   /// Peak threshold for detecting user speech while assistant is speaking (0..1)
@@ -98,9 +98,9 @@ const SOUND_THRESHOLD_PEAK_DEFAULT: f32 = 0.10;
 pub const HANGOVER_MS_DEFAULT: u64 = 300;
 const END_SILENCE_MS_DEFAULT: u64 = 1200;
 pub const MIN_UTTERANCE_MS_DEFAULT: u64 = 300;
-pub const OLLAMA_URL_DEFAULT: &str = "http://localhost:11434/v1/chat/completions";
+pub const OLLAMA_URL_DEFAULT: &str = "http://localhost:11434";
 pub const MODEL_DEFAULT: &str = "llama3.2:3b";
-pub const LLAMASERVER_URL_DEFAULT: &str = "http://127.0.0.1:8080/completion";
+pub const LLAMASERVER_URL_DEFAULT: &str = "http://127.0.0.1:8080";
 pub const WHISPER_MODEL_PATH: &str = "~/.whisper-models/ggml-tiny.bin";
 const OPENTTS_BASE_URL_DEFAULT: &str = "http://127.0.0.1:5500/api/tts?&vocoder=high&denoiserStrength=0.005&&speakerId=&ssml=false&ssmlNumbers=true&ssmlDates=true&ssmlCurrency=true&cache=false";
 

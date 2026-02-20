@@ -34,7 +34,7 @@
 - 📌 Interrupt: `press "<ESCAPE>" TWICE to interrupt the current response alltogether`
 - 📌 Push to Talk mode (PTT): `run it with --ptt and keep <SPACE> while talking and release to stop recording`
 - 📌 Voice speed change: `change the agent voice speed by pressing <ARROW_UP> / <ARROW_DOWN> (applicable to next response)`
-- 📌 Voice change: `change the agent voice by pressing <ARROW_LEFT> / <ARROW_RIGHT> (applicable to next response)`
+- 📌 Voice change (realtime): `change the agent voice by pressing <ARROW_LEFT> / <ARROW_RIGHT> (applicable to next response)`
 - 📌 Integrated `whisper`
 - 📌 Integrated `kokoro TTS` system
 - 📌 Interface with `OpenTTS` system
@@ -138,7 +138,7 @@ ai-mate \
   --end-silence-ms 850 \
   --whisper-model-path ~/.whisper-models/ggml-tiny.bin \
   --model "llama3.2:3b" \
-  --ollama-url "http://localhost:11434/api/generate"
+  --ollama-url "http://localhost:11434"
 ```
 
 You can just override a specific variable, for example:
