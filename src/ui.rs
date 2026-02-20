@@ -124,6 +124,7 @@ pub fn spawn_ui_thread(
             }
 
             "stream" => {
+              // Skip if stream rendering is paused but reset flag
               if STOP_STREAM.load(Ordering::Relaxed) {
                 break;
               }
@@ -223,7 +224,7 @@ fn redraw_top_region<W: Write>(out: &mut W, buffer: &[String], max_height: u16) 
     // keep space in verbose mode to see the logs
     ((max_height as f32) / 1.6).round() as usize
   } else {
-    max_height as usize
+    max_height.saturating_sub(2) as usize // leave 2 lines space for error logs
   };
 
   // Determine the start line so the bottom of the buffer is visible
