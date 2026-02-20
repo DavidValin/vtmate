@@ -11,7 +11,7 @@ ESPEAK_ARCHIVE="${ASSETS_DIR}/espeak-ng-data.tar.gz"
 DO_PACKAGE=1
 
 # macOS optional
-MAC_WITH_OPENBLAS="${MAC_WITH_OPENBLAS:-0}"
+WITH_OPENBLAS="${WITH_OPENBLAS:-1}"
 
 usage() {
   cat <<'USAGE'
@@ -19,9 +19,10 @@ Usage:
   ./build_macos.sh [--skip-package]
 
 Env:
-  MAC_WITH_OPENBLAS=0|1 (macos) default 0
+  WITH_OPENBLAS=0|1 (macOS) default 1
 Notes:
   - macOS builds always enable Metal.
+  - OpenBLAS is statically linked for portability.
 USAGE
 }
 
@@ -49,12 +50,13 @@ VERSION="$(
 mkdir -p "${DIST_DIR}" "${PKG_DIR}" "${PROJECT_ROOT}/target-cross" "${ASSETS_DIR}"
 
 echo "Version: ${VERSION}"
-echo "macOS: Metal always, MAC_WITH_OPENBLAS=${MAC_WITH_OPENBLAS}"
+echo "macOS: Metal always, WITH_OPENBLAS=${WITH_OPENBLAS}"
 
 FEATURES_COMMON="whisper-logs"
 FEATURES_MACOS_METAL="${FEATURES_COMMON},whisper-metal"
 FEATURES_MACOS_METAL_OPENBLAS="${FEATURES_COMMON},whisper-metal,whisper-openblas"
 
+# --- Helper functions ---
 sha256_file() {
   local file="$1" out="$2"
   if command -v shasum >/dev/null 2>&1; then
@@ -83,7 +85,7 @@ package_one() {
   sha256_file "$tgz" "$sha"
 }
 
-# Embedded eSpeak asset generation (via Docker if missing)
+# --- Embedded eSpeak asset generation ---
 docker_ok=0
 command -v docker >/dev/null 2>&1 && docker_ok=1
 ensure_espeak_data_archive() {
@@ -143,7 +145,7 @@ arch="$(uname -m)"
 
 # --- Build Metal variant ---
 echo "== macOS build [metal] features: ${FEATURES_MACOS_METAL} =="
-export RUSTFLAGS="-C codegen-units=1 -C opt-level=2 -C link-arg=-Wl,-dead_strip"
+export RUSTFLAGS="-C codegen-units=1 -C opt-level=3 -C link-arg=-Wl,-dead_strip"
 export CARGO_PROFILE_RELEASE_LTO=false
 export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
 export CARGO_PROFILE_RELEASE_DEBUG=false
@@ -157,27 +159,65 @@ chmod +x "$out" || true
 add_artifact "$out"
 echo "✔ Built: $out"
 
-# --- Build Metal + OpenBLAS variant (optional) ---
-if [[ "${MAC_WITH_OPENBLAS}" == "1" ]]; then
+# --- Build Metal + OpenBLAS variant (optional, statically linked portable) ---
+if [[ "${WITH_OPENBLAS}" == "1" ]]; then
   echo "== macOS build [metal-openblas] features: ${FEATURES_MACOS_METAL_OPENBLAS} =="
 
-  # Detect OpenBLAS include path
-  if [ -d /opt/homebrew/include/openblas ]; then
-    export BLAS_INCLUDE_DIRS=/opt/homebrew/include/openblas
-  elif [ -d /usr/local/include/openblas ]; then
-    export BLAS_INCLUDE_DIRS=/usr/local/include/openblas
+  PREBUILT_OPENBLAS_DIR="${PROJECT_ROOT}/assets/openblas-macos-11-portable"
+  OPENBLAS_LIB="${PREBUILT_OPENBLAS_DIR}/lib/libopenblas.a"
+
+  mkdir -p "${PREBUILT_OPENBLAS_DIR}/lib" "${PREBUILT_OPENBLAS_DIR}/include"
+
+  # Rebuild OpenBLAS if missing or invalid
+  rebuild_openblas=0
+  if [[ ! -f "${OPENBLAS_LIB}" ]]; then
+    rebuild_openblas=1
   else
-    export BLAS_INCLUDE_DIRS=/usr/include
+    if ! file "${OPENBLAS_LIB}" | grep -q "Mach-O 64-bit"; then
+      echo "⚠ Found libopenblas.a but it is not a valid Mach-O archive; rebuilding..."
+      rebuild_openblas=1
+    fi
   fi
 
+  if [[ "${rebuild_openblas}" -eq 1 ]]; then
+      echo "✔ Building OpenBLAS locally for macOS ARM64 (skipping tests)..."
+      tmp_build="$(mktemp -d)"
+      git clone --depth 1 https://github.com/xianyi/OpenBLAS.git "$tmp_build/OpenBLAS"
+      pushd "$tmp_build/OpenBLAS" >/dev/null
+      make TARGET=ARMV8 BINARY=64 CC=clang FC=gfortran NO_SHARED=1 NO_LAPACK=1 NO_TEST=1 \
+          CFLAGS="-mmacosx-version-min=11.0" LDFLAGS="-mmacosx-version-min=11.0"
+      make PREFIX="${PREBUILT_OPENBLAS_DIR}" install
+      popd >/dev/null
+      rm -rf "$tmp_build"
+      [[ -f "${OPENBLAS_LIB}" ]] || { echo "ERROR: OpenBLAS build failed"; exit 1; }
+      echo "✔ OpenBLAS built and installed at ${PREBUILT_OPENBLAS_DIR}"
+  fi
+
+  export BLAS_INCLUDE_DIRS="${PREBUILT_OPENBLAS_DIR}/include"
+  export OPENBLAS_STATIC="${OPENBLAS_LIB}"
+
+  export MACOSX_DEPLOYMENT_TARGET=11.0
+  export RUSTFLAGS="-C link-arg=-Wl,-all_load -C link-arg=${OPENBLAS_STATIC} -C codegen-units=1 -C opt-level=3 -C link-arg=-Wl,-dead_strip"
+
+  # --- Ensure whisper-rs-sys CMake finds OpenBLAS ---
+  export GGML_BLAS_VENDOR=OpenBLAS
+  export BLAS_LIBRARIES="${OPENBLAS_LIB}"
+  export BLAS_INCLUDE_DIRS="${PREBUILT_OPENBLAS_DIR}/include"
+  export CMAKE_PREFIX_PATH="${PREBUILT_OPENBLAS_DIR}"
+  export BLAS_DIR="${PREBUILT_OPENBLAS_DIR}"
+
+  # Clear previous CMake cache so BLAS is detected correctly
+  rm -rf "${PROJECT_ROOT}/target-cross/macos-${arch}-metal-openblas/release/build/whisper-rs-sys-"*
+
+  # Build Metal + OpenBLAS variant
   CARGO_TARGET_DIR="${PROJECT_ROOT}/target-cross/macos-${arch}-metal-openblas" \
-    cargo build --release --no-default-features --features "${FEATURES_MACOS_METAL_OPENBLAS}"
+    cargo build --release --no-default-features --features "${FEATURES_MACOS_METAL_OPENBLAS}" --verbose
 
   out="${DIST_DIR}/${BIN_NAME}-${VERSION}-macos-${arch}-metal-openblas"
   cp "${PROJECT_ROOT}/target-cross/macos-${arch}-metal-openblas/release/${BIN_NAME}" "$out"
   chmod +x "$out" || true
   add_artifact "$out"
-  echo "✔ Built: $out"
+  echo "✔ Built (statically linked OpenBLAS, portable macOS 11+): $out"
 fi
 
 # --- Package ---
