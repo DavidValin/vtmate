@@ -41,7 +41,9 @@ where powershell >nul 2>nul || (echo ERROR: powershell not found & exit /b 1)
 REM ==========================================================
 REM USE DYNAMIC RUST CRT TO MATCH ONNX /MD
 REM ==========================================================
-set "RUSTFLAGS="
+REM Set Rust optimization and single-thread compilation
+set "RUSTFLAGS=-C opt-level=3"
+set "CARGO_BUILD_JOBS=1"
 
 REM ==========================================================
 REM DETERMINE VARIANT
