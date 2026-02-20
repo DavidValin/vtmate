@@ -178,15 +178,27 @@ ai-mate --help
 
 ***Linux***
 - (require docker for building the image)
+- Openblas is always included in all variants by default
+
+Examples:
 ```
-LINUX_WITH_VULKAN=0 ./build_linux.sh
+WITH_CUDA=0 ./build_linux.sh --arch amd64
+WITH_CUDA=1 ./build_linux.sh --arch amd64
+LINUX_WITH_VULKAN=1 WITH_CUDA=0 ./build_linux.sh --arch amd64
+
+WITH_CUDA=0 ./build_linux.sh --arch arm64
+LINUX_WITH_VULKAN=1 WITH_CUDA=0 ./build_linux.sh --arch arm64
 ```
 
 ***Windows***
 - You can only build the Windows build from windows
 - You need to install [Visual CPP Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools)
+
 ```
-set WIN_WITH_VULKAN=0 && build_windows.bat
+build_windows.bat cpu
+build_windows.bat cuda
+build_windows.bat openblas
+build_windows.bat vulkan
 ```
 
 ## Tricks
