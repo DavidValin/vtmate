@@ -41,7 +41,6 @@ where powershell >nul 2>nul || (echo ERROR: powershell not found & exit /b 1)
 REM ==========================================================
 REM USE DYNAMIC RUST CRT TO MATCH ONNX /MD
 REM ==========================================================
-REM Set Rust optimization and single-thread compilation
 set "RUSTFLAGS=-C opt-level=3"
 set "CARGO_BUILD_JOBS=1"
 
@@ -51,7 +50,6 @@ REM ==========================================================
 set "VARIANT=%~1"
 if "%VARIANT%"=="" set "VARIANT=cpu"
 
-REM Default OpenBLAS off
 set WITH_OPENBLAS=0
 
 if "%VARIANT%"=="cpu" (
@@ -68,7 +66,6 @@ if "%VARIANT%"=="cpu" (
     exit /b 1
 )
 
-REM Optionally enable OpenBLAS for any variant
 if "%~2"=="openblas" set WITH_OPENBLAS=1
 
 echo.
@@ -148,7 +145,7 @@ REM ==========================================================
 REM BUILD OPENBLAS STATIC AND LINK (OPTIONAL)
 REM ==========================================================
 if "%WITH_OPENBLAS%"=="1" (
-    if not exist "%OPENBLAS_DIR%\lib\libopenblas.lib" (
+    if not exist "%OPENBLAS_DIR%\install\lib\libopenblas.lib" (
         echo === Building OpenBLAS static with MSVC ===
         if not exist "%OPENBLAS_DIR%" git clone --branch v0.3.30 https://github.com/xianyi/OpenBLAS "%OPENBLAS_DIR%" || exit /b 1
         mkdir "%OPENBLAS_DIR%\build" 2>nul
@@ -162,10 +159,13 @@ if "%WITH_OPENBLAS%"=="1" (
         cmake --build "%OPENBLAS_DIR%\build" --config Release --target INSTALL || exit /b 1
         echo OpenBLAS static library ready.
     )
-    set "OPENBLAS_LIB_DIR=%OPENBLAS_DIR%\install\lib"
-    set "OPENBLAS_INCLUDE_DIR=%OPENBLAS_DIR%\install\include"
-    REM Remove any invalid -C include
-    set "RUSTFLAGS=-C opt-level=3"
+
+    REM ==========================================================
+    REM EXPORT ENVIRONMENT VARIABLES FOR whisper-rs-sys
+    REM ==========================================================
+    set "BLAS_INCLUDE_DIRS=%OPENBLAS_DIR%\install\include"
+    set "BLAS_LIB_DIRS=%OPENBLAS_DIR%\install\lib"
+    set "BLAS_LIB=openblas"
 )
 
 REM ==========================================================
@@ -201,6 +201,8 @@ if not exist "%ONNX_BUILD%\Release\onnxruntime.lib" (
           -DBUILD_TESTING=OFF
     cmake --build "%ONNX_BUILD%" --config Release || exit /b 1
 )
+
+set "RUSTFLAGS=-C opt-level=3"
 
 REM ==========================================================
 REM EXPORT ENVIRONMENT
