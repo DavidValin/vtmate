@@ -118,7 +118,7 @@ if "%WITH_CUDA%"=="1" (
         setlocal EnableDelayedExpansion
         for %%I in (nvcc.exe) do set "CUDA_BIN=%%~dp$PATH:I"
         for %%I in ("!CUDA_BIN!..\") do set "CUDA_PATH=%%~fI"
-        endlocal & set "CUDAToolkit_ROOT=%CUDA_PATH%"
+        set "CUDAToolkit_ROOT=%CUDA_PATH%"
     )
     echo CUDA_PATH = %CUDA_PATH%
 )
