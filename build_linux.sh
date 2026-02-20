@@ -15,7 +15,6 @@ SEL_ARCH="all"   # amd64,arm64,all
 # Linux variant toggles
 WITH_CUDA="${WITH_CUDA:-0}"          # amd64 only
 WITH_ROCM="${WITH_ROCM:-0}"          # amd64 only
-WITH_OPENBLAS="${WITH_OPENBLAS:-1}"
 WITH_VULKAN="${WITH_VULKAN:-0}"
 
 # Host cache mounts (Linux Docker)
@@ -25,6 +24,9 @@ HOST_WHISPER_MODELS="${HOST_HOME}/.whisper-models"
 CONT_K_CACHE="/root/.cache/k"
 CONT_WHISPER_MODELS="/root/.whisper-models"
 
+# -----------------------------
+# Helper functions (usage, normalize list, etc.)
+# -----------------------------
 usage() {
   cat <<'USAGE'
 Usage:
@@ -35,8 +37,7 @@ Usage:
 Env:
   WITH_CUDA=0|1           (amd64) default 0
   WITH_ROCM=0|1           (amd64) default 0
-  WITH_OPENBLAS=0|1 default 1
-  WITH_VULKAN=0|1   default 0
+  WITH_VULKAN=0|1         default 0
 USAGE
 }
 
@@ -54,7 +55,6 @@ list_has() {
   [[ -n "$list" && -n "$tok" && ",${list}," == *",${tok},"* ]]
 }
 want_arch() { [[ "${SEL_ARCH}" == "all" ]] && return 0; list_has "${SEL_ARCH}" "$1"; }
-
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -83,20 +83,20 @@ mkdir -p "${HOST_K_CACHE}" "${HOST_WHISPER_MODELS}"
 echo "Version: ${VERSION}"
 echo "Linux: arch=${SEL_ARCH}"
 echo "Linux amd64: WITH_CUDA=${WITH_CUDA} WITH_ROCM=${WITH_ROCM}"
-echo "Linux variants: OPENBLAS=${WITH_OPENBLAS} VULKAN=${WITH_VULKAN}"
 echo "Cache mounts:"
 echo "  ${HOST_K_CACHE} -> ${CONT_K_CACHE}"
 echo "  ${HOST_WHISPER_MODELS} -> ${CONT_WHISPER_MODELS}"
 
 # Features
-FEATURES_COMMON="whisper-logs"
+FEATURES_COMMON="whisper-openblas"
 FEATURES_CPU="${FEATURES_COMMON}"
-FEATURES_OPENBLAS="${FEATURES_COMMON},whisper-openblas"
 FEATURES_VULKAN="${FEATURES_COMMON},whisper-vulkan"
 FEATURES_CUDA="${FEATURES_COMMON},whisper-cuda"
 FEATURES_ROCM="${FEATURES_COMMON},whisper-hipblas"
 
+# -----------------------------
 # Packaging helpers
+# -----------------------------
 sha256_file() {
   local file="$1" out="$2"
   if command -v shasum >/dev/null 2>&1; then
@@ -125,7 +125,9 @@ package_one() {
   sha256_file "$tgz" "$sha"
 }
 
+# -----------------------------
 # Docker helpers
+# -----------------------------
 docker_ok=0
 command -v docker >/dev/null 2>&1 && docker_ok=1
 can_run_amd64() { docker run --rm --platform=linux/amd64 alpine:3.19 uname -m >/dev/null 2>&1; }
@@ -145,12 +147,10 @@ ensure_espeak_data_archive() {
     echo "ERROR: Docker not found and ${ESPEAK_ARCHIVE} is missing."
     exit 1
   fi
-
   local tmp img df
   tmp="$(mktemp -d)"
   df="${tmp}/Dockerfile.espeak.asset"
   img="local/${BIN_NAME}-espeak-asset:${VERSION}-$$"
-
   cat > "$df" <<'DOCKERFILE'
 FROM ubuntu:noble
 ENV DEBIAN_FRONTEND=noninteractive
@@ -162,7 +162,6 @@ DOCKERFILE
 
   local build_args=(--pull)
   [[ "${DOCKER_NO_CACHE}" -eq 1 ]] && build_args+=(--no-cache)
-
   docker build "${build_args[@]}" --platform=linux/amd64 -f "$df" -t "$img" "$tmp"
 
   docker run --rm --platform=linux/amd64 \
@@ -178,11 +177,70 @@ DOCKERFILE
 
   docker image rm -f "$img" >/dev/null 2>&1 || true
   rm -rf "$tmp" >/dev/null 2>&1 || true
-
   [[ -f "${ESPEAK_ARCHIVE}" ]] || { echo "ERROR: failed to generate ${ESPEAK_ARCHIVE}"; exit 1; }
   echo "✔ Generated: ${ESPEAK_ARCHIVE}"
 }
 
+# -----------------------------
+# eSpeak-ng static build
+# -----------------------------
+build_static_espeak_ng() {
+  local arch="$1" docker_platform="$2" target_dir="/work/deps/espeak-ng-install"
+  echo "== Building static eSpeak-ng for ${arch} =="
+
+  local tmp df img CACHE_BUST
+  tmp="$(mktemp -d)"
+  df="${tmp}/Dockerfile.espeak.static"
+  CACHE_BUST="$(date +%s)"
+  img="local/espeak-ng-static:${arch}-${VERSION}-$$"
+
+  cat > "$df" <<DOCKERFILE
+FROM ubuntu:noble
+ENV DEBIAN_FRONTEND=noninteractive
+ARG CACHE_BUST=${CACHE_BUST}
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential git cmake pkg-config libasound2-dev ca-certificates \
+ && update-ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /work
+RUN git clone --depth 1 https://github.com/espeak-ng/espeak-ng.git /work/espeak-ng
+
+WORKDIR /work/espeak-ng
+RUN mkdir build && cd build && \
+    cmake -DCMAKE_BUILD_TYPE=Release \
+      -DBUILD_SHARED_LIBS=OFF \
+      -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+      -DCMAKE_SKIP_RPATH=ON \
+      -DCMAKE_INSTALL_RPATH="" \
+      -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=OFF \
+      -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+      -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+      -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
+      -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY \
+      -DCMAKE_INSTALL_PREFIX=/work/deps/espeak-ng-install .. && \
+    make -j$(nproc) && \
+    make install
+
+RUN mkdir -p /out/espeak-ng-data && \
+    cp -a ${target_dir}/share/espeak-ng-data/* /out/espeak-ng-data/
+DOCKERFILE
+
+  local build_args=(--pull)
+  [[ "${DOCKER_NO_CACHE}" -eq 1 ]] && build_args+=(--no-cache)
+
+  # Mount host deps folder so the dictionary archive is copied out
+  docker build "${build_args[@]}" --platform="${docker_platform}" -f "$df" -t "$img" "$tmp"
+  docker run --rm --platform="${docker_platform}" -v "${PROJECT_ROOT}/target-cross:/out" "$img"
+  docker image rm -f "$img" >/dev/null 2>&1 || true
+  rm -rf "$tmp"
+  echo "✔ eSpeak-ng static build complete for ${arch}"
+}
+
+# -----------------------------
+# Linux copy helper
+# -----------------------------
 ARTIFACTS=()
 add_artifact() { [[ -f "$1" ]] && ARTIFACTS+=("$1"); }
 
@@ -203,6 +261,9 @@ build_linux_amd64_docker_variants() {
   [[ "$docker_ok" -eq 1 ]] || { echo "Skipping linux/amd64: docker not found."; return 0; }
   [[ "${FORCE_AMD64_DOCKER}" -eq 1 ]] || { echo "Skipping linux/amd64: cannot run linux/amd64 containers."; return 0; }
 
+  build_static_espeak_ng amd64 linux/amd64
+
+
   local tmp df img CACHE_BUST
   tmp="$(mktemp -d)"
   df="${tmp}/Dockerfile.linux.amd64"
@@ -214,6 +275,7 @@ FROM ubuntu:noble
 ENV DEBIAN_FRONTEND=noninteractive
 ARG CACHE_BUST=${CACHE_BUST}
 
+# Install build tools + OpenBLAS
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl git xz-utils \
     build-essential pkg-config \
@@ -224,7 +286,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libasound2-dev \
     libxdo-dev \
     libx11-dev \
+    libblas-dev \
     libopenblas-dev \
+    gfortran \
     libvulkan-dev vulkan-tools vulkan-utility-libraries-dev \
     spirv-tools glslang-tools \
  && rm -rf /var/lib/apt/lists/*
@@ -235,6 +299,7 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*; \
     (command -v glslc >/dev/null 2>&1 && echo "glslc installed") || echo "glslc not available"
 
+# CUDA (dynamic only)
 ARG WITH_CUDA=1
 RUN if [ "\$WITH_CUDA" = "1" ]; then \
       apt-get update && apt-get install -y --no-install-recommends nvidia-cuda-toolkit && \
@@ -247,8 +312,10 @@ RUN if [ "\$WITH_ROCM" = "1" ]; then \
       rm -rf /var/lib/apt/lists/* ; \
     fi
 
+# Rust + musl target for static linking
 RUN curl -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:\${PATH}"
+RUN rustup update stable
 RUN rustup target add x86_64-unknown-linux-gnu
 WORKDIR /work
 DOCKERFILE
@@ -268,10 +335,11 @@ DOCKERFILE
     -v "${PROJECT_ROOT}:/work" -w /work \
     -v "${HOST_K_CACHE}:${CONT_K_CACHE}" \
     -v "${HOST_WHISPER_MODELS}:${CONT_WHISPER_MODELS}" \
-    -e WITH_OPENBLAS="${WITH_OPENBLAS}" \
     -e WITH_VULKAN="${WITH_VULKAN}" \
     -e WITH_CUDA="${WITH_CUDA}" \
     -e WITH_ROCM="${WITH_ROCM}" \
+    -e CMAKE_SKIP_RPATH=ON \
+    -e CMAKE_INSTALL_RPATH_USE_LINK_PATH=OFF \
     "$img" \
     bash -lc '
       set -euo pipefail
@@ -286,12 +354,21 @@ DOCKERFILE
 
         echo "---- Building linux/${ARCH} [$variant] features: $feats"
 
-        export RUSTFLAGS="-C codegen-units=1 -C opt-level=2 -C link-arg=-Wl,--gc-sections -C link-arg=-Wl,--icf=safe"
+        # Force static linking for system libraries except CUDA
+        export OPENBLAS_STATIC=1
+        export GGML_BLAS_VENDOR=OpenBLAS
+        export BLAS_INCLUDE_DIRS=/usr/include
+        export BLAS_LIBRARIES=/usr/lib/x86_64-linux-gnu/libopenblas.a
+        export CMAKE_PREFIX_PATH=/usr/include:/usr/lib/x86_64-linux-gnu
+
+        export RUSTFLAGS="-C target-feature=+crt-static -C codegen-units=1 -C opt-level=3 -C link-arg=-Wl,-static -C link-arg=-Wl,--gc-sections -C link-arg=-Wl,--icf=safe"
         export CARGO_PROFILE_RELEASE_LTO=false
         export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
         export CARGO_PROFILE_RELEASE_DEBUG=false
         export CARGO_PROFILE_RELEASE_STRIP=symbols
         export CARGO_PROFILE_RELEASE_INCREMENTAL=false
+
+        export ESPEAK_NG_DIR="/work/deps/espeak-ng-install"
 
         CARGO_TARGET_DIR="$ctd" \
         cargo build --release --target "$target" --no-default-features --features "$feats"
@@ -299,35 +376,20 @@ DOCKERFILE
 
       build_variant cpu "'"${FEATURES_CPU}"'"
 
-      if [ "${WITH_OPENBLAS}" = "1" ]; then
-        if [ -d /usr/include/x86_64-linux-gnu/openblas-pthread ]; then
-          export BLAS_INCLUDE_DIRS=/usr/include/x86_64-linux-gnu/openblas-pthread
-        elif [ -d /usr/include/x86_64-linux-gnu/openblas ]; then
-          export BLAS_INCLUDE_DIRS=/usr/include/x86_64-linux-gnu/openblas
-        elif [ -d /usr/include/openblas ]; then
-          export BLAS_INCLUDE_DIRS=/usr/include/openblas
-        else
-          export BLAS_INCLUDE_DIRS=/usr/include
-        fi
-        build_variant openblas "'"${FEATURES_OPENBLAS}"'"
-      fi
-
       if [ "${WITH_VULKAN}" = "1" ] && command -v glslc >/dev/null 2>&1; then
-        build_variant vulkan "'"${FEATURES_OPENBLAS},${FEATURES_VULKAN}"'"
+        build_variant vulkan "'"${FEATURES_VULKAN}"'"
       fi
 
       if [ "${WITH_CUDA}" = "1" ]; then
-        build_variant cuda "'"${FEATURES_OPENBLAS},${FEATURES_CUDA}"'"
+        build_variant cuda "'"${FEATURES_CUDA}"'"
       fi
 
       if [ "${WITH_ROCM}" = "1" ]; then
-        build_variant rocm "'"${FEATURES_OPENBLAS},${FEATURES_ROCM}"'"
+        build_variant rocm "'"${FEATURES_ROCM}"'"
       fi
     '
 
-
   linux_copy_out "amd64" "x86_64-unknown-linux-gnu" "cpu"
-  [[ "${WITH_OPENBLAS}" == "1" ]] && linux_copy_out "amd64" "x86_64-unknown-linux-gnu" "openblas"
   if [[ "${WITH_VULKAN}" == "1" ]] && [[ -f "${PROJECT_ROOT}/target-cross/linux-amd64-vulkan/x86_64-unknown-linux-gnu/release/${BIN_NAME}" ]]; then
     linux_copy_out "amd64" "x86_64-unknown-linux-gnu" "vulkan"
   fi
@@ -339,11 +401,14 @@ DOCKERFILE
 }
 
 # -----------------------------
-# ARM64 Docker Build (FIXED)
+# ARM64 Docker Build
 # -----------------------------
 build_linux_arm64_docker_variants() {
   [[ "$docker_ok" -eq 1 ]] || { echo "Skipping linux/arm64: docker not found."; return 0; }
 
+  build_static_espeak_ng arm64 linux/arm64
+
+ 
   local tmp df img CACHE_BUST
   tmp="$(mktemp -d)"
   df="${tmp}/Dockerfile.linux.arm64"
@@ -355,6 +420,7 @@ FROM ubuntu:noble
 ENV DEBIAN_FRONTEND=noninteractive
 ARG CACHE_BUST=${CACHE_BUST}
 
+# Install build tools + OpenBLAS (static) + Vulkan (dynamic)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl git xz-utils \
     build-essential pkg-config \
@@ -365,7 +431,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libasound2-dev \
     libxdo-dev \
     libx11-dev \
+    libblas-dev \
     libopenblas-dev \
+    gfortran \
     libvulkan-dev vulkan-tools vulkan-utility-libraries-dev \
     spirv-tools glslang-tools \
  && rm -rf /var/lib/apt/lists/*
@@ -376,8 +444,10 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*; \
     (command -v glslc >/dev/null 2>&1 && echo "glslc installed") || echo "glslc not available"
 
+# Rust + target
 RUN curl -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:\${PATH}"
+RUN rustup update stable
 RUN rustup target add aarch64-unknown-linux-gnu
 WORKDIR /work
 DOCKERFILE
@@ -395,56 +465,55 @@ DOCKERFILE
     -v "${PROJECT_ROOT}:/work" -w /work \
     -v "${HOST_K_CACHE}:${CONT_K_CACHE}" \
     -v "${HOST_WHISPER_MODELS}:${CONT_WHISPER_MODELS}" \
-    -e WITH_OPENBLAS="${WITH_OPENBLAS}" \
     -e WITH_VULKAN="${WITH_VULKAN}" \
+    -e CMAKE_SKIP_RPATH=ON \
+    -e CMAKE_INSTALL_RPATH_USE_LINK_PATH=OFF \
     "$img" \
-      bash -lc '
-        set -euo pipefail
+    bash -lc '
+      set -euo pipefail
 
-        ARCH=arm64
-        target=aarch64-unknown-linux-gnu
+      ARCH=arm64
+      target=aarch64-unknown-linux-gnu
 
-        build_variant() {
-          local variant="$1"
-          local feats="$2"
-          local ctd="/work/target-cross/linux-${ARCH}-${variant}"
+      build_variant() {
+        local variant="$1"
+        local feats="$2"
+        local ctd="/work/target-cross/linux-${ARCH}-${variant}"
 
-          echo "---- Building linux/${ARCH} [$variant] features: $feats"
+        echo "---- Building linux/${ARCH} [$variant] features: $feats"
 
-          export RUSTFLAGS="-C codegen-units=1 -C opt-level=3 -C link-arg=-Wl,--gc-sections -C link-arg=-Wl,--icf=safe"
-          export CARGO_PROFILE_RELEASE_LTO=false
-          export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
-          export CARGO_PROFILE_RELEASE_DEBUG=false
-          export CARGO_PROFILE_RELEASE_STRIP=symbols
-          export CARGO_PROFILE_RELEASE_INCREMENTAL=false
+        # OpenBLAS static + system libraries static
+        export OPENBLAS_STATIC=1
+        export GGML_BLAS_VENDOR=OpenBLAS
+        export BLAS_INCLUDE_DIRS=/usr/include
+        export BLAS_LIBRARIES=/usr/lib/aarch64-linux-gnu/libopenblas.a
+        export CMAKE_PREFIX_PATH=/usr/include:/usr/lib/aarch64-linux-gnu
 
-          CARGO_TARGET_DIR="$ctd" \
-          cargo build --release --target "$target" \
-            --no-default-features --features "$feats"
-        }
+        # Static linking flags for Rust
+        export RUSTFLAGS="-C target-feature=+crt-static -C codegen-units=1 -C opt-level=3 -C link-arg=-Wl,--gc-sections"
+        export CARGO_PROFILE_RELEASE_LTO=false
+        export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+        export CARGO_PROFILE_RELEASE_DEBUG=false
+        export CARGO_PROFILE_RELEASE_STRIP=symbols
+        export CARGO_PROFILE_RELEASE_INCREMENTAL=false
 
-        build_variant cpu "'"${FEATURES_CPU}"'"
+        export ESPEAK_NG_DIR="/work/deps/espeak-ng-install"
 
-        if [ "${WITH_OPENBLAS}" = "1" ]; then
-          if [ -d /usr/include/aarch64-linux-gnu/openblas-pthread ]; then
-            export BLAS_INCLUDE_DIRS=/usr/include/aarch64-linux-gnu/openblas-pthread
-          elif [ -d /usr/include/aarch64-linux-gnu/openblas ]; then
-            export BLAS_INCLUDE_DIRS=/usr/include/aarch64-linux-gnu/openblas
-          elif [ -d /usr/include/openblas ]; then
-            export BLAS_INCLUDE_DIRS=/usr/include/openblas
-          else
-            export BLAS_INCLUDE_DIRS=/usr/include
-          fi
-          build_variant openblas "'"${FEATURES_OPENBLAS}"'"
-        fi
+        CARGO_TARGET_DIR="$ctd" \
+        cargo build --release --target "$target" --no-default-features --features "$feats"
+      }
 
-        if [ "${WITH_VULKAN}" = "1" ] && command -v glslc >/dev/null 2>&1; then
-          build_variant vulkan "'"${FEATURES_VULKAN}"'"
-        fi
-      '
+      # Always build CPU variant statically
+      build_variant cpu "'"${FEATURES_CPU}"'"
 
+      # Vulkan dynamic variant (link system libvulkan.so)
+      if [ "${WITH_VULKAN}" = "1" ] && command -v glslc >/dev/null 2>&1; then
+        build_variant vulkan "'"${FEATURES_VULKAN}"'"
+      fi
+    '
+
+  # Copy out artifacts
   linux_copy_out "arm64" "aarch64-unknown-linux-gnu" "cpu"
-  [[ "${WITH_OPENBLAS}" == "1" ]] && linux_copy_out "arm64" "aarch64-unknown-linux-gnu" "openblas"
   if [[ "${WITH_VULKAN}" == "1" ]] && [[ -f "${PROJECT_ROOT}/target-cross/linux-arm64-vulkan/aarch64-unknown-linux-gnu/release/${BIN_NAME}" ]]; then
     linux_copy_out "arm64" "aarch64-unknown-linux-gnu" "vulkan"
   fi
@@ -454,14 +523,16 @@ DOCKERFILE
 }
 
 # -----------------------------
-# Run
+# Run builds
 # -----------------------------
 ensure_espeak_data_archive
 
 if want_arch amd64; then build_linux_amd64_docker_variants; fi
 if want_arch arm64; then build_linux_arm64_docker_variants; fi
 
-# Package
+# -----------------------------
+# Packaging
+# -----------------------------
 if [[ "${DO_PACKAGE}" -eq 1 ]]; then
   echo "== Packaging tar.gz + SHA256 =="
   for f in "${ARTIFACTS[@]}"; do
