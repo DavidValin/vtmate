@@ -143,7 +143,7 @@ if not exist "%ESPEAK_INSTALL%\lib\espeak-ng.lib" (
       -DCMAKE_C_FLAGS="/MD"^
       -DCMAKE_CXX_FLAGS="/MD"
 
-    cmake --build "%ESPEAK_BUILD%" --config Release --target INSTALL
+    cmd /V:0 /C "cmake --build "%ESPEAK_BUILD%" --config Release --target INSTALL"
     if errorlevel 1 exit /b 1
 )
 
