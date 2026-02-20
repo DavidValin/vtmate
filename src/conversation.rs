@@ -157,6 +157,7 @@ pub fn conversation_thread(
         let interrupt_counter_cloned = interrupt_counter.clone();
         let llama_url = args.llama_server_url.clone();
         let model = args.model.clone();
+        let engine_type = args.llm.clone();
 
         if args.llm == "llama-server" {
           let on_piece_cloned = std::sync::Arc::new(std::sync::Mutex::new(on_piece));
@@ -166,7 +167,8 @@ pub fn conversation_thread(
                 &cleaned_prompt,
                 llama_url.as_str(),
                 model.as_str(),
-                stop_all_rx_cloned,
+                engine_type.as_str(),
+                &stop_all_rx_cloned,
                 interrupt_counter_cloned.clone(),
                 my_interrupt,
                 &mut *on_piece_cloned.lock().unwrap()
@@ -190,7 +192,8 @@ pub fn conversation_thread(
                 &cleaned_prompt,
                 ollama_url.as_str(),
                 model.as_str(),
-                stop_all_rx_cloned,
+                engine_type.as_str(),
+                &stop_all_rx_cloned,
                 interrupt_counter_cloned.clone(),
                 my_interrupt,
                 &mut *on_piece_cloned.lock().unwrap()
