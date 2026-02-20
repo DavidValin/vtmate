@@ -9,7 +9,7 @@
 
 ### Status
 
-✅ First release ready! [Download](https://github.com/DavidValin/ai-mate/releases/tag/0.3.0)
+✅ Ready to kick in! [Download](https://github.com/DavidValin/ai-mate/releases)
 
 ## How it works
 
@@ -58,6 +58,9 @@ You can run the models locally (by default) or remotely by configuring the base 
 ## Acceleration support
 
 Do you have GPU? (nvidia? an apple computer?) Great! then ai-mate speed is at lighting speed =)
+
+* To be able to use acceleration, pick the built version for your hardware from [Releases list](https://github.com/DavidValin/ai-mate/releases)
+* For CUDA install CUDA Toolkit. For Vulkan install VULKAN SDK
 
 ```
 Platform   Arch    CPU    OpenBLAS   CUDA   Metal   Vulkan
