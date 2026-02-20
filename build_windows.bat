@@ -26,6 +26,7 @@ rmdir /s /q "%ESPEAK_BUILD%" 2>nul
 rmdir /s /q "%OPENBLAS_DIR%" 2>nul
 rmdir /s /q "%ONNX_BUILD%" 2>nul
 rmdir /s /q "%PROJECT_ROOT%target" 2>nul
+rmdir /s /q "%PROJECT_ROOT%target-cross" 2>nul
 rmdir /s /q "%TARGET_DIR%" 2>nul
 rmdir /s /q "%DIST_DIR%" 2>nul
 
@@ -50,23 +51,22 @@ REM ==========================================================
 set "VARIANT=%~1"
 if "%VARIANT%"=="" set "VARIANT=cpu"
 
-set WITH_OPENBLAS=0
-
 if "%VARIANT%"=="cpu" (
+    set WITH_OPENBLAS=1
     set WITH_CUDA=0
     set WITH_VULKAN=0
 ) else if "%VARIANT%"=="vulkan" (
+    set WITH_OPENBLAS=1
     set WITH_CUDA=0
     set WITH_VULKAN=1
 ) else if "%VARIANT%"=="cuda" (
+    set WITH_OPENBLAS=1
     set WITH_CUDA=1
     set WITH_VULKAN=0
 ) else (
     echo ERROR: Unknown variant "%VARIANT%"
     exit /b 1
 )
-
-if "%~2"=="openblas" set WITH_OPENBLAS=1
 
 echo.
 echo ============================================
@@ -145,27 +145,79 @@ REM ==========================================================
 REM BUILD OPENBLAS STATIC AND LINK (OPTIONAL)
 REM ==========================================================
 if "%WITH_OPENBLAS%"=="1" (
-    if not exist "%OPENBLAS_DIR%\install\lib\libopenblas.lib" (
-        echo === Building OpenBLAS static with MSVC ===
-        if not exist "%OPENBLAS_DIR%" git clone --branch v0.3.30 https://github.com/xianyi/OpenBLAS "%OPENBLAS_DIR%" || exit /b 1
-        mkdir "%OPENBLAS_DIR%\build" 2>nul
-        cmake -S "%OPENBLAS_DIR%" ^
-              -B "%OPENBLAS_DIR%\build" ^
+
+    echo === Windows build [openblas] variant ===
+
+    set "PREBUILT_OPENBLAS_DIR=%PROJECT_ROOT%assets\openblas-windows-portable"
+    set "OPENBLAS_LIB=%PREBUILT_OPENBLAS_DIR%\lib\libopenblas.lib"
+
+    mkdir "%PREBUILT_OPENBLAS_DIR%\lib" 2>nul
+    mkdir "%PREBUILT_OPENBLAS_DIR%\include" 2>nul
+
+    set "rebuild_openblas=0"
+    if not exist "%OPENBLAS_LIB%" (
+        set "rebuild_openblas=1"
+    )
+
+    if "%rebuild_openblas%"=="1" (
+        echo ✔ Building OpenBLAS locally for Windows x64 (static, skip tests)...
+
+        set "tmp_build=%TEMP%\openblas_build"
+        rmdir /s /q "%tmp_build%" 2>nul
+        mkdir "%tmp_build%"
+
+        git clone --depth 1 --branch v0.3.30 https://github.com/xianyi/OpenBLAS "%tmp_build%\OpenBLAS" || exit /b 1
+        mkdir "%tmp_build%\OpenBLAS\build" 2>nul
+
+        pushd "%tmp_build%\OpenBLAS"
+        cmake -S . ^
+              -B build ^
               -G "Visual Studio 17 2022" ^
               -A x64 ^
               -DBUILD_SHARED_LIBS=OFF ^
               -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded ^
-              -DCMAKE_INSTALL_PREFIX="%OPENBLAS_DIR%\install"
-        cmake --build "%OPENBLAS_DIR%\build" --config Release --target INSTALL || exit /b 1
-        echo OpenBLAS static library ready.
+              -DCMAKE_INSTALL_PREFIX="%PREBUILT_OPENBLAS_DIR%" ^
+              -DNO_LAPACK=ON ^
+              -DNO_TEST=ON
+        cmake --build build --config Release --target INSTALL || exit /b 1
+        popd
+
+        rmdir /s /q "%tmp_build%"
+        if not exist "%OPENBLAS_LIB%" (
+            echo ERROR: OpenBLAS build failed
+            exit /b 1
+        )
+        echo ✔ OpenBLAS built and installed at %PREBUILT_OPENBLAS_DIR%
     )
 
-    REM ==========================================================
-    REM EXPORT ENVIRONMENT VARIABLES FOR whisper-rs-sys
-    REM ==========================================================
-    set "BLAS_INCLUDE_DIRS=%OPENBLAS_DIR%\install\include"
-    set "BLAS_LIB_DIRS=%OPENBLAS_DIR%\install\lib"
-    set "BLAS_LIB=openblas"
+    REM --- Proper static OpenBLAS linking for Rust + CMake ---
+    set "OPENBLAS_STATIC=%OPENBLAS_LIB%"
+    set "OpenBLAS_DIR=%PREBUILT_OPENBLAS_DIR%"
+    set "OpenBLAS_LIBRARIES=%OPENBLAS_STATIC%"
+    set "OpenBLAS_INCLUDE_DIR=%PREBUILT_OPENBLAS_DIR%\include"
+    set "BLAS_INCLUDE_DIRS=%PREBUILT_OPENBLAS_DIR%\include"
+    set "BLAS_LIBRARIES=%OPENBLAS_LIB%"
+
+    set "CMAKE_PREFIX_PATH=%PREBUILT_OPENBLAS_DIR%"
+    set "CMAKE_INCLUDE_PATH=%PREBUILT_OPENBLAS_DIR%\include"
+    set "CMAKE_LIBRARY_PATH=%PREBUILT_OPENBLAS_DIR%\lib"
+
+    REM --- CMake arguments for Windows static OpenBLAS linking ---
+    set "CMAKE_ARGS=-DBLAS_LIBRARIES=%BLAS_LIBRARIES% ^
+    -DBLAS_INCLUDE_DIRS=%BLAS_INCLUDE_DIRS% ^
+    -DBLAS_LIBRARY_DIR=%PREBUILT_OPENBLAS_DIR%\lib ^
+    -DGGML_BLAS=ON ^
+    -DGGML_BLAS_VENDOR=OpenBLAS ^
+    -DGGML_BLAS_LIBRARIES=%BLAS_LIBRARIES% ^
+    -DGGML_BLA_STATIC=ON ^
+    -DBLA_VENDOR=OpenBLAS ^
+    -DOpenBLAS_ROOT=%PREBUILT_OPENBLAS_DIR% ^
+    -DBLA_STATIC=ON ^
+    -DBLA_SIZEOF_INTEGER=4 ^
+    -DOpenBLAS_LIBRARY=%OPENBLAS_STATIC% ^
+    -DOpenBLAS_LIBRARIES=%OPENBLAS_STATIC% ^
+    -DOpenBLAS_DIR=%PREBUILT_OPENBLAS_DIR% ^
+    -DOpenBLAS_INCLUDE_DIR=%OpenBLAS_INCLUDE_DIR%"
 )
 
 REM ==========================================================
@@ -199,10 +251,9 @@ if not exist "%ONNX_BUILD%\Release\onnxruntime.lib" (
           -Donnxruntime_BUILD_TESTS=OFF ^
           -Donnxruntime_ENABLE_TESTING=OFF ^
           -DBUILD_TESTING=OFF
+
     cmake --build "%ONNX_BUILD%" --config Release || exit /b 1
 )
-
-set "RUSTFLAGS=-C opt-level=3"
 
 REM ==========================================================
 REM EXPORT ENVIRONMENT
@@ -223,7 +274,7 @@ if "%WITH_OPENBLAS%"=="1" set "CARGO_FEATURES=%CARGO_FEATURES% whisper-openblas"
 if "%WITH_VULKAN%"=="1" set "CARGO_FEATURES=%CARGO_FEATURES% whisper-vulkan"
 if "%WITH_CUDA%"=="1"  set "CARGO_FEATURES=%CARGO_FEATURES% whisper-cuda"
 
-cargo build --release --target %TARGET% --features "%CARGO_FEATURES%" || exit /b 1
+set "RUSTFLAGS=-C codegen-units=1 -C opt-level=3 -C link-arg=-L%PREBUILT_OPENBLAS_DIR%\lib -C link-arg=-lopenblas"
 
 set "SRC_BIN=%PROJECT_ROOT%target\%TARGET%\release\%BIN_BASE%.exe"
 set "DST_BIN=%TARGET_DIR%\%VARIANT%\%BIN_BASE%-%VARIANT%.exe"
