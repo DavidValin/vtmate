@@ -26,7 +26,6 @@ rmdir /s /q "%ESPEAK_BUILD%" 2>nul
 rmdir /s /q "%OPENBLAS_DIR%" 2>nul
 rmdir /s /q "%ONNX_BUILD%" 2>nul
 rmdir /s /q "%PROJECT_ROOT%target" 2>nul
-rmdir /s /q "%PROJECT_ROOT%target-cross" 2>nul
 rmdir /s /q "%TARGET_DIR%" 2>nul
 rmdir /s /q "%DIST_DIR%" 2>nul
 
@@ -140,9 +139,9 @@ if not exist "%ESPEAK_INSTALL%\lib\espeak-ng.lib" (
           -DCMAKE_CXX_FLAGS="/MD"
 
     REM Disable delayed expansion only for the install step to avoid ! in filenames
+    setlocal DisableDelayedExpansion
+    cmake --build "%ESPEAK_BUILD%" --config Release --target INSTALL || exit /b 1
     endlocal
-    cmd /V:OFF /C cmake --build "%ESPEAK_BUILD%" --config Release --target INSTALL || exit /b 1
-    setlocal EnableDelayedExpansion
 )
 
 REM ==========================================================
