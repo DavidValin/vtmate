@@ -93,7 +93,6 @@ if ($WITH_CUDA -eq 1) {
         $CUDA_INSTALLER = "$env:TEMP\cuda_installer.exe"
         $CUDA_URL = "https://developer.download.nvidia.com/compute/cuda/$CUDA_VERSION/network_installers/cuda_${CUDA_VERSION}_windows_network.exe"
 
-        # Download installer
         Invoke-WebRequest -Uri $CUDA_URL -OutFile $CUDA_INSTALLER -UseBasicParsing
 
         if (-not (Test-Path $CUDA_INSTALLER)) {
@@ -101,7 +100,6 @@ if ($WITH_CUDA -eq 1) {
             exit 1
         }
 
-        # Silent install (network installer) for CUDA + runtime only
         $arguments = "--silent --toolkit --installpath `"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v$CUDA_VERSION`""
         $proc = Start-Process -FilePath $CUDA_INSTALLER -ArgumentList $arguments -Wait -PassThru
         if ($proc.ExitCode -ne 0) {
@@ -109,12 +107,10 @@ if ($WITH_CUDA -eq 1) {
             exit 1
         }
 
-        # Set environment variables for this script
         $env:CUDA_PATH = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v$CUDA_VERSION"
         $env:Path = "$env:CUDA_PATH\bin;$env:Path"
         $env:CUDAToolkit_ROOT = $env:CUDA_PATH
 
-        # Validate installation
         if (-not (Get-Command nvcc -ErrorAction SilentlyContinue)) {
             Write-Error "CUDA installed but nvcc not found in PATH."
             exit 1
