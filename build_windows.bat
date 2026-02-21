@@ -1,320 +1,273 @@
-@echo off
-setlocal EnableDelayedExpansion
+# ==========================================================
+# PowerShell Build Script (MSVC + Safe eSpeak Paths)
+# ==========================================================
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
 
-REM ==========================================================
-REM CONFIG
-REM ==========================================================
-set "BIN_BASE=ai-mate"
-set "PROJECT_ROOT=%~dp0"
-set "DIST_DIR=%PROJECT_ROOT%dist"
-set "TARGET_DIR=%PROJECT_ROOT%target-cross"
-set "VENDOR_DIR=%PROJECT_ROOT%vendor"
-set "ESPEAK_SRC=%VENDOR_DIR%\espeak-ng"
-set "ESPEAK_BUILD=%ESPEAK_SRC%\build-msvc"
-set "ESPEAK_INSTALL=%ESPEAK_BUILD%\install"
-set "OPENBLAS_DIR=%VENDOR_DIR%\openblas"
-set "OPENBLAS_URL=https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.30/OpenBLAS-0.3.30-x64-64.zip"
-set "OPENBLAS_ZIP=%VENDOR_DIR%\openblas.zip"
-set "ONNX_SRC=%VENDOR_DIR%\onnxruntime"
-set "ONNX_BUILD=%ONNX_SRC%\build-static"
-set "UPLOAD_ENABLED=1"
+# ==========================================================
+# CONFIG
+# ==========================================================
+$BIN_BASE       = "ai-mate"
+$PROJECT_ROOT   = Split-Path -Parent $MyInvocation.MyCommand.Path
+$DIST_DIR       = Join-Path $PROJECT_ROOT "dist"
+$TARGET_DIR     = Join-Path $PROJECT_ROOT "target-cross"
+$VENDOR_DIR     = Join-Path $PROJECT_ROOT "vendor"
+$ESPEAK_SRC     = Join-Path $VENDOR_DIR "espeak-ng"
+$ESPEAK_BUILD   = Join-Path $ESPEAK_SRC "build-msvc"
+$ESPEAK_INSTALL = Join-Path $ESPEAK_BUILD "install"
+$OPENBLAS_DIR   = Join-Path $VENDOR_DIR "openblas"
+$ONNX_SRC       = Join-Path $VENDOR_DIR "onnxruntime"
+$ONNX_BUILD     = Join-Path $ONNX_SRC "build-static"
+$UPLOAD_ENABLED = $true
 
-REM ==========================================================
-REM CLEAN OLD BUILDS
-REM ==========================================================
-rmdir /s /q "%ESPEAK_BUILD%" 2>nul
-rmdir /s /q "%OPENBLAS_DIR%" 2>nul
-rmdir /s /q "%ONNX_BUILD%" 2>nul
-rmdir /s /q "%PROJECT_ROOT%target" 2>nul
-rmdir /s /q "%TARGET_DIR%" 2>nul
-rmdir /s /q "%DIST_DIR%" 2>nul
+# ==========================================================
+# CLEAN OLD BUILDS
+# ==========================================================
+Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $ESPEAK_BUILD, $OPENBLAS_DIR, $ONNX_BUILD, "$PROJECT_ROOT\target", $TARGET_DIR, $DIST_DIR
 
-REM ==========================================================
-REM CHECK REQUIRED TOOLS
-REM ==========================================================
-where cl.exe >nul 2>nul || (echo ERROR: Open "x64 Native Tools Command Prompt for VS" ^& exit /b 1)
-where cmake >nul 2>nul || (echo ERROR: cmake not found ^& exit /b 1)
-where git >nul 2>nul || (echo ERROR: git not found ^& exit /b 1)
-where cargo >nul 2>nul || (echo ERROR: cargo not found ^& exit /b 1)
-where powershell >nul 2>nul || (echo ERROR: powershell not found ^& exit /b 1)
+# ==========================================================
+# CHECK REQUIRED TOOLS
+# ==========================================================
+foreach ($tool in "cl.exe","cmake","git","cargo","powershell") {
+    if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
+        Write-Error "ERROR: Required tool $tool not found. Launch PowerShell from 'x64 Native Tools Command Prompt for VS'."
+        exit 1
+    }
+}
 
-REM ==========================================================
-REM USE DYNAMIC RUST CRT TO MATCH ONNX /MD
-REM ==========================================================
-set "RUSTFLAGS=-C opt-level=3"
-set "CARGO_BUILD_JOBS=1"
+# ==========================================================
+# USE DYNAMIC RUST CRT TO MATCH ONNX /MD
+# ==========================================================
+$env:RUSTFLAGS = "-C opt-level=3"
+$env:CARGO_BUILD_JOBS = 1
 
-REM ==========================================================
-REM DETERMINE VARIANT
-REM ==========================================================
-set "VARIANT=%~1"
-if "%VARIANT%"=="" set "VARIANT=cpu"
+# ==========================================================
+# DETERMINE VARIANT
+# ==========================================================
+param([string]$VARIANT="cpu")
 
-if "%VARIANT%"=="cpu" (
-    set WITH_OPENBLAS=1
-    set WITH_CUDA=0
-    set WITH_VULKAN=0
-) else if "%VARIANT%"=="vulkan" (
-    set WITH_OPENBLAS=1
-    set WITH_CUDA=0
-    set WITH_VULKAN=1
-) else if "%VARIANT%"=="cuda" (
-    set WITH_OPENBLAS=1
-    set WITH_CUDA=1
-    set WITH_VULKAN=0
-) else (
-    echo ERROR: Unknown variant "%VARIANT%"
-    exit /b 1
-)
+switch ($VARIANT) {
+    "cpu" {
+        $WITH_OPENBLAS = $true
+        $WITH_CUDA     = $false
+        $WITH_VULKAN   = $false
+    }
+    "vulkan" {
+        $WITH_OPENBLAS = $true
+        $WITH_CUDA     = $false
+        $WITH_VULKAN   = $true
+    }
+    "cuda" {
+        $WITH_OPENBLAS = $true
+        $WITH_CUDA     = $true
+        $WITH_VULKAN   = $false
+    }
+    default {
+        Write-Error "ERROR: Unknown variant $VARIANT"
+        exit 1
+    }
+}
 
-echo.
-echo ============================================
-echo Building variant: %VARIANT%
-if "%WITH_OPENBLAS%"=="1" echo OpenBLAS: ENABLED
-if "%WITH_CUDA%"=="1" echo CUDA: ENABLED
-if "%WITH_VULKAN%"=="1" echo Vulkan: ENABLED
-echo ============================================
-echo.
+Write-Host "`n============================================"
+Write-Host "Building variant: $VARIANT"
+if ($WITH_OPENBLAS) { Write-Host "OpenBLAS: ENABLED" }
+if ($WITH_CUDA)     { Write-Host "CUDA: ENABLED" }
+if ($WITH_VULKAN)   { Write-Host "Vulkan: ENABLED" }
+Write-Host "============================================`n"
 
-mkdir "%TARGET_DIR%\%VARIANT%" >nul 2>nul
-mkdir "%DIST_DIR%" >nul 2>nul
-mkdir "%VENDOR_DIR%" >nul 2>nul
+# ==========================================================
+# CREATE REQUIRED DIRECTORIES
+# ==========================================================
+foreach ($dir in $TARGET_DIR, $DIST_DIR, $VENDOR_DIR) {
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+}
 
-REM ==========================================================
-REM ENSURE CUDA TOOLKIT IF REQUIRED (BUILD-TIME)
-REM ==========================================================
-if "%WITH_CUDA%"=="1" (
-    where nvcc >nul 2>nul
-    if errorlevel 1 (
-        echo CUDA not detected. Installing CUDA Toolkit for build...
-        set "CUDA_VERSION=12.3.2"
-        set "CUDA_INSTALLER=%TEMP%\cuda_installer.exe"
-        set "CUDA_URL=https://developer.download.nvidia.com/compute/cuda/%CUDA_VERSION%/network_installers/cuda_%CUDA_VERSION%_windows_network.exe"
-        powershell -Command "Invoke-WebRequest -Uri '%CUDA_URL%' -OutFile '%CUDA_INSTALLER%'"
-        if errorlevel 1 (
-            echo ERROR: Failed to download CUDA installer.
-            exit /b 1
-        )
-        REM Silent install nvcc + runtime "%CUDA_INSTALLER%" -s nvcc_%CUDA_VERSION% cudart_%CUDA_VERSION%
-        if errorlevel 1 (
-            echo ERROR: CUDA installation failed.
-            exit /b 1
-        )
-        set "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.3"
-        set "PATH=%CUDA_PATH%\bin;%PATH%"
-        set "CUDAToolkit_ROOT=%CUDA_PATH%"
-        where nvcc >nul 2>nul
-        if errorlevel 1 (
-            echo ERROR: CUDA installed but nvcc not found.
-            exit /b 1
-        )
-        echo CUDA successfully installed for build.
-    ) else (
-        echo CUDA already present.
-        for %%I in (nvcc.exe) do set "CUDA_BIN=%%~dp$PATH:I"
-        for %%I in ("!CUDA_BIN!..\") do set "CUDA_PATH=%%~fI"
-        set "CUDAToolkit_ROOT=%CUDA_PATH%"
-    )
-    echo CUDA_PATH = %CUDA_PATH%
-)
+# ==========================================================
+# ENSURE CUDA TOOLKIT IF REQUIRED (BUILD-TIME)
+# ==========================================================
+if ($WITH_CUDA -eq 1) {
+    $nvcc = Get-Command nvcc -ErrorAction SilentlyContinue
+    if (-not $nvcc) {
+        Write-Host "CUDA not detected. Installing CUDA Toolkit for build..."
+        $CUDA_VERSION = "12.3.2"
+        $CUDA_INSTALLER = "$env:TEMP\cuda_installer.exe"
+        $CUDA_URL = "https://developer.download.nvidia.com/compute/cuda/$CUDA_VERSION/network_installers/cuda_${CUDA_VERSION}_windows_network.exe"
 
-REM ==========================================================
-REM BUILD ESPEAK NG (STATIC LIB, DYNAMIC CRT /MD)
-REM ==========================================================
-set "ESPEAK_INSTALL_SAFE=%ESPEAK_INSTALL%"
+        # Download installer
+        Invoke-WebRequest -Uri $CUDA_URL -OutFile $CUDA_INSTALLER -UseBasicParsing
 
-REM ==========================================================
-REM BUILD ESPEAK NG (STATIC LIB, DYNAMIC CRT /MD)
-REM ==========================================================
-REM Use a safe variable for the install path
-set "ESPEAK_INSTALL_SAFE=%ESPEAK_INSTALL%"
+        if (-not (Test-Path $CUDA_INSTALLER)) {
+            Write-Error "Failed to download CUDA installer."
+            exit 1
+        }
 
-REM Disable delayed expansion to avoid ! in paths
-setlocal DisableDelayedExpansion
-if exist "%ESPEAK_INSTALL_SAFE%\lib\espeak-ng.lib" (
-    echo eSpeak NG already built, skipping.
-) else (
-    echo === Building eSpeak NG ===
-    if not exist "%ESPEAK_SRC%" (
-        git clone "https://github.com/espeak-ng/espeak-ng" "%ESPEAK_SRC%" || exit /b 1
-    )
+        # Silent install (network installer) for CUDA + runtime only
+        $arguments = "--silent --toolkit --installpath `"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v$CUDA_VERSION`""
+        $proc = Start-Process -FilePath $CUDA_INSTALLER -ArgumentList $arguments -Wait -PassThru
+        if ($proc.ExitCode -ne 0) {
+            Write-Error "CUDA installation failed with exit code $($proc.ExitCode)"
+            exit 1
+        }
 
-    REM --- Build CMake arguments safely ---
-    set "CMAKE_ARGS=-DCMAKE_BUILD_TYPE=Release"
-    set "CMAKE_ARGS=%CMAKE_ARGS% -DCMAKE_INSTALL_PREFIX=%ESPEAK_INSTALL_SAFE%"
-    set "CMAKE_ARGS=%CMAKE_ARGS% -DBUILD_SHARED_LIBS=OFF"
-    set "CMAKE_ARGS=%CMAKE_ARGS% -DESPEAKNG_BUILD_TESTS=OFF"
-    set "CMAKE_ARGS=%CMAKE_ARGS% -DESPEAKNG_BUILD_EXAMPLES=OFF"
-    set "CMAKE_ARGS=%CMAKE_ARGS% -DESPEAKNG_BUILD_PROGRAM=OFF"
-    set "CMAKE_ARGS=%CMAKE_ARGS% -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL"
-    set "CMAKE_ARGS=%CMAKE_ARGS% -DCMAKE_C_FLAGS=/MD"
-    set "CMAKE_ARGS=%CMAKE_ARGS% -DCMAKE_CXX_FLAGS=/MD"
+        # Set environment variables for this script
+        $env:CUDA_PATH = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v$CUDA_VERSION"
+        $env:Path = "$env:CUDA_PATH\bin;$env:Path"
+        $env:CUDAToolkit_ROOT = $env:CUDA_PATH
 
-    REM --- Run CMake build safely ---
-    cmake -S "%ESPEAK_SRC%" -B "%ESPEAK_BUILD%" -G "Visual Studio 17 2022" -A x64 %CMAKE_ARGS%
-    cmake --build "%ESPEAK_BUILD%" --config Release --target INSTALL || exit /b 1
-)
-endlocal
+        # Validate installation
+        if (-not (Get-Command nvcc -ErrorAction SilentlyContinue)) {
+            Write-Error "CUDA installed but nvcc not found in PATH."
+            exit 1
+        }
 
-REM ==========================================================
-REM BUILD OPENBLAS STATIC AND LINK (OPTIONAL)
-REM ==========================================================
-if "%WITH_OPENBLAS%"=="1" (
+        Write-Host "CUDA successfully installed for build."
+    }
+    else {
+        Write-Host "CUDA already present."
+        $env:CUDA_PATH = Split-Path -Parent $nvcc.Source
+        $env:CUDAToolkit_ROOT = $env:CUDA_PATH
+        Write-Host "CUDA_PATH = $env:CUDA_PATH"
+    }
+}
 
-    echo === Windows build [openblas] variant ===
+# ==========================================================
+# BUILD eSpeak NG (STATIC LIB, DYNAMIC CRT /MD)
+# ==========================================================
+$ESPEAK_INSTALL_SAFE = $ESPEAK_INSTALL
+if (-not (Test-Path (Join-Path $ESPEAK_INSTALL_SAFE "lib\espeak-ng.lib"))) {
+    Write-Host "=== Building eSpeak NG ==="
+    if (-not (Test-Path $ESPEAK_SRC)) {
+        git clone "https://github.com/espeak-ng/espeak-ng" $ESPEAK_SRC
+    }
 
-    set "PREBUILT_OPENBLAS_DIR=%PROJECT_ROOT%assets\openblas-windows-portable"
-    set "OPENBLAS_LIB=%PREBUILT_OPENBLAS_DIR%\lib\libopenblas.lib"
-
-    mkdir "%PREBUILT_OPENBLAS_DIR%\lib" 2>nul
-    mkdir "%PREBUILT_OPENBLAS_DIR%\include" 2>nul
-
-    set "rebuild_openblas=0"
-    if not exist "%OPENBLAS_LIB%" (
-        set "rebuild_openblas=1"
+    $CMAKE_ARGS = @(
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DCMAKE_INSTALL_PREFIX=$ESPEAK_INSTALL_SAFE",
+        "-DBUILD_SHARED_LIBS=OFF",
+        "-DESPEAKNG_BUILD_TESTS=OFF",
+        "-DESPEAKNG_BUILD_EXAMPLES=OFF",
+        "-DESPEAKNG_BUILD_PROGRAM=OFF",
+        "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL",
+        "-DCMAKE_C_FLAGS=/MD",
+        "-DCMAKE_CXX_FLAGS=/MD"
     )
 
-    if "%rebuild_openblas%"=="1" (
-        echo ✔ Building OpenBLAS locally for Windows x64 (static, skip tests)...
+    cmake -S $ESPEAK_SRC -B $ESPEAK_BUILD -G "Visual Studio 17 2022" -A x64 $CMAKE_ARGS
+    cmake --build $ESPEAK_BUILD --config Release --target INSTALL
+} else {
+    Write-Host "eSpeak NG already built, skipping."
+}
 
-        set "tmp_build=%TEMP%\openblas_build"
-        rmdir /s /q "%tmp_build%" 2>nul
-        mkdir "%tmp_build%"
+# ==========================================================
+# BUILD OPENBLAS STATIC AND LINK
+# ==========================================================
+if ($WITH_OPENBLAS) {
+    Write-Host "=== Windows build [OpenBLAS] variant ==="
 
-        git clone --depth 1 --branch v0.3.30 https://github.com/xianyi/OpenBLAS "%tmp_build%\OpenBLAS" || exit /b 1
-        mkdir "%tmp_build%\OpenBLAS\build" 2>nul
+    $PREBUILT_OPENBLAS_DIR = Join-Path $PROJECT_ROOT "assets\openblas-windows-portable"
+    $OPENBLAS_LIB           = Join-Path $PREBUILT_OPENBLAS_DIR "lib\libopenblas.lib"
 
-        pushd "%tmp_build%\OpenBLAS"
-        cmake -S .^
-          -B build^
-          -G "Visual Studio 17 2022"^
-          -A x64^
-          -DBUILD_SHARED_LIBS=OFF^
-          -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded^
-          -DCMAKE_INSTALL_PREFIX="%PREBUILT_OPENBLAS_DIR%"^
-          -DNO_LAPACK=ON^
-          -DNO_TEST=ON
-        cmake --build build --config Release --target INSTALL || exit /b 1
-        popd
+    foreach ($dir in @("$PREBUILT_OPENBLAS_DIR\lib","$PREBUILT_OPENBLAS_DIR\include")) {
+        if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+    }
 
-        rmdir /s /q "%tmp_build%"
-        if not exist "%OPENBLAS_LIB%" (
-            echo ERROR: OpenBLAS build failed
-            exit /b 1
-        )
-        echo ✔ OpenBLAS built and installed at %PREBUILT_OPENBLAS_DIR%
-    )
+    if (-not (Test-Path $OPENBLAS_LIB)) {
+        $tmp_build = Join-Path $env:TEMP "openblas_build"
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $tmp_build
+        New-Item -ItemType Directory -Force -Path $tmp_build | Out-Null
 
-    REM --- Proper static OpenBLAS linking for Rust + CMake ---
-    set "OPENBLAS_STATIC=%OPENBLAS_LIB%"
-    set "OpenBLAS_DIR=%PREBUILT_OPENBLAS_DIR%"
-    set "OpenBLAS_LIBRARIES=%OPENBLAS_STATIC%"
-    set "OpenBLAS_INCLUDE_DIR=%PREBUILT_OPENBLAS_DIR%\include"
-    set "BLAS_INCLUDE_DIRS=%PREBUILT_OPENBLAS_DIR%\include"
-    set "BLAS_LIBRARIES=%OPENBLAS_LIB%"
+        git clone --depth 1 --branch v0.3.30 https://github.com/xianyi/OpenBLAS (Join-Path $tmp_build "OpenBLAS")
+        New-Item -ItemType Directory -Force -Path (Join-Path $tmp_build "OpenBLAS\build") | Out-Null
 
-    set "CMAKE_PREFIX_PATH=%PREBUILT_OPENBLAS_DIR%"
-    set "CMAKE_INCLUDE_PATH=%PREBUILT_OPENBLAS_DIR%\include"
-    set "CMAKE_LIBRARY_PATH=%PREBUILT_OPENBLAS_DIR%\lib"
+        Push-Location (Join-Path $tmp_build "OpenBLAS")
+        cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
+            -DBUILD_SHARED_LIBS=OFF `
+            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
+            -DCMAKE_INSTALL_PREFIX="$PREBUILT_OPENBLAS_DIR" `
+            -DNO_LAPACK=ON `
+            -DNO_TEST=ON
 
-    REM --- CMake arguments for Windows static OpenBLAS linking ---
-    set "CMAKE_ARGS=-DBLAS_LIBRARIES=%BLAS_LIBRARIES%"
-    set "CMAKE_ARGS=%CMAKE_ARGS% -DBLAS_INCLUDE_DIRS=%BLAS_INCLUDE_DIRS%"
-    set "CMAKE_ARGS=%CMAKE_ARGS% -DBLAS_LIBRARY_DIR=%PREBUILT_OPENBLAS_DIR%\lib"
-    set "CMAKE_ARGS=%CMAKE_ARGS% -DGGML_BLAS=ON"
-    set "CMAKE_ARGS=%CMAKE_ARGS% -DGGML_BLAS_VENDOR=OpenBLAS"
-    set "CMAKE_ARGS=%CMAKE_ARGS% -DGGML_BLAS_LIBRARIES=%BLAS_LIBRARIES%"
-    set "CMAKE_ARGS=%CMAKE_ARGS% -DGGML_BLA_STATIC=ON"
-    set "CMAKE_ARGS=%CMAKE_ARGS% -DBLA_VENDOR=OpenBLAS"
-    set "CMAKE_ARGS=%CMAKE_ARGS% -DOpenBLAS_ROOT=%PREBUILT_OPENBLAS_DIR%"
-    set "CMAKE_ARGS=%CMAKE_ARGS% -DBLA_STATIC=ON"
-    set "CMAKE_ARGS=%CMAKE_ARGS% -DBLA_SIZEOF_INTEGER=4"
-    set "CMAKE_ARGS=%CMAKE_ARGS% -DOpenBLAS_LIBRARY=%OPENBLAS_STATIC%"
-    set "CMAKE_ARGS=%CMAKE_ARGS% -DOpenBLAS_LIBRARIES=%OPENBLAS_STATIC%"
-    set "CMAKE_ARGS=%CMAKE_ARGS% -DOpenBLAS_DIR=%PREBUILT_OPENBLAS_DIR%"
-    set "CMAKE_ARGS=%CMAKE_ARGS% -DOpenBLAS_INCLUDE_DIR=%OpenBLAS_INCLUDE_DIR%"
+        cmake --build build --config Release --target INSTALL
+        Pop-Location
 
-    cmake -S . -B build %CMAKE_ARGS%
-    cmake --build build --config Release --target INSTALL || exit /b 1
-)
+        Remove-Item -Recurse -Force $tmp_build
+    }
 
-REM ==========================================================
-REM BUILD ONNX RUNTIME (STATIC LIB, DYNAMIC CRT /MD)
-REM ==========================================================
-if not exist "%ONNX_BUILD%\Release\onnxruntime.lib" (
-    echo === Building ONNX Runtime ===
-    if not exist "%ONNX_SRC%" git clone --recursive https://github.com/microsoft/onnxruntime "%ONNX_SRC%" || exit /b 1
-    pushd "%ONNX_SRC%"
-    git submodule update --init --recursive --force || exit /b 1
-    popd
+    $env:OpenBLAS_DIR      = $PREBUILT_OPENBLAS_DIR
+    $env:OpenBLAS_LIBRARIES = $OPENBLAS_LIB
+    $env:OpenBLAS_INCLUDE_DIR = Join-Path $PREBUILT_OPENBLAS_DIR "include"
+}
 
-    set "ONNX_CUDA_FLAG=OFF"
-    set "ONNX_VULKAN_FLAG=OFF"
-    if "%WITH_CUDA%"=="1" set "ONNX_CUDA_FLAG=ON"
-    if "%WITH_VULKAN%"=="1" set "ONNX_VULKAN_FLAG=ON"
+# ==========================================================
+# BUILD ONNX RUNTIME
+# ==========================================================
+if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
+    Write-Host "=== Building ONNX Runtime ==="
+    if (-not (Test-Path $ONNX_SRC)) {
+        git clone --recursive https://github.com/microsoft/onnxruntime $ONNX_SRC
+    }
+    Push-Location $ONNX_SRC
+    git submodule update --init --recursive --force
+    Pop-Location
 
-    cmake -S "%ONNX_SRC%\cmake"^
-      -B "%ONNX_BUILD%"^
-      -G "Visual Studio 17 2022"^
-      -A x64^
-      -DCMAKE_BUILD_TYPE=Release^
-      -DBUILD_SHARED_LIBS=OFF^
-      -Donnxruntime_BUILD_SHARED_LIB=OFF^
-      -Donnxruntime_MSVC_STATIC_RUNTIME=OFF^
-      -Donnxruntime_USE_CUDA=%ONNX_CUDA_FLAG%^
-      -Donnxruntime_USE_VULKAN=%ONNX_VULKAN_FLAG%^
-      -Donnxruntime_USE_EIGEN=ON^
-      -Donnxruntime_USE_OPENMP=OFF^
-      -Donnxruntime_BUILD_UNIT_TESTS=OFF^
-      -Donnxruntime_BUILD_TESTS=OFF^
-      -Donnxruntime_ENABLE_TESTING=OFF^
-      -DBUILD_TESTING=OFF
+    $ONNX_CUDA_FLAG   = if ($WITH_CUDA) { "ON" } else { "OFF" }
+    $ONNX_VULKAN_FLAG = if ($WITH_VULKAN) { "ON" } else { "OFF" }
 
-    cmake --build "%ONNX_BUILD%" --config Release || exit /b 1
-)
+    cmake -S (Join-Path $ONNX_SRC "cmake") -B $ONNX_BUILD -G "Visual Studio 17 2022" -A x64 `
+        -DCMAKE_BUILD_TYPE=Release `
+        -DBUILD_SHARED_LIBS=OFF `
+        -Donnxruntime_BUILD_SHARED_LIB=OFF `
+        -Donnxruntime_MSVC_STATIC_RUNTIME=OFF `
+        -Donnxruntime_USE_CUDA=$ONNX_CUDA_FLAG `
+        -Donnxruntime_USE_VULKAN=$ONNX_VULKAN_FLAG `
+        -Donnxruntime_USE_EIGEN=ON `
+        -Donnxruntime_USE_OPENMP=OFF `
+        -Donnxruntime_BUILD_UNIT_TESTS=OFF `
+        -Donnxruntime_BUILD_TESTS=OFF `
+        -Donnxruntime_ENABLE_TESTING=OFF `
+        -DBUILD_TESTING=OFF
 
-REM ==========================================================
-REM EXPORT ENVIRONMENT
-REM ==========================================================
-set "ESPEAKNG_INCLUDE_DIR=%ESPEAK_INSTALL%\include"
-set "ESPEAKNG_LIB_DIR=%ESPEAK_INSTALL%\lib"
-set "ONNXRUNTIME_INCLUDE_DIR=%ONNX_SRC%\include"
-set "ONNXRUNTIME_LIB_DIR=%ONNX_BUILD%\Release"
+    cmake --build $ONNX_BUILD --config Release
+}
 
-REM ==========================================================
-REM BUILD RUST BINARY WITH FEATURES
-REM ==========================================================
-set "TARGET=x86_64-pc-windows-msvc"
+# ==========================================================
+# EXPORT ENVIRONMENT
+# ==========================================================
+$env:ESPEAKNG_INCLUDE_DIR   = Join-Path $ESPEAK_INSTALL "include"
+$env:ESPEAKNG_LIB_DIR       = Join-Path $ESPEAK_INSTALL "lib"
+$env:ONNXRUNTIME_INCLUDE_DIR = Join-Path $ONNX_SRC "include"
+$env:ONNXRUNTIME_LIB_DIR     = Join-Path $ONNX_BUILD "Release"
 
-REM Compose Cargo features
-set "CARGO_FEATURES="
-if "%WITH_OPENBLAS%"=="1" set "CARGO_FEATURES=%CARGO_FEATURES% whisper-openblas"
-if "%WITH_VULKAN%"=="1" set "CARGO_FEATURES=%CARGO_FEATURES% whisper-vulkan"
-if "%WITH_CUDA%"=="1"  set "CARGO_FEATURES=%CARGO_FEATURES% whisper-cuda"
+# ==========================================================
+# BUILD RUST BINARY WITH FEATURES
+# ==========================================================
+$TARGET = "x86_64-pc-windows-msvc"
 
-set "RUSTFLAGS=-C codegen-units=1 -C opt-level=3 -C link-arg=-L%PREBUILT_OPENBLAS_DIR%\lib -C link-arg=-lopenblas"
+$CARGO_FEATURES = @()
+if ($WITH_OPENBLAS) { $CARGO_FEATURES += "whisper-openblas" }
+if ($WITH_VULKAN)   { $CARGO_FEATURES += "whisper-vulkan" }
+if ($WITH_CUDA)     { $CARGO_FEATURES += "whisper-cuda" }
 
-set "SRC_BIN=%PROJECT_ROOT%target\%TARGET%\release\%BIN_BASE%.exe"
-set "DST_BIN=%TARGET_DIR%\%VARIANT%\%BIN_BASE%-%VARIANT%.exe"
+$env:RUSTFLAGS = "-C codegen-units=1 -C opt-level=3 -C link-arg=-L$PREBUILT_OPENBLAS_DIR\lib -C link-arg=-lopenblas"
 
-if not exist "%SRC_BIN%" (
-    echo ERROR: Built binary not found.
-    exit /b 1
-)
-copy /Y "%SRC_BIN%" "%DST_BIN%" >nul
-echo Built %DST_BIN%
+$SRC_BIN = Join-Path $PROJECT_ROOT "target\$TARGET\release\$BIN_BASE.exe"
+$DST_BIN = Join-Path $TARGET_DIR "$VARIANT\$BIN_BASE-$VARIANT.exe"
 
-REM ==========================================================
-REM UPLOAD ARTIFACT IMMEDIATELY
-REM ==========================================================
-if "%UPLOAD_ENABLED%"=="1" (
-    echo Uploading artifact for %VARIANT%...
-    gh run upload-artifact "%BIN_BASE%-%VARIANT%" "%DST_BIN%"
-    if errorlevel 1 (
-        echo WARNING: Upload failed
-    )
-)
+if (-not (Test-Path $SRC_BIN)) {
+    Write-Error "ERROR: Built binary not found."
+    exit 1
+}
 
-echo.
-echo SUCCESS: %DST_BIN%
-exit /b 0
+Copy-Item -Force $SRC_BIN $DST_BIN
+Write-Host "Built $DST_BIN"
+
+# ==========================================================
+# UPLOAD ARTIFACT
+# ==========================================================
+if ($UPLOAD_ENABLED) {
+    Write-Host "Uploading artifact for $VARIANT..."
+    gh run upload-artifact "$BIN_BASE-$VARIANT" $DST_BIN
+}
+
+Write-Host "`nSUCCESS: $DST_BIN"
+exit 0
