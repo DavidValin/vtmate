@@ -238,6 +238,7 @@ $env:BLAS_INCLUDE_DIRS       = Join-Path $PREBUILT_OPENBLAS_DIR "include"
 $env:BLAS_LIBRARIES          = $OPENBLAS_LIB
 $env:GGML_BLAS               = "ON"
 $env:GGML_BLAS_VENDOR        = "OpenBLAS"
+$env:CMAKE_ARGS              = "-DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS -DBLAS_INCLUDE_DIRS=`"$PREBUILT_OPENBLAS_DIR\include`" -DBLAS_LIBRARIES=`"$OPENBLAS_LIB`""
 
 # Set ORT crate feature flags
 if ($WITH_CUDA)    { $env:ORT_USE_CUDA = "1" } else { Remove-Item Env:ORT_USE_CUDA -ErrorAction SilentlyContinue }
