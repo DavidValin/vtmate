@@ -1,5 +1,5 @@
 # ==========================================================
-# PowerShell Build Script (MSVC + Safe eSpeak Paths)
+# PowerShell Build Script (MSVC)
 # ==========================================================
 param(
     [string]$VARIANT = "cpu"
@@ -16,9 +16,6 @@ $PROJECT_ROOT   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $DIST_DIR       = Join-Path $PROJECT_ROOT "dist"
 $TARGET_DIR     = Join-Path $PROJECT_ROOT "target-cross"
 $VENDOR_DIR     = Join-Path $PROJECT_ROOT "vendor"
-$ESPEAK_SRC     = Join-Path $VENDOR_DIR "espeak-ng"
-$ESPEAK_BUILD   = Join-Path $ESPEAK_SRC "build-msvc"
-$ESPEAK_INSTALL = Join-Path $ESPEAK_BUILD "install"
 $OPENBLAS_DIR   = Join-Path $VENDOR_DIR "openblas"
 $ONNX_SRC       = Join-Path $VENDOR_DIR "onnxruntime"
 $ONNX_BUILD     = Join-Path $ONNX_SRC "build-static"
@@ -27,7 +24,7 @@ $UPLOAD_ENABLED = $true
 # ==========================================================
 # CLEAN OLD BUILDS
 # ==========================================================
-Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $ESPEAK_BUILD, $OPENBLAS_DIR, $ONNX_BUILD, "$PROJECT_ROOT\target", $TARGET_DIR, $DIST_DIR
+Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $OPENBLAS_DIR, $ONNX_BUILD, "$PROJECT_ROOT\target", $TARGET_DIR, $DIST_DIR
 
 # ==========================================================
 # CHECK REQUIRED TOOLS
@@ -217,8 +214,6 @@ if ($WITH_OPENBLAS) {
 # ==========================================================
 # EXPORT ENVIRONMENT
 # ==========================================================
-$env:ESPEAKNG_INCLUDE_DIR   = Join-Path $ESPEAK_INSTALL "include"
-$env:ESPEAKNG_LIB_DIR       = Join-Path $ESPEAK_INSTALL "lib"
 $env:ONNXRUNTIME_INCLUDE_DIR = Join-Path $ONNX_SRC "include"
 $env:ONNXRUNTIME_LIB_DIR     = Join-Path $ONNX_BUILD "Release"
 
