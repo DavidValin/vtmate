@@ -1,5 +1,5 @@
 @echo off
-setlocal DisableDelayedExpansion
+setlocal EnableDelayedExpansion
 
 REM ==========================================================
 REM CONFIG
@@ -121,17 +121,27 @@ if "%WITH_CUDA%"=="1" (
 REM ==========================================================
 REM BUILD ESPEAK NG (STATIC LIB, DYNAMIC CRT /MD)
 REM ==========================================================
-setlocal DisableDelayedExpansion
+set "ESPEAK_INSTALL_SAFE=%ESPEAK_INSTALL%"
 
-REM --- Check if eSpeak NG is already installed ---
-if exist "%ESPEAK_INSTALL%\lib\espeak-ng.lib" (
+REM ==========================================================
+REM BUILD ESPEAK NG (STATIC LIB, DYNAMIC CRT /MD)
+REM ==========================================================
+REM Use a safe variable for the install path
+set "ESPEAK_INSTALL_SAFE=%ESPEAK_INSTALL%"
+
+REM Disable delayed expansion to avoid ! in paths
+setlocal DisableDelayedExpansion
+if exist "%ESPEAK_INSTALL_SAFE%\lib\espeak-ng.lib" (
     echo eSpeak NG already built, skipping.
 ) else (
     echo === Building eSpeak NG ===
-    if not exist "%ESPEAK_SRC%" git clone https://github.com/espeak-ng/espeak-ng "%ESPEAK_SRC%" || exit /b 1
-    REM --- Build CMake arguments incrementally ---
+    if not exist "%ESPEAK_SRC%" (
+        git clone "https://github.com/espeak-ng/espeak-ng" "%ESPEAK_SRC%" || exit /b 1
+    )
+
+    REM --- Build CMake arguments safely ---
     set "CMAKE_ARGS=-DCMAKE_BUILD_TYPE=Release"
-    set "CMAKE_ARGS=%CMAKE_ARGS% -DCMAKE_INSTALL_PREFIX=%ESPEAK_INSTALL%"
+    set "CMAKE_ARGS=%CMAKE_ARGS% -DCMAKE_INSTALL_PREFIX=%ESPEAK_INSTALL_SAFE%"
     set "CMAKE_ARGS=%CMAKE_ARGS% -DBUILD_SHARED_LIBS=OFF"
     set "CMAKE_ARGS=%CMAKE_ARGS% -DESPEAKNG_BUILD_TESTS=OFF"
     set "CMAKE_ARGS=%CMAKE_ARGS% -DESPEAKNG_BUILD_EXAMPLES=OFF"
@@ -142,11 +152,8 @@ if exist "%ESPEAK_INSTALL%\lib\espeak-ng.lib" (
 
     REM --- Run CMake build safely ---
     cmake -S "%ESPEAK_SRC%" -B "%ESPEAK_BUILD%" -G "Visual Studio 17 2022" -A x64 %CMAKE_ARGS%
-
-    cmake --build "%ESPEAK_BUILD%" --config Release --target INSTALL
-    if errorlevel 1 exit /b 1
+    cmake --build "%ESPEAK_BUILD%" --config Release --target INSTALL || exit /b 1
 )
-
 endlocal
 
 REM ==========================================================
