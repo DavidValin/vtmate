@@ -54,21 +54,17 @@ if "%VARIANT%"=="cpu" (
     set WITH_OPENBLAS=1
     set WITH_CUDA=0
     set WITH_VULKAN=0
+) else if "%VARIANT%"=="vulkan" (
+    set WITH_OPENBLAS=1
+    set WITH_CUDA=0
+    set WITH_VULKAN=1
+) else if "%VARIANT%"=="cuda" (
+    set WITH_OPENBLAS=1
+    set WITH_CUDA=1
+    set WITH_VULKAN=0
 ) else (
-    if "%VARIANT%"=="vulkan" (
-      set WITH_OPENBLAS=1
-      set WITH_CUDA=0
-      set WITH_VULKAN=1
-    ) else (
-      if "%VARIANT%"=="cuda" (
-        set WITH_OPENBLAS=1
-        set WITH_CUDA=1
-        set WITH_VULKAN=0
-      ) else (
-        echo ERROR: Unknown variant "%VARIANT%"
-        exit /b 1
-      )
-    )
+    echo ERROR: Unknown variant "%VARIANT%"
+    exit /b 1
 )
 
 echo.
@@ -125,28 +121,33 @@ if "%WITH_CUDA%"=="1" (
 REM ==========================================================
 REM BUILD ESPEAK NG (STATIC LIB, DYNAMIC CRT /MD)
 REM ==========================================================
-if not exist "%ESPEAK_INSTALL%\lib\espeak-ng.lib" (
+setlocal DisableDelayedExpansion
+
+REM --- Check if eSpeak NG is already installed ---
+if exist "%ESPEAK_INSTALL%\lib\espeak-ng.lib" (
+    echo eSpeak NG already built, skipping.
+) else (
     echo === Building eSpeak NG ===
     if not exist "%ESPEAK_SRC%" git clone https://github.com/espeak-ng/espeak-ng "%ESPEAK_SRC%" || exit /b 1
-    cmake -S "%ESPEAK_SRC%"^
-      -B "%ESPEAK_BUILD%"^
-      -G "Visual Studio 17 2022"^
-      -A x64^
-      -DCMAKE_BUILD_TYPE=Release^
-      -DCMAKE_INSTALL_PREFIX="%ESPEAK_INSTALL%"^
-      -DBUILD_SHARED_LIBS=OFF^
-      -DESPEAKNG_BUILD_TESTS=OFF^
-      -DESPEAKNG_BUILD_EXAMPLES=OFF^
-      -DESPEAKNG_BUILD_PROGRAM=OFF^
-      -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL^
-      -DCMAKE_C_FLAGS="/MD"^
-      -DCMAKE_CXX_FLAGS="/MD"
+    REM --- Build CMake arguments incrementally ---
+    set "CMAKE_ARGS=-DCMAKE_BUILD_TYPE=Release"
+    set "CMAKE_ARGS=%CMAKE_ARGS% -DCMAKE_INSTALL_PREFIX=%ESPEAK_INSTALL%"
+    set "CMAKE_ARGS=%CMAKE_ARGS% -DBUILD_SHARED_LIBS=OFF"
+    set "CMAKE_ARGS=%CMAKE_ARGS% -DESPEAKNG_BUILD_TESTS=OFF"
+    set "CMAKE_ARGS=%CMAKE_ARGS% -DESPEAKNG_BUILD_EXAMPLES=OFF"
+    set "CMAKE_ARGS=%CMAKE_ARGS% -DESPEAKNG_BUILD_PROGRAM=OFF"
+    set "CMAKE_ARGS=%CMAKE_ARGS% -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL"
+    set "CMAKE_ARGS=%CMAKE_ARGS% -DCMAKE_C_FLAGS=/MD"
+    set "CMAKE_ARGS=%CMAKE_ARGS% -DCMAKE_CXX_FLAGS=/MD"
 
-    setlocal DisableDelayedExpansion
+    REM --- Run CMake build safely ---
+    cmake -S "%ESPEAK_SRC%" -B "%ESPEAK_BUILD%" -G "Visual Studio 17 2022" -A x64 %CMAKE_ARGS%
+
     cmake --build "%ESPEAK_BUILD%" --config Release --target INSTALL
-    endlocal
     if errorlevel 1 exit /b 1
 )
+
+endlocal
 
 REM ==========================================================
 REM BUILD OPENBLAS STATIC AND LINK (OPTIONAL)
@@ -210,21 +211,24 @@ if "%WITH_OPENBLAS%"=="1" (
     set "CMAKE_LIBRARY_PATH=%PREBUILT_OPENBLAS_DIR%\lib"
 
     REM --- CMake arguments for Windows static OpenBLAS linking ---
-    set "CMAKE_ARGS=-DBLAS_LIBRARIES=%BLAS_LIBRARIES%^
-      -DBLAS_INCLUDE_DIRS=%BLAS_INCLUDE_DIRS%^
-      -DBLAS_LIBRARY_DIR=%PREBUILT_OPENBLAS_DIR%\lib^
-      -DGGML_BLAS=ON^
-      -DGGML_BLAS_VENDOR=OpenBLAS^
-      -DGGML_BLAS_LIBRARIES=%BLAS_LIBRARIES%^
-      -DGGML_BLA_STATIC=ON^
-      -DBLA_VENDOR=OpenBLAS^
-      -DOpenBLAS_ROOT=%PREBUILT_OPENBLAS_DIR%^
-      -DBLA_STATIC=ON^
-      -DBLA_SIZEOF_INTEGER=4^
-      -DOpenBLAS_LIBRARY=%OPENBLAS_STATIC%^
-      -DOpenBLAS_LIBRARIES=%OPENBLAS_STATIC%^
-      -DOpenBLAS_DIR=%PREBUILT_OPENBLAS_DIR%^
-      -DOpenBLAS_INCLUDE_DIR=%OpenBLAS_INCLUDE_DIR%"
+    set "CMAKE_ARGS=-DBLAS_LIBRARIES=%BLAS_LIBRARIES%"
+    set "CMAKE_ARGS=%CMAKE_ARGS% -DBLAS_INCLUDE_DIRS=%BLAS_INCLUDE_DIRS%"
+    set "CMAKE_ARGS=%CMAKE_ARGS% -DBLAS_LIBRARY_DIR=%PREBUILT_OPENBLAS_DIR%\lib"
+    set "CMAKE_ARGS=%CMAKE_ARGS% -DGGML_BLAS=ON"
+    set "CMAKE_ARGS=%CMAKE_ARGS% -DGGML_BLAS_VENDOR=OpenBLAS"
+    set "CMAKE_ARGS=%CMAKE_ARGS% -DGGML_BLAS_LIBRARIES=%BLAS_LIBRARIES%"
+    set "CMAKE_ARGS=%CMAKE_ARGS% -DGGML_BLA_STATIC=ON"
+    set "CMAKE_ARGS=%CMAKE_ARGS% -DBLA_VENDOR=OpenBLAS"
+    set "CMAKE_ARGS=%CMAKE_ARGS% -DOpenBLAS_ROOT=%PREBUILT_OPENBLAS_DIR%"
+    set "CMAKE_ARGS=%CMAKE_ARGS% -DBLA_STATIC=ON"
+    set "CMAKE_ARGS=%CMAKE_ARGS% -DBLA_SIZEOF_INTEGER=4"
+    set "CMAKE_ARGS=%CMAKE_ARGS% -DOpenBLAS_LIBRARY=%OPENBLAS_STATIC%"
+    set "CMAKE_ARGS=%CMAKE_ARGS% -DOpenBLAS_LIBRARIES=%OPENBLAS_STATIC%"
+    set "CMAKE_ARGS=%CMAKE_ARGS% -DOpenBLAS_DIR=%PREBUILT_OPENBLAS_DIR%"
+    set "CMAKE_ARGS=%CMAKE_ARGS% -DOpenBLAS_INCLUDE_DIR=%OpenBLAS_INCLUDE_DIR%"
+
+    cmake -S . -B build %CMAKE_ARGS%
+    cmake --build build --config Release --target INSTALL || exit /b 1
 )
 
 REM ==========================================================
