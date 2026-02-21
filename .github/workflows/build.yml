@@ -47,24 +47,29 @@ jobs:
       # ----------------------
       # Build Variants
       - name: Build Windows CPU
-        shell: cmd
+        shell: powershell
         run: |
-          REM Load MSVC environment
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
-          REM Run PowerShell build script in a proper PowerShell process
-          powershell -NoProfile -ExecutionPolicy Bypass -File "%CD%\build_windows.ps1" cpu openblas
+          Write-Host "=== Loading MSVC environment ==="
+          & "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
+          Write-Host "=== Running build_windows.ps1 for CPU + OpenBLAS ==="
+          & "$PWD\build_windows.ps1" cpu openblas
 
       - name: Build Windows Vulkan
-        shell: cmd
+        shell: powershell
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
-          powershell -NoProfile -ExecutionPolicy Bypass -File "%CD%\build_windows.ps1" vulkan openblas
+          Write-Host "=== Loading MSVC environment ==="
+          & "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
+          Write-Host "=== Running build_windows.ps1 for Vulkan + OpenBLAS ==="
+          & "$PWD\build_windows.ps1" vulkan openblas
 
       - name: Build Windows CUDA
-        shell: cmd
+        shell: powershell
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
-          powershell -NoProfile -ExecutionPolicy Bypass -File "%CD%\build_windows.ps1" cuda openblas
+          Write-Host "=== Loading MSVC environment ==="
+          & "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
+          Write-Host "=== Running build_windows.ps1 for CUDA + OpenBLAS ==="
+          & "$PWD\build_windows.ps1" cuda openblas
+ 
       # ----------------------
       # Upload artifacts
       - name: Upload CPU Artifact
