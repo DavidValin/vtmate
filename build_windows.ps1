@@ -109,10 +109,12 @@ if ($WITH_CUDA) {
             exit 1
         }
 
-        $env:CUDA_PATH = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v$CUDA_VERSION"
-        $env:Path = "$env:CUDA_PATH\bin;$env:Path"
-        $env:CUDAToolkit_ROOT = $env:CUDA_PATH
+        $cuda_root = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v$CUDA_VERSION"
+        $env:CUDA_PATH = $cuda_root
+        $env:CUDAToolkit_ROOT = $cuda_root
+        $env:Path = "$cuda_root\bin;$env:Path"
 
+        # Verify nvcc
         if (-not (Get-Command nvcc -ErrorAction SilentlyContinue)) {
             Write-Error "CUDA installed but nvcc not found in PATH."
             exit 1
@@ -122,15 +124,14 @@ if ($WITH_CUDA) {
     }
     else {
         Write-Host "CUDA already present."
-        $env:CUDA_PATH = Split-Path -Parent $nvcc.Source
-        $env:CUDAToolkit_ROOT = $env:CUDA_PATH
+        $cuda_root = Split-Path -Parent $nvcc.Source
+        $env:CUDA_PATH = $cuda_root
+        $env:CUDAToolkit_ROOT = $cuda_root
+        $env:Path = "$cuda_root\bin;$env:Path"
         Write-Host "CUDA_PATH = $env:CUDA_PATH"
     }
 } 
 else {
-    # ------------------------------------------------------
-    # REMOVE ALL CUDA ENV VARS TO PREVENT CMake FROM DETECTING CUDA
-    # ------------------------------------------------------
     Remove-Item Env:CUDAToolkit_ROOT -ErrorAction SilentlyContinue
     Remove-Item Env:CUDA_PATH -ErrorAction SilentlyContinue
     Remove-Item Env:CUDA_HOME -ErrorAction SilentlyContinue
@@ -138,7 +139,7 @@ else {
 }
 
 # ==========================================================
-# BUILD ONNX RUNTIME
+# BUILD ONNX RUNTIME (Single Block, No Duplicates)
 # ==========================================================
 if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
 
@@ -152,11 +153,10 @@ if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
     git submodule update --init --recursive --force
     Pop-Location
 
-    # Force ONNX flags explicitly to prevent CUDA detection
     $ONNX_CUDA_FLAG   = if ($WITH_CUDA) { "ON" } else { "OFF" }
     $ONNX_VULKAN_FLAG = if ($WITH_VULKAN) { "ON" } else { "OFF" }
 
-    cmake -S (Join-Path $ONNX_SRC "cmake") -B $ONNX_BUILD -G "Visual Studio 17 2022" -A x64 `
+    cmake -S $ONNX_SRC -B $ONNX_BUILD -G "Visual Studio 17 2022" -A x64 `
         -DCMAKE_BUILD_TYPE=Release `
         -DBUILD_SHARED_LIBS=OFF `
         -Donnxruntime_BUILD_SHARED_LIB=OFF `
@@ -168,7 +168,8 @@ if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
         -Donnxruntime_BUILD_UNIT_TESTS=OFF `
         -Donnxruntime_BUILD_TESTS=OFF `
         -Donnxruntime_ENABLE_TESTING=OFF `
-        -DBUILD_TESTING=OFF
+        -DBUILD_TESTING=OFF `
+        -DCUDAToolkit_ROOT=$env:CUDAToolkit_ROOT
 
     cmake --build $ONNX_BUILD --config Release
 }
@@ -211,41 +212,6 @@ if ($WITH_OPENBLAS) {
     $env:OpenBLAS_DIR = $PREBUILT_OPENBLAS_DIR
     $env:OpenBLAS_LIBRARIES = $OPENBLAS_LIB
     $env:OpenBLAS_INCLUDE_DIR = Join-Path $PREBUILT_OPENBLAS_DIR "include"
-}
-
-# ==========================================================
-# BUILD ONNX RUNTIME
-# ==========================================================
-if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
-
-    Write-Host "=== Building ONNX Runtime ==="
-
-    if (-not (Test-Path $ONNX_SRC)) {
-        git clone --recursive https://github.com/microsoft/onnxruntime $ONNX_SRC
-    }
-
-    Push-Location $ONNX_SRC
-    git submodule update --init --recursive --force
-    Pop-Location
-
-    $ONNX_CUDA_FLAG   = if ($WITH_CUDA) { "ON" } else { "OFF" }
-    $ONNX_VULKAN_FLAG = if ($WITH_VULKAN) { "ON" } else { "OFF" }
-
-    cmake -S (Join-Path $ONNX_SRC "cmake") -B $ONNX_BUILD -G "Visual Studio 17 2022" -A x64 `
-        -DCMAKE_BUILD_TYPE=Release `
-        -DBUILD_SHARED_LIBS=OFF `
-        -Donnxruntime_BUILD_SHARED_LIB=OFF `
-        -Donnxruntime_MSVC_STATIC_RUNTIME=OFF `
-        -Donnxruntime_USE_CUDA=$ONNX_CUDA_FLAG `
-        -Donnxruntime_USE_VULKAN=$ONNX_VULKAN_FLAG `
-        -Donnxruntime_USE_EIGEN=ON `
-        -Donnxruntime_USE_OPENMP=OFF `
-        -Donnxruntime_BUILD_UNIT_TESTS=OFF `
-        -Donnxruntime_BUILD_TESTS=OFF `
-        -Donnxruntime_ENABLE_TESTING=OFF `
-        -DBUILD_TESTING=OFF
-
-    cmake --build $ONNX_BUILD --config Release
 }
 
 # ==========================================================
