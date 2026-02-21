@@ -194,11 +194,22 @@ if ($WITH_OPENBLAS) {
 
         Push-Location (Join-Path $tmp_build "OpenBLAS")
         cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON `
             -DBUILD_SHARED_LIBS=OFF `
             -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
             -DCMAKE_INSTALL_PREFIX="$PREBUILT_OPENBLAS_DIR" `
             -DNO_LAPACK=ON `
-            -DNO_TEST=ON
+            -DNO_TEST=ON `
+            -DUSE_SHARED_LIBS=OFF `
+            -DBUILD_SHARED_LIBS=OFF `
+            -DUSE_OPENMP=ON `
+            -DUSE_MKL=OFF `
+            -DUSE_CUDA=OFF `
+            -DUSE_ROCM=OFF `
+            -DUSE_VULKAN=OFF `
+            -DUSE_TENSORRT=OFF `
+            -DUSE_EIGEN=ON `
+            -DUSE_BLAS=ON
 
         cmake --build build --config Release --target INSTALL
         Pop-Location
@@ -229,7 +240,18 @@ if ($WITH_CUDA)     { $CARGO_FEATURES += "whisper-cuda" }
 
 $env:RUSTFLAGS = "-C codegen-units=1 -C opt-level=3 -C link-arg=-L$PREBUILT_OPENBLAS_DIR\lib -C link-arg=-lopenblas"
 
+Write-Host "Ensuring Rust target $TARGET is installed..."
+rustup target add $TARGET
+
+Write-Host "Building Rust binary..."
+cargo build --release --target $TARGET --features ($CARGO_FEATURES -join ",")
+
 $SRC_BIN = Join-Path $PROJECT_ROOT "target\$TARGET\release\$BIN_BASE.exe"
+# Fallback: try plain release folder if cross-target folder does not exist
+if (-not (Test-Path $SRC_BIN)) {
+    $SRC_BIN = Join-Path $PROJECT_ROOT "target\release\$BIN_BASE.exe"
+}
+
 $DST_BIN = Join-Path $TARGET_DIR "$VARIANT\$BIN_BASE-$VARIANT.exe"
 
 if (-not (Test-Path $SRC_BIN)) {
