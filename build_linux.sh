@@ -272,36 +272,31 @@ build_linux_amd64_docker_variants() {
 
   build_static_espeak_ng amd64 linux/amd64
 
-
   local tmp df img CACHE_BUST
   tmp="$(mktemp -d)"
   df="${tmp}/Dockerfile.linux.amd64"
   img="local/${BIN_NAME}-linux-amd64:${VERSION}-$$"
   CACHE_BUST="$(date +%s)"
 
-  cat > "$df" <<DOCKERFILE
+  cat > "$df" <<'DOCKERFILE'
 FROM ubuntu:noble
 ENV DEBIAN_FRONTEND=noninteractive
-ARG CACHE_BUST=${CACHE_BUST}
+ARG CACHE_BUST
 
-# Install build tools + OpenBLAS
+# -----------------------------
+# System deps + Vulkan + BLAS (remove old libs)
+# -----------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl git xz-utils \
-    build-essential pkg-config \
-    cmake ninja-build \
-    clang libclang-dev llvm-dev \
-    perl \
-    libssl-dev \
-    libasound2-dev \
-    libxdo-dev \
-    libx11-dev \
-    libblas-dev \
-    libopenblas-dev \
-    gfortran \
+    build-essential pkg-config cmake ninja-build \
+    clang libclang-dev llvm-dev perl \
+    libssl-dev libasound2-dev libxdo-dev libx11-dev \
+    libblas-dev libopenblas-dev gfortran \
     libvulkan-dev vulkan-tools vulkan-utility-libraries-dev \
     spirv-tools glslang-tools \
  && rm -rf /var/lib/apt/lists/*
 
+# Install glslc
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends glslc || true; \
@@ -310,20 +305,30 @@ RUN set -eux; \
 
 # CUDA (dynamic only)
 ARG WITH_CUDA=1
-RUN if [ "\$WITH_CUDA" = "1" ]; then \
+RUN if [ "$WITH_CUDA" = "1" ]; then \
       apt-get update && apt-get install -y --no-install-recommends nvidia-cuda-toolkit && \
       rm -rf /var/lib/apt/lists/* ; \
     fi
 
+# ROCm (dynamic only)
 ARG WITH_ROCM=0
-RUN if [ "\$WITH_ROCM" = "1" ]; then \
+RUN if [ "$WITH_ROCM" = "1" ]; then \
       apt-get update && apt-get install -y --no-install-recommends rocm-hip-sdk hipblas rocblas && \
       rm -rf /var/lib/apt/lists/* ; \
     fi
 
+# -----------------------------
+# Build static OpenBLAS (amd64)
+# -----------------------------
+RUN git clone --depth 1 https://github.com/xianyi/OpenBLAS.git /tmp/openblas && \
+    make -C /tmp/openblas -j$(nproc) NO_SHARED=1 USE_OPENMP=1 DYNAMIC_ARCH=1 TARGET=GENERIC && \
+    cp /tmp/openblas/libopenblas.a /usr/local/lib/libopenblas.a && \
+    cp -a /tmp/openblas/include/* /usr/local/include/ && \
+    rm -rf /tmp/openblas
+
 # Rust + musl target for static linking
 RUN curl -sSf https://sh.rustup.rs | sh -s -- -y
-ENV PATH="/root/.cargo/bin:\${PATH}"
+ENV PATH="/root/.cargo/bin:${PATH}"
 RUN rustup update stable
 RUN rustup target add x86_64-unknown-linux-musl
 WORKDIR /work
@@ -367,10 +372,10 @@ DOCKERFILE
         export OPENBLAS_STATIC=1
         export GGML_BLAS=ON
         export GGML_BLAS_VENDOR=OpenBLAS
-        export BLAS_INCLUDE_DIRS=/usr/include
-        export BLAS_LIBRARIES=/usr/lib/x86_64-linux-gnu/libopenblas.a
+        export BLAS_INCLUDE_DIRS=/usr/local/include
+        export BLAS_LIBRARIES=/usr/local/lib/libopenblas.a
 
-        export RUSTFLAGS="-C target-feature=+crt-static -C codegen-units=1 -C opt-level=3 -C link-arg=/usr/lib/x86_64-linux-gnu/libopenblas.a"
+        export RUSTFLAGS="-C target-feature=+crt-static -C codegen-units=1 -C opt-level=3 -C link-arg=/usr/local/lib/libopenblas.a"
         export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
         export CARGO_PROFILE_RELEASE_DEBUG=false
         export CARGO_PROFILE_RELEASE_STRIP=symbols
@@ -378,7 +383,7 @@ DOCKERFILE
 
         export ESPEAK_NG_DIR="/work/deps/espeak-ng-install"
 
-        GGML_CMAKE_ARGS="-DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS -DOPENBLAS_STATIC=ON -DBLAS_LIBRARIES=/usr/lib/x86_64-linux-gnu/libopenblas.a -DBLAS_INCLUDE_DIRS=/usr/include -DCMAKE_PREFIX_PATH=/usr/include:/usr/lib/x86_64-linux-gnu" \
+        GGML_CMAKE_ARGS="-DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS -DOPENBLAS_STATIC=ON -DBLAS_LIBRARIES=/usr/local/lib/libopenblas.a -DBLAS_INCLUDE_DIRS=/usr/local/include -DCMAKE_PREFIX_PATH=/usr/include:/usr/lib/x86_64-linux-gnu" \
         CARGO_TARGET_DIR="$ctd" \
         cargo build --release --target "$target" --features "$feats"
       }
@@ -417,45 +422,47 @@ build_linux_arm64_docker_variants() {
 
   build_static_espeak_ng arm64 linux/arm64
 
- 
   local tmp df img CACHE_BUST
   tmp="$(mktemp -d)"
   df="${tmp}/Dockerfile.linux.arm64"
   img="local/${BIN_NAME}-linux-arm64:${VERSION}-$$"
   CACHE_BUST="$(date +%s)"
 
-  cat > "$df" <<DOCKERFILE
+  cat > "$df" <<'DOCKERFILE'
 FROM ubuntu:noble
 ENV DEBIAN_FRONTEND=noninteractive
-ARG CACHE_BUST=${CACHE_BUST}
+ARG CACHE_BUST
 
-# Install build tools + OpenBLAS (static) + Vulkan (dynamic)
+# System deps + Vulkan + BLAS
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl git xz-utils \
-    build-essential pkg-config \
-    cmake ninja-build \
-    clang libclang-dev llvm-dev \
-    perl \
-    libssl-dev \
-    libasound2-dev \
-    libxdo-dev \
-    libx11-dev \
-    libblas-dev \
-    libopenblas-dev \
-    gfortran \
+    build-essential pkg-config cmake ninja-build \
+    clang libclang-dev llvm-dev perl \
+    libssl-dev libasound2-dev libxdo-dev libx11-dev \
+    libblas-dev libopenblas-dev gfortran \
     libvulkan-dev vulkan-tools vulkan-utility-libraries-dev \
     spirv-tools glslang-tools \
  && rm -rf /var/lib/apt/lists/*
 
+# Install glslc
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends glslc || true; \
     rm -rf /var/lib/apt/lists/*; \
     (command -v glslc >/dev/null 2>&1 && echo "glslc installed") || echo "glslc not available"
 
-# Rust + target
+# -----------------------------
+# Build static OpenBLAS (arm64)
+# -----------------------------
+RUN git clone --depth 1 https://github.com/xianyi/OpenBLAS.git /tmp/openblas && \
+    make -C /tmp/openblas -j$(nproc) NO_SHARED=1 USE_OPENMP=1 DYNAMIC_ARCH=1 TARGET=ARMV8 && \
+    cp /tmp/openblas/libopenblas.a /usr/local/lib/libopenblas.a && \
+    cp -a /tmp/openblas/include/* /usr/local/include/ && \
+    rm -rf /tmp/openblas
+
+# Rust + musl target
 RUN curl -sSf https://sh.rustup.rs | sh -s -- -y
-ENV PATH="/root/.cargo/bin:\${PATH}"
+ENV PATH="/root/.cargo/bin:${PATH}"
 RUN rustup update stable
 RUN rustup target add aarch64-unknown-linux-musl
 WORKDIR /work
@@ -494,10 +501,10 @@ DOCKERFILE
         export OPENBLAS_STATIC=1
         export GGML_BLAS=ON
         export GGML_BLAS_VENDOR=OpenBLAS
-        export BLAS_INCLUDE_DIRS=/usr/include
-        export BLAS_LIBRARIES=/usr/lib/aarch64-linux-gnu/libopenblas.a
+        export BLAS_INCLUDE_DIRS=/usr/local/include
+        export BLAS_LIBRARIES=/usr/local/lib/libopenblas.a
 
-        export RUSTFLAGS="-C target-feature=+crt-static -C codegen-units=1 -C opt-level=3 -C link-arg=/usr/lib/aarch64-linux-gnu/libopenblas.a"
+        export RUSTFLAGS="-C target-feature=+crt-static -C codegen-units=1 -C opt-level=3 -C link-arg=/usr/local/lib/libopenblas.a"
         export CARGO_PROFILE_RELEASE_LTO=false
         export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
         export CARGO_PROFILE_RELEASE_DEBUG=false
@@ -506,7 +513,7 @@ DOCKERFILE
 
         export ESPEAK_NG_DIR="/work/deps/espeak-ng-install"
 
-        GGML_CMAKE_ARGS="-DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS -DOPENBLAS_STATIC=ON -DBLAS_LIBRARIES=/usr/lib/aarch64-linux-gnu/libopenblas.a -DBLAS_INCLUDE_DIRS=/usr/include -DCMAKE_PREFIX_PATH=/usr/include:/usr/lib/aarch64-linux-gnu" \
+        GGML_CMAKE_ARGS="-DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS -DOPENBLAS_STATIC=ON -DBLAS_LIBRARIES=/usr/local/lib/libopenblas.a -DBLAS_INCLUDE_DIRS=/usr/local/include -DCMAKE_PREFIX_PATH=/usr/include:/usr/lib/aarch64-linux-gnu" \
         CARGO_TARGET_DIR="$ctd" \
         cargo build --release --target "$target" --features "$feats"
       }
@@ -514,7 +521,7 @@ DOCKERFILE
       # Always build CPU variant statically
       build_variant cpu "'"${FEATURES_CPU}"'"
 
-      # Vulkan dynamic variant (link system libvulkan.so)
+      # Vulkan dynamic variant
       if [ "${WITH_VULKAN}" = "1" ] && command -v glslc >/dev/null 2>&1; then
         build_variant vulkan "'"${FEATURES_VULKAN}"'"
       fi
@@ -538,15 +545,28 @@ ensure_espeak_data_archive
 if want_arch amd64; then build_linux_amd64_docker_variants; fi
 if want_arch arm64; then build_linux_arm64_docker_variants; fi
 
-
 # -----------------------------
 # Check static build
 # -----------------------------
-for f in "${ARTIFACTS[@]}"; do
-  echo "$f -> ldd check:"
-  ldd "$f" || echo "✔ statically linked (ldd shows not a dynamic ELF)"
-done
+for f in dist/ai-mate-*-linux-*/ai-mate; do
+  echo "Checking $f"
 
+  if ldd "$f" 2>&1 | grep -q "not a dynamic"; then
+    echo "✔ Statically linked (ldd says not a dynamic ELF)"
+  else
+    echo "ldd output:"
+    ldd "$f" || true
+  fi
+
+  # Fallback: check for OpenBLAS symbols
+  if nm "$f" 2>/dev/null | grep -q "openblas"; then
+    echo "✔ OpenBLAS symbols found (static link confirmed)"
+  else
+    echo "⚠ No OpenBLAS symbols found in $f"
+  fi
+
+  echo "---------------------------------"
+done
 
 # -----------------------------
 # Packaging
