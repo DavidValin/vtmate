@@ -2,10 +2,11 @@
 
 ![ai mate screenshot](https://github.com/DavidValin/ai-mate/raw/main/preview.png)
 
-### Video Demo
+### English demo
+https://github.com/user-attachments/assets/d9c27108-41f7-4148-8c32-28c8ca6d8516
 
-[![English demo](https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/demo/e-thumb.png)](https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/demo/ai-mate%200.3.0%20-%20English%20speech%20demo.mov) [![Spanish demo](https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/demo/s-thumb.png)](https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/demo/ai-mate%200.3.0%20-%20Spanish%20speech%20demo.mov)
-
+### Spanish demo
+https://github.com/user-attachments/assets/e612feaa-8ab0-4761-9c67-53ec7d40cab7
 
 ### Status
 
