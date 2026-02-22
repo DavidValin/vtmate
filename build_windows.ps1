@@ -162,12 +162,12 @@ if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
         "vulkan" {
             $ONNX_CUDA_FLAG   = "OFF"
             $ONNX_VULKAN_FLAG = "ON"
-            $ONNX_USE_BLAS    = "OFF"
+            $ONNX_USE_BLAS    = "ON"
         }
         "cuda" {
             $ONNX_CUDA_FLAG   = "ON"
             $ONNX_VULKAN_FLAG = "OFF"
-            $ONNX_USE_BLAS    = "OFF"
+            $ONNX_USE_BLAS    = "ON"
         }
     }
 
@@ -226,7 +226,7 @@ if ($WITH_OPENBLAS) {
     }
 
     # Update the variable so CMAKE_ARGS points to the renamed file
-    $OPENBLAS_LIB = $NEW_LIB
+    $OPENBLAS_LIB = $FINAL_LIB
 
     foreach ($dir in @("$PREBUILT_OPENBLAS_DIR\lib","$PREBUILT_OPENBLAS_DIR\include")) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
