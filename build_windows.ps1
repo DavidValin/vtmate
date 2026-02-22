@@ -277,10 +277,13 @@ $env:ONNXRUNTIME_LIB_DIR     = Join-Path $ONNX_BUILD "Release"
 $env:OpenBLAS_DIR            = $PREBUILT_OPENBLAS_DIR
 $env:GGML_BLAS               = "ON"
 $env:GGML_BLAS_VENDOR        = "OpenBLAS"
+# -----------------------------------------------------------
 $env:BLAS_INCLUDE_DIRS       = Join-Path $PREBUILT_OPENBLAS_DIR "include"
 $env:BLAS_LIBRARIES          = $OPENBLAS_LIB
+$env:BLAS_VENDOR             = "OpenBLAS"
+# -----------------------------------------------------------
 $env:CMAKE_PREFIX_PATH       = "$PREBUILT_OPENBLAS_DIR;$ONNX_BUILD"
-$env:CMAKE_ARGS              = "-DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS -DBLA_STATIC=ON"
+$env:CMAKE_ARGS              = "-DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS -DBLAS_VENDOR=OpenBLAS -DBLA_STATIC=ON"
 
 # Set ORT crate feature flags
 if ($WITH_CUDA)    { $env:ORT_USE_CUDA = "1" } else { Remove-Item Env:ORT_USE_CUDA -ErrorAction SilentlyContinue }
