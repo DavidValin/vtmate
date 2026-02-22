@@ -435,7 +435,7 @@ DOCKERFILE
         esac
 
         # Configure musl static build
-        cmake .. \
+        cmake ../cmake \
             -D CMAKE_BUILD_TYPE=Release \
             -D CMAKE_POSITION_INDEPENDENT_CODE=ON \
             -D CMAKE_INSTALL_PREFIX="$ONNX_DIR" \
@@ -666,7 +666,7 @@ DOCKERFILE
         esac
 
         # Configure musl static build
-        cmake .. \
+        cmake ../cmake \
             -D CMAKE_BUILD_TYPE=Release \
             -D CMAKE_POSITION_INDEPENDENT_CODE=ON \
             -D CMAKE_INSTALL_PREFIX="$ONNX_DIR" \
