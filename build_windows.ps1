@@ -142,7 +142,7 @@ if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
 
     Write-Host "=== Building ONNX Runtime ==="
 
-    if (-not (Test-Path $ONNX_SRC)) {
+    if (-not (Test-Path (Join-Path $ONNX_SRC "CMakeLists.txt"))) {
         git clone --recursive https://github.com/microsoft/onnxruntime $ONNX_SRC
     }
 
@@ -204,7 +204,7 @@ if ($WITH_OPENBLAS) {
     $OLD_LIB = Join-Path $LIB_DIR "libopenblas.lib"
     $NEW_LIB = Join-Path $LIB_DIR "openblas.lib"
 
-    if (Test-Path $OLD_LIB -and -not (Test-Path $NEW_LIB)) {
+    if ((Test-Path $OLD_LIB) -and (-not (Test-Path $NEW_LIB))) {
         Write-Host "Renaming libopenblas.lib → openblas.lib for CMake"
         Copy-Item $OLD_LIB $NEW_LIB -Force
     }
