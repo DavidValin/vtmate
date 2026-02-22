@@ -263,11 +263,11 @@ if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
 # ==========================================================
 $env:ONNXRUNTIME_INCLUDE_DIR = Join-Path $ONNX_SRC "include"
 $env:ONNXRUNTIME_LIB_DIR     = Join-Path $ONNX_BUILD "Release"
-$env:BLAS_INCLUDE_DIRS       = Join-Path $PREBUILT_OPENBLAS_DIR "include"
+$env:BLAS_INCLUDE_DIRS       = Join-Path $ONNX_BUILD "include"
 $env:BLAS_LIBRARIES          = $OPENBLAS_LIB
 $env:GGML_BLAS               = "ON"
 $env:GGML_BLAS_VENDOR        = "OpenBLAS"
-$env:CMAKE_ARGS              = "-DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS -DBLAS_INCLUDE_DIRS=$PREBUILT_OPENBLAS_DIR/include -DBLAS_LIBRARIES=$OPENBLAS_LIB -DCMAKE_PREFIX_PATH=$PREBUILT_OPENBLAS_DIR"
+$env:CMAKE_ARGS              = "-DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS -DBLAS_INCLUDE_DIRS=$ONNX_BUILD/include -DBLAS_LIBRARIES=$OPENBLAS_LIB -DCMAKE_PREFIX_PATH=$ONNX_BUILD"
 
 # Set ORT crate feature flags
 if ($WITH_CUDA)    { $env:ORT_USE_CUDA = "1" } else { Remove-Item Env:ORT_USE_CUDA -ErrorAction SilentlyContinue }
@@ -288,7 +288,7 @@ if ($WITH_OPENBLAS) { $CARGO_FEATURES += "whisper-openblas" }
 if ($WITH_VULKAN)   { $CARGO_FEATURES += "whisper-vulkan" }
 if ($WITH_CUDA)     { $CARGO_FEATURES += "whisper-cuda" }
 
-$env:RUSTFLAGS = "-C codegen-units=1 -C opt-level=3 -C link-arg=-L$PREBUILT_OPENBLAS_DIR\lib -C link-arg=-lopenblas"
+$env:RUSTFLAGS = "-C codegen-units=1 -C opt-level=3 -C link-arg=-L$ONNX_BUILD\lib -C link-arg=-lopenblas"
 
 Write-Host "Ensuring Rust target $TARGET is installed..."
 rustup target add $TARGET

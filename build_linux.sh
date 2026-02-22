@@ -306,9 +306,10 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 RUN rustup update stable
 RUN rustup target add x86_64-unknown-linux-musl
 
-# Optional: tell cc-rs where the MUSL compiler is
 ENV CC_x86_64_unknown_linux_musl=x86_64-linux-musl-gcc
-ENV CXX=/usr/bin/x86_64-linux-musl-g++
+ENV CXX=clang++
+ENV CXXFLAGS="--target=x86_64-linux-musl"
+ENV LDFLAGS="--target=x86_64-linux-musl"
 ENV CC=/usr/bin/x86_64-linux-musl-gcc
 ENV CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=x86_64-linux-musl-gcc
 
