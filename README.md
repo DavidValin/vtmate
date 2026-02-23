@@ -1,4 +1,8 @@
-## voice chat with your local ai models from your terminal!
+## the final AI voice conversational system all running in your terminal!
+
+As easy as it sounds. Includes all you need to voice chat with ai models.
+Finally the cross platform voice ui you were waiting on now available
+for MacOS, Windows and Linux, no need for external installations.
 
 ![ai mate screenshot](https://github.com/DavidValin/ai-mate/raw/main/preview.png)
 
