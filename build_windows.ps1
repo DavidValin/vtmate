@@ -89,6 +89,7 @@ if ($WITH_CUDA) {
     if (-not $nvcc) {
         Write-Host "CUDA not detected. Installing CUDA Toolkit for build..."
         $CUDA_VERSION = "12.3.2"
+        $cuda_root = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v$CUDA_VERSION"
         $CUDA_INSTALLER = "$env:TEMP\cuda_installer.exe"
         $CUDA_URL = "https://developer.download.nvidia.com/compute/cuda/$CUDA_VERSION/network_installers/cuda_${CUDA_VERSION}_windows_network.exe"
 
@@ -99,14 +100,14 @@ if ($WITH_CUDA) {
             exit 1
         }
 
-        $arguments = "--silent --toolkit --installpath `"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v$CUDA_VERSION`""
+        $arguments = "--silent --toolkit --installpath `"$cuda_root`""
         $proc = Start-Process -FilePath $CUDA_INSTALLER -ArgumentList $arguments -Wait -PassThru
         if ($proc.ExitCode -ne 0) {
             Write-Error "CUDA installation failed with exit code $($proc.ExitCode)"
             exit 1
         }
 
-        $cuda_root = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v$CUDA_VERSION"
+        # Set environment variables
         $env:CUDA_PATH = $cuda_root
         $env:CUDAToolkit_ROOT = $cuda_root
         $env:Path = "$cuda_root\bin;$env:Path"
@@ -121,7 +122,7 @@ if ($WITH_CUDA) {
     }
     else {
         Write-Host "CUDA already present."
-        $cuda_root = Split-Path -Parent $nvcc.Source
+        $cuda_root = Split-Path -Parent (Split-Path -Parent $nvcc.Source)
         $env:CUDA_PATH = $cuda_root
         $env:CUDAToolkit_ROOT = $cuda_root
         $env:Path = "$cuda_root\bin;$env:Path"
@@ -142,7 +143,7 @@ if ($WITH_OPENBLAS) {
     Write-Host "=== Windows build [OpenBLAS] variant ==="
     $PREBUILT_OPENBLAS_DIR = Join-Path $PROJECT_ROOT "assets\openblas-windows-portable"
     $LIB_DIR = Join-Path $PREBUILT_OPENBLAS_DIR "lib"
-    $INCLUDE_DIR = Join-Path $PREBUILT_OPENBLAS_DIR "include"
+    $INCLUDE_DIR = Join-Path $PREBUILT_OPENBLAS_DIR "include\openblas"
     $FINAL_LIB = Join-Path $LIB_DIR "openblas.lib"
 
     Write-Host "OpenBLAS library not found — building from source..."
@@ -226,14 +227,13 @@ if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
     # -----------------------------
     cmake -S "$ONNX_SRC/cmake" -B "$ONNX_BUILD" -G "Visual Studio 17 2022" -A x64 `
         -DCMAKE_BUILD_TYPE=Release `
-        -Donnxruntime_BUILD_SHARED_LIBS=OFF `
         -Donnxruntime_BUILD_SHARED_LIB=OFF `
         -Donnxruntime_MSVC_STATIC_RUNTIME=ON `
         -Donnxruntime_USE_CUDA=$ONNX_CUDA_FLAG `
-        -Donnxruntime_USE_VULKAN=$ONNX_VULKAN_FLAG `
-        -Donnxruntime_USE_EIGEN=ON `
-        -Donnxruntime_USE_OPENMP=ON `
-        -Donnxruntime_USE_BLAS=$ONNX_USE_BLAS `
+        -Donnxruntime_USE_EIGEN_FOR_BLAS=OFF `
+        -Donnxruntime_USE_OPENBLAS=$ONNX_USE_BLAS `
+        -Donnxruntime_OPENBLAS_INCLUDE_DIR=$INCLUDE_DIR `
+        -Donnxruntime_OPENBLAS_LIB=$FINAL_LIB `
         -Donnxruntime_BUILD_UNIT_TESTS=OFF `
         -Donnxruntime_BUILD_TESTS=OFF `
         -Donnxruntime_ENABLE_TESTING=OFF `
@@ -261,7 +261,7 @@ $env:BLAS_INCLUDE_DIRS       = $INCLUDE_DIR
 $env:BLAS_LIBRARIES          = $OPENBLAS_LIB
 $env:OPENBLAS_PATH           = $PREBUILT_OPENBLAS_DIR
 $env:OPENBLAS_DIR            = $PREBUILT_OPENBLAS_DIR
-$env:CMAKE_PREFIX_PATH       = "$PREBUILT_OPENBLAS_DIR;$ONNX_BUILD"
+$env:CMAKE_PREFIX_PATH       = "$PREBUILT_OPENBLAS_DIR:$ONNX_BUILD"
 $env:CMAKE_ARGS              = "-DGGML_BLAS=ON -DGGML_BLAS_STATIC=ON -DGGML_BLAS_VENDOR=OpenBLAS -DBLAS_VENDOR=OpenBLAS -DOPENBLAS_PATH=$PREBUILT_OPENBLAS_DIR -DBLAS_INCLUDE_DIRS=$INCLUDE_DIR -DBLAS_LIBRARIES=$OPENBLAS_LIB"
 
 # Set ORT crate feature flags
