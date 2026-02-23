@@ -164,7 +164,6 @@ cmake $PROTOC_SRC\cmake `
     -Dprotobuf_BUILD_TESTS=OFF `
     -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded  # /MT static CRT
 cmake --build . --config Release --target INSTALL
-$env:PATH = "$PROTOC_INSTALL\bin;$env:PATH"
 $PROTOC_BIN = "$PROTOC_INSTALL\bin\protoc.exe"
 
 # ==========================================================
@@ -313,7 +312,7 @@ if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
         -Donnxruntime_USE_CUDA=$ONNX_CUDA_FLAG `
         -Donnxruntime_USE_EIGEN_FOR_BLAS=OFF `
         -Donnxruntime_USE_OPENBLAS=$ONNX_USE_BLAS `
-        -Donnxruntime_OPENBLAS_INCLUDE_DIR=$INCLUDE_DIR `
+        -Donnxruntime_OPENBLAS_INCLUDE_DIR="$INCLUDE_DIR" `
         -Donnxruntime_OPENBLAS_LIB=$RENAMED_LIB `
         -Donnxruntime_BUILD_UNIT_TESTS=OFF `
         -Donnxruntime_BUILD_TESTS=OFF `
@@ -323,8 +322,8 @@ if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
         -Donnxruntime_USE_AVX512=OFF `
         -Donnxruntime_RUN_ONNX_TESTS=OFF `
         -DBUILD_TESTING=OFF `
-        -DONNX_CUSTOM_PROTOC_EXECUTABLE=$PROTOC_BIN `
-        -DProtobuf_ROOT=$PROTOC_INSTALL `
+        -DONNX_CUSTOM_PROTOC_EXECUTABLE="$PROTOC_BIN" `
+        -DProtobuf_ROOT="$PROTOC_INSTALL" `
         -DCUDAToolkit_ROOT="$cuda_root"
 
     # -----------------------------
@@ -381,7 +380,7 @@ Write-Host "Ensuring Rust target $TARGET is installed..."
 rustup target add $TARGET
 
 Write-Host "Building Rust binary..."
-cargo build --release --target $TARGET --features ($CARGO_FEATURES -join ",")
+cargo build -vv --release --target $TARGET --features ($CARGO_FEATURES -join ",")
 
 $SRC_BIN = Join-Path $PROJECT_ROOT "target\$TARGET\release\$BIN_BASE.exe"
 # Fallback: try plain release folder if cross-target folder does not exist
