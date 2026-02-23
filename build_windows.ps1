@@ -305,6 +305,7 @@ if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
         -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF `
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON `
         -Donnxruntime_BUILD_SHARED_LIB=OFF `
+        -DDonnxruntime_USE_STATIC_LIBS=ON `
         -Donnxruntime_MSVC_STATIC_RUNTIME=ON `
         -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
         -Donnxruntime_USE_CUDA=$ONNX_CUDA_FLAG `
@@ -336,6 +337,7 @@ if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
 $env:ONNXRUNTIME_INCLUDE_DIR = Join-Path $ONNX_SRC "include"
 $env:ORT_STRATEGY            = "system"
 $env:ORT_LIB_LOCATION        = Join-Path $ONNX_BUILD "Release"
+$env:ORT_PREFER_DYNAMIC_LINK = "0"
 $env:ONNXRUNTIME_LIB_DIR     = Join-Path $ONNX_BUILD "Release"
 # -----------------------------------------------------------
 $env:GGML_BLAS               = "ON"
@@ -354,6 +356,11 @@ $env:WHISPER_RS_STATIC_CRT   = "1"
 $env:ORT_SYS_STATIC_CRT      = "1"
 $env:ESPEAK_RS_STATIC_CRT    = "1"
 $env:ESPEAK_NG_DIR           = $ESPEAK_INSTALL
+
+# Merge all onnx libs into one (onnx produces multiple .lib files)
+lib /OUT:"$ORT_LIB_LOCATION\onnxruntime_merged.lib" $ORT_LIB_LOCATION\*.lib
+Get-ChildItem "$ORT_LIB_LOCATION\*.lib" | Where-Object { $_.Name -ne "onnxruntime_merged.lib" } | Remove-Item
+Rename-Item "$ORT_LIB_LOCATION\onnxruntime_merged.lib" "onnxruntime.lib"
 
 # Set ORT crate feature flags
 if ($WITH_CUDA)    { $env:ORT_USE_CUDA = "1" } else { Remove-Item Env:ORT_USE_CUDA -ErrorAction SilentlyContinue }
