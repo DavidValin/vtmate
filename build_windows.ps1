@@ -143,7 +143,7 @@ if ($WITH_OPENBLAS) {
     $PREBUILT_OPENBLAS_DIR = Join-Path $PROJECT_ROOT "assets\openblas-windows-portable"
     $LIB_DIR = Join-Path $PREBUILT_OPENBLAS_DIR "lib"
     $INCLUDE_DIR = Join-Path $PREBUILT_OPENBLAS_DIR "include"
-    $FINAL_LIB = Join-Path $LIB_DIR "libopenblas.lib"
+    $FINAL_LIB = Join-Path $LIB_DIR "openblas.lib"
 
     Write-Host "OpenBLAS library not found — building from source..."
 
@@ -226,7 +226,7 @@ if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
     # -----------------------------
     cmake -S "$ONNX_SRC/cmake" -B "$ONNX_BUILD" -G "Visual Studio 17 2022" -A x64 `
         -DCMAKE_BUILD_TYPE=Release `
-        -DBUILD_SHARED_LIBS=OFF `
+        -Donnxruntime_BUILD_SHARED_LIBS=OFF `
         -Donnxruntime_BUILD_SHARED_LIB=OFF `
         -Donnxruntime_MSVC_STATIC_RUNTIME=ON `
         -Donnxruntime_USE_CUDA=$ONNX_CUDA_FLAG `
