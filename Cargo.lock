@@ -28,7 +28,6 @@ dependencies = [
  "crossterm",
  "directories",
  "env_logger",
- "espeak-rs",
  "flate2",
  "futures-util",
  "hex",

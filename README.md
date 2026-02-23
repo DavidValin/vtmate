@@ -63,14 +63,16 @@ Do you have GPU? (nvidia? an apple computer?) Great! then ai-mate speed is at li
 * For CUDA install CUDA Toolkit. For Vulkan install VULKAN SDK
 
 ```
-Platform   Arch    CPU    OpenBLAS   CUDA   Metal   Vulkan
---------   ----    ---    --------   ----   -----   ------
-macOS      ARM64   ✅    optional     n/a     ✅      ❌
-Linux      AMD64   ✅       ✅        ✅      n/a     ✅
-Linux      ARM64   ✅       ✅        ❌      n/a     ✅
-Windows    x86     ⚠️       ⚠️        ⚠️      n/a     ⚠️
-Windows    ARM64   ⚠️       ⚠️        ⚠️      n/a     ⚠️
+Platform   Arch          Supported acceleration
+--------   ----   ----------------------------------------------                                                       
+macOS      ARM64   ✅ CPU   ✅ Accelerate  ✅ Metal    ❌ ROCm
+Linux      AMD64   ✅ CPU   ✅ Openblas    ✅ Vulkan   ❌ ROCm
+Linux      ARM64   ✅ CPU   ✅ Openblas    ✅ Vulkan   ❌ ROCm
+Windows    x86     ⚠️ CPU   ⚠️ Openblas    ⚠️ Vulkan   ❌ ROCm
+Windows    ARM64   ⚠️ CPU   ❌ Openblas    ❌ Vulkan   ❌ ROCm
 ```
+⚠️ = working on it
+
 
 ## Installation
 
