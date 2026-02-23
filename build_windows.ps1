@@ -16,6 +16,9 @@ $PROJECT_ROOT   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $DIST_DIR       = Join-Path $PROJECT_ROOT "dist"
 $TARGET_DIR     = Join-Path $PROJECT_ROOT "target-cross"
 $VENDOR_DIR     = Join-Path $PROJECT_ROOT "vendor"
+$ESPEAK_SRC     = Join-Path $VENDOR_DIR "espeak-ng"
+$ESPEAK_BUILD   = Join-Path $ESPEAK_SRC "build-msvc"
+$ESPEAK_INSTALL = Join-Path $ESPEAK_BUILD "install"
 $OPENBLAS_DIR   = Join-Path $VENDOR_DIR "openblas"
 $ONNX_SRC       = Join-Path $VENDOR_DIR "onnxruntime"
 $ONNX_BUILD     = Join-Path $ONNX_SRC "build-static"
@@ -134,6 +137,45 @@ else {
     Remove-Item Env:CUDA_PATH -ErrorAction SilentlyContinue
     Remove-Item Env:CUDA_HOME -ErrorAction SilentlyContinue
     Remove-Item Env:CUDA_ROOT -ErrorAction SilentlyContinue
+}
+
+# ==========================================================
+# BUILD ESPEAK-NG
+# ==========================================================
+$ESPEAK_LIB = Join-Path $ESPEAK_INSTALL "lib\espeak-ng.lib"
+
+if (-not (Test-Path $ESPEAK_LIB)) {
+
+    Write-Host ""
+    Write-Host "=== Building eSpeak NG (MSVC) ==="
+
+    # Clone repository if source doesn't exist
+    if (-not (Test-Path $ESPEAK_SRC)) {
+        New-Item -ItemType Directory -Force -Path $VENDOR_DIR | Out-Null
+        git clone https://github.com/espeak-ng/espeak-ng $ESPEAK_SRC
+        if ($LASTEXITCODE -ne 0) { exit 1 }
+    }
+
+    # Change directory to source
+    Push-Location $ESPEAK_SRC
+
+    # Configure with CMake
+    cmake -S . `
+          -B $ESPEAK_BUILD `
+          -G "Visual Studio 17 2022" `
+          -A x64 `
+          -DCMAKE_BUILD_TYPE=Release `
+          -DCMAKE_INSTALL_PREFIX=$ESPEAK_INSTALL `
+          -DBUILD_SHARED_LIBS=OFF `
+          -DESPEAKNG_BUILD_TESTS=OFF `
+          -DESPEAKNG_BUILD_EXAMPLES=OFF
+    if ($LASTEXITCODE -ne 0) { exit 1 }
+
+    # Build and install
+    cmake --build $ESPEAK_BUILD --config Release --target INSTALL
+    if ($LASTEXITCODE -ne 0) { exit 1 }
+
+    Pop-Location
 }
 
 # ==========================================================
