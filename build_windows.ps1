@@ -275,7 +275,9 @@ if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
 $env:ONNXRUNTIME_INCLUDE_DIR = Join-Path $ONNX_SRC "include"
 # -----------------------------------------------------------
 $env:ONNXRUNTIME_LIB_DIR     = Join-Path $ONNX_BUILD "Release"
+$env:GGML_BLAS               = "ON"
 $env:BLA_STATIC              = "ON"
+$env:GGML_BLAS_STATIC        = "ON"
 $env:BLAS_VENDOR             = "OpenBLAS"
 $env:GGML_BLAS_VENDOR        = "OpenBLAS"
 $env:BLAS_INCLUDE_DIRS       = $INCLUDE_DIR
@@ -283,7 +285,7 @@ $env:BLAS_LIBRARIES          = $OPENBLAS_LIB
 $env:OPENBLAS_PATH           = $PREBUILT_OPENBLAS_DIR
 $env:OPENBLAS_DIR            = $PREBUILT_OPENBLAS_DIR
 $env:CMAKE_PREFIX_PATH       = "$PREBUILT_OPENBLAS_DIR;$ONNX_BUILD"
-$env:CMAKE_ARGS              = "-DGGML_BLAS_VENDOR=OpenBLAS -DBLAS_VENDOR=OpenBLAS -DOPENBLAS_PATH=$PREBUILT_OPENBLAS_DIR -DBLAS_INCLUDE_DIRS=$INCLUDE_DIR -DBLAS_LIBRARIES=$OPENBLAS_LIB"
+$env:CMAKE_ARGS              = "-DGGML_BLAS=ON -DGGML_BLAS_STATIC=ON -DGGML_BLAS_VENDOR=OpenBLAS -DBLAS_VENDOR=OpenBLAS -DOPENBLAS_PATH=$PREBUILT_OPENBLAS_DIR -DBLAS_INCLUDE_DIRS=$INCLUDE_DIR -DBLAS_LIBRARIES=$OPENBLAS_LIB"
 
 # Set ORT crate feature flags
 if ($WITH_CUDA)    { $env:ORT_USE_CUDA = "1" } else { Remove-Item Env:ORT_USE_CUDA -ErrorAction SilentlyContinue }
