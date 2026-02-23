@@ -237,11 +237,12 @@ if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
         -DCMAKE_BUILD_TYPE=Release `
         -Donnxruntime_BUILD_SHARED_LIB=OFF `
         -Donnxruntime_MSVC_STATIC_RUNTIME=ON `
+        -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
         -Donnxruntime_USE_CUDA=$ONNX_CUDA_FLAG `
         -Donnxruntime_USE_EIGEN_FOR_BLAS=OFF `
         -Donnxruntime_USE_OPENBLAS=$ONNX_USE_BLAS `
         -Donnxruntime_OPENBLAS_INCLUDE_DIR=$INCLUDE_DIR `
-        -Donnxruntime_OPENBLAS_LIB=$FINAL_LIB `
+        -Donnxruntime_OPENBLAS_LIB=$RENAMED_LIB `
         -Donnxruntime_BUILD_UNIT_TESTS=OFF `
         -Donnxruntime_BUILD_TESTS=OFF `
         -Donnxruntime_ENABLE_TESTING=OFF `
@@ -261,6 +262,7 @@ if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
 # EXPORT ENVIRONMENT
 # ==========================================================
 $env:ONNXRUNTIME_INCLUDE_DIR = Join-Path $ONNX_SRC "include"
+$env:ORT_INCLUDE_DIR  = Join-Path $ONNX_SRC "include"
 # -----------------------------------------------------------
 $env:ONNXRUNTIME_LIB_DIR     = Join-Path $ONNX_BUILD "Release"
 $env:GGML_BLAS               = "ON"
@@ -275,15 +277,16 @@ $env:OPENBLAS_PATH           = $PREBUILT_OPENBLAS_DIR
 $env:OPENBLAS_DIR            = $PREBUILT_OPENBLAS_DIR
 $env:CMAKE_PREFIX_PATH       = "${PREBUILT_OPENBLAS_DIR};${ONNX_BUILD}"
 $env:CMAKE_ARGS              = "-DGGML_BLAS=ON -DGGML_BLAS_STATIC=ON -DGGML_BLAS_VENDOR=OpenBLAS -DBLAS_VENDOR=OpenBLAS -DOPENBLAS_PATH=$PREBUILT_OPENBLAS_DIR -DBLAS_INCLUDE_DIRS=$INCLUDE_DIR -DBLAS_LIBRARIES=$OPENBLAS_LIB -DBLA_VENDOR=OpenBLAS -DBLAS_ROOT=$PREBUILT_OPENBLAS_DIR -DBLAS_DIR=$PREBUILT_OPENBLAS_DIR -DBLAS_LIBDIR=$LIB_DIR -DBLA_STATIC=ON"
+$env:WHISPER_RS_STATIC_CRT   = "1"
+$env:ORT_SYS_STATIC_CRT      = "1"
+$env:ESPEAK_RS_STATIC_CRT    = "1"
 
 # Set ORT crate feature flags
 if ($WITH_CUDA)    { $env:ORT_USE_CUDA = "1" } else { Remove-Item Env:ORT_USE_CUDA -ErrorAction SilentlyContinue }
 if ($WITH_OPENBLAS){ $env:ORT_USE_OPENMP = "1" } else { Remove-Item Env:ORT_USE_OPENMP -ErrorAction SilentlyContinue }
-if ($WITH_VULKAN) { $env:ORT_USE_VULKAN = "1" } else { Remove-Item Env:ORT_USE_VULKAN -ErrorAction SilentlyContinue }
 
 Write-Host "ORT_USE_CUDA = $env:ORT_USE_CUDA"
 Write-Host "ORT_USE_OPENMP = $env:ORT_USE_OPENMP"
-Write-Host "ORT_USE_VULKAN = $env:ORT_USE_VULKAN"
 
 # ==========================================================
 # BUILD RUST BINARY WITH FEATURES
