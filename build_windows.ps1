@@ -159,37 +159,37 @@ if ($WITH_OPENBLAS) {
               }
           }
           # If a prebuilt library exists, rename to openblas.lib
-          if ($OPENBLAS_LIB -and $OPENBLAS_LIB -ne $FINAL_LIB) {
-              Copy-Item $OPENBLAS_LIB $FINAL_LIB -Force
-              $OPENBLAS_LIB = $FINAL_LIB
-              Write-Host "Copied existing OpenBLAS lib to $FINAL_LIB"
-              # If library is still missing, build OpenBLAS
-              if (-not (Test-Path $FINAL_LIB)) {
-                  Write-Host "OpenBLAS library not found — building from source..."
+          # if ($OPENBLAS_LIB -and $OPENBLAS_LIB -ne $FINAL_LIB) {
+          #     Copy-Item $OPENBLAS_LIB $FINAL_LIB -Force
+          #     $OPENBLAS_LIB = $FINAL_LIB
+          #     Write-Host "Copied existing OpenBLAS lib to $FINAL_LIB"
+          #     # If library is still missing, build OpenBLAS
+          #     if (-not (Test-Path $FINAL_LIB)) {
+          #         Write-Host "OpenBLAS library not found — building from source..."
 
-                  $tmp_build = Join-Path $env:TEMP "openblas_build"
-                  Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $tmp_build
-                  New-Item -ItemType Directory -Force -Path $tmp_build | Out-Null
+          #         $tmp_build = Join-Path $env:TEMP "openblas_build"
+          #         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $tmp_build
+          #         New-Item -ItemType Directory -Force -Path $tmp_build | Out-Null
 
-                  $src_dir = Join-Path $tmp_build "OpenBLAS"
-                  git clone --depth 1 --branch v0.3.30 https://github.com/xianyi/OpenBLAS $src_dir
-                  $build_dir = Join-Path $src_dir "build"
-                  New-Item -ItemType Directory -Force -Path $build_dir | Out-Null
+          #         $src_dir = Join-Path $tmp_build "OpenBLAS"
+          #         git clone --depth 1 --branch v0.3.30 https://github.com/xianyi/OpenBLAS $src_dir
+          #         $build_dir = Join-Path $src_dir "build"
+          #         New-Item -ItemType Directory -Force -Path $build_dir | Out-Null
 
-                  Push-Location $src_dir
-                  cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
-                    -DBUILD_SHARED_LIBS=OFF `
-                    -DNO_LAPACK=ON `
-                    -DUSE_OPENMP=ON `
-                    -DCMAKE_INSTALL_PREFIX="$PREBUILT_OPENBLAS_DIR"
+          #         Push-Location $src_dir
+          #         cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
+          #           -DBUILD_SHARED_LIBS=OFF `
+          #           -DNO_LAPACK=ON `
+          #           -DUSE_OPENMP=ON `
+          #           -DCMAKE_INSTALL_PREFIX="$PREBUILT_OPENBLAS_DIR"
 
-                  cmake --build build --config Release --target INSTALL
-                  Pop-Location
+          #         cmake --build build --config Release --target INSTALL
+          #         Pop-Location
 
-                  Remove-Item -Recurse -Force $tmp_build
-                  Write-Host "OpenBLAS build completed"
-              }
-          }
+          #         Remove-Item -Recurse -Force $tmp_build
+          #         Write-Host "OpenBLAS build completed"
+          #     }
+          # }
     }
 
     # Ensure the variable points to the final library
