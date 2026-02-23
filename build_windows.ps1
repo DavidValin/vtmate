@@ -239,10 +239,9 @@ if ($WITH_OPENBLAS) {
 # BUILD PROTOC STATIC
 # ==========================================================
 
+git clone -b v3.21.12 https://github.com/protocolbuffers/protobuf.git $PROTOC_SRC
 # ensure directories
 New-Item -ItemType Directory -Force -Path $PROTOC_BUILD, $PROTOC_INSTALL
-
-git clone -b v3.21.12 https://github.com/protocolbuffers/protobuf.git $PROTOC_SRC
 cd $PROTOC_BUILD
 cmake $PROTOC_SRC\cmake `
     -G "Visual Studio 17 2022" `
