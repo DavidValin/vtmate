@@ -300,10 +300,6 @@ RUN wget https://musl.cc/x86_64-linux-musl-cross.tgz
 RUN tar xvf x86_64-linux-musl-cross.tgz -C /opt/
 ENV PATH=/opt/x86_64-linux-musl-cross/bin:$PATH
 
-# Make sure espeak-rs-sys find clib
-# ENV LIBCLANG_PATH=/usr/lib/llvm-20/lib
-# ENV LD_LIBRARY_PATH=/usr/lib/llvm-20/lib
-
 # Install Rust and add MUSL target
 RUN curl -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PKG_CONFIG_ALLOW_CROSS=1
@@ -312,11 +308,14 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 RUN rustup target add x86_64-unknown-linux-musl
 RUN rustup update stable
 
+# set musl compiler
 ENV CC_x86_64_unknown_linux_musl=x86_64-linux-musl-gcc
 ENV CXX_x86_64_unknown_linux_musl=x86_64-linux-musl-gcc
 ENV CC=x86_64-linux-musl-gcc
 ENV CXX=x86_64-linux-musl-g++
-# ENV CXX=/usr/bin/clang++-20
+ENV AR=ar
+ENV RANLIB=ranlib
+
 ENV CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=x86_64-linux-musl-gcc
 ENV LD=x86_64-linux-musl-g++
 
@@ -344,12 +343,13 @@ RUN if [ "$WITH_ROCM" = "1" ]; then \
 # -----------------------------
 # Build openssl for musl (amd64)
 # -----------------------------
-RUN curl -LO https://www.openssl.org/source/openssl-3.1.3.tar.gz \
- && tar xvf openssl-3.1.3.tar.gz \
- && cd openssl-3.1.3 \
- && ./Configure linux-x86_64 no-shared no-tests --prefix=/usr/local \
- && make -j$(nproc) \
- && make install
+RUN set -eux; \
+    curl -LO https://www.openssl.org/source/openssl-3.1.3.tar.gz \
+    && tar xvf openssl-3.1.3.tar.gz \
+    && cd openssl-3.1.3 \
+    && ./Configure linux-x86_64 no-shared no-tests no-async no-secure-memory no-engine --openssldir=/usr/local/ssl --libdir=/usr/local/lib --prefix=/usr/local \
+    && make -j$(nproc) \
+    && make install
 
 ENV OPENSSL_DIR=/usr/local
 ENV OPENSSL_LIB_DIR=/usr/local/lib
@@ -375,7 +375,8 @@ RUN cd /tmp/openblas && \
         2>&1 | tee /tmp/openblas_build.log
 
 # Install OpenBLAS
-RUN cd /tmp/openblas && \
+RUN set -eux; \
+    cd /tmp/openblas && \
     make install PREFIX=/usr/local STATIC_ONLY=1 NO_SHARED=1 && \
     cd / && rm -rf /tmp/openblas
 
@@ -502,7 +503,7 @@ DOCKERFILE
         # Make ort crate find the onnx musl static build
         export ORT_STRATEGY=system
         export ORT_LIB_LOCATION=/work/deps/onnxruntime
-        export RUSTFLAGS="-C target-feature=+crt-static -C target-cpu=native -C codegen-units=1 -C opt-level=3 -C link-arg=/usr/local/lib/libopenblas.a -C link-arg=-L/usr/local/lib -C link-arg=-lssl -C link-arg=-lcrypto"
+        export RUSTFLAGS="-C target-feature=+crt-static -C target-cpu=native -C codegen-units=1 -C opt-level=3 -C link-arg=/usr/local/lib/libopenblas.a"
 
         cd /work
         CARGO_TARGET_DIR="$ctd" \
