@@ -317,8 +317,12 @@ if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
         "-Donnxruntime_USE_XNNPACK=OFF",
         "-DBUILD_TESTING=OFF",
         "-DONNX_CUSTOM_PROTOC_EXECUTABLE=$PROTOC_BIN",
-        "-DProtobuf_ROOT=$PROTOC_INSTALL",
-        "-Donnxruntime_USE_CUDA=$ONNX_CUDA_FLAG"
+        "-DONNX_USE_PROTOBUF_SHARED_LIBS=OFF",
+        "-DProtobuf_USE_STATIC_LIBS=ON",
+        "-DProtobuf_INCLUDE_DIR=$PROTOC_INSTALL/include",
+        "-DProtobuf_LIBRARIES=$PROTOC_INSTALL/lib/libprotobuf.lib;$PROTOC_INSTALL/lib/libprotoc.lib",
+        "-DCMAKE_PREFIX_PATH=$PROTOC_INSTALL",
+        "-Donnxruntime_USE_CUDA=$ONNX_CUDA_FLAG",
     )
 
     # Conditionally add CUDA-specific options only if CUDA is ON
@@ -372,7 +376,6 @@ $env:ESPEAK_NG_DIR           = $ESPEAK_INSTALL
 Write-Host "`n=== ONNX .lib files BEFORE merge ==="
 $allLibs = Get-ChildItem -Path $ONNX_BUILD -Filter *.lib -Recurse | Select-Object -ExpandProperty FullName
 $allLibs | ForEach-Object { Write-Host $_ }
-$ORT_LIB_LOCATION = Join-Path $ONNX_BUILD "Release"
 lib /OUT:"$ORT_LIB_LOCATION\onnxruntime_merged.lib" $allLibs
 # Remove all original .lib files except merged one
 Get-ChildItem "$ORT_LIB_LOCATION" -Filter *.lib | Where-Object { $_.Name -ne "onnxruntime_merged.lib" } | Remove-Item
