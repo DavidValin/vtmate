@@ -439,7 +439,7 @@ $env:RUSTFLAGS = "-C target-feature=+crt-static `
                   -C codegen-units=1 `
                   -C opt-level=3 `
                   -C link-arg=/DEFAULTLIB:legacy_stdio_definitions.lib `
-                  -C link-arg=/DEFAULTLIB:OLDNAMES.lib `
+                  -C link-arg=/DEFAULTLIB:OLDNAMES.lib"
 
 
 Write-Host "Ensuring Rust target $TARGET is installed..."
