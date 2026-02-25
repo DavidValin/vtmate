@@ -66,6 +66,17 @@ fn main() {
       println!("cargo:warning=ESPEAK_NG_DIR not set, skipping prebuilt eSpeak NG linking");
   }
 
+  // -----------------------------
+  // Optionally link ONNX Runtime
+  // -----------------------------
+  if let Ok(ort_lib_dir) = env::var("ORT_LIB_LOCATION") {
+      println!("cargo:rustc-link-search=native={}", ort_lib_dir);
+      println!("cargo:rustc-link-lib=static=onnxruntime");
+
+      let ort_include_dir = Path::new(&ort_lib_dir).join("..").join("include");
+      println!("cargo:include={}", ort_include_dir.display());
+  }
+
   let out_dir = env::var("OUT_DIR").expect("OUT_DIR not set");
   let is_release = env::var("PROFILE").unwrap_or_default() == "release";
   let dest = Path::new(&out_dir).join("embedded");
