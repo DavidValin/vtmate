@@ -9,7 +9,7 @@ ASSETS_DIR="${PROJECT_ROOT}/assets"
 ESPEAK_ARCHIVE="${ASSETS_DIR}/espeak-ng-data.tar.gz"
 
 DO_PACKAGE=1
-DOCKER_NO_CACHE=0
+DOCKER_NO_CACHE=1
 SEL_ARCH="all"   # amd64,arm64,all
 
 # Linux variant toggles
@@ -150,7 +150,7 @@ ensure_espeak_data_archive() {
   local tmp img df
   tmp="$(mktemp -d)"
   df="${tmp}/Dockerfile.espeak.asset"
-  img="local/${BIN_NAME}-espeak-asset:${VERSION}"
+  img="local/${BIN_NAME}-espeak-asset:cache"
   cat > "$df" <<'DOCKERFILE'
 FROM ubuntu:noble
 ENV DEBIAN_FRONTEND=noninteractive
@@ -210,6 +210,8 @@ RUN git clone --depth 1 https://github.com/espeak-ng/espeak-ng.git /work/espeak-
 WORKDIR /work/espeak-ng
 RUN mkdir build && cd build && \
 cmake -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_CXX_FLAGS="-static-libstdc++ -static-libgcc -std=c++17" \
+      -DCMAKE_EXE_LINKER_FLAGS="-static" \
       -DBUILD_SHARED_LIBS=OFF \
       -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
       -DCMAKE_SKIP_RPATH=ON \
@@ -275,7 +277,9 @@ build_linux_amd64_docker_variants() {
   local tmp df img CACHE_BUST
   tmp="$(mktemp -d)"
   df="${tmp}/Dockerfile.linux.amd64"
-  img="local/${BIN_NAME}-linux-amd64:${VERSION}"
+  FIXED_IMG="local/${BIN_NAME}-linux-amd64:cache"
+  img="$FIXED_IMG"
+  # img="local/${BIN_NAME}-linux-amd64:${VERSION}"
   CACHE_BUST="$(date +%s)"
 
   cat > "$df" <<'DOCKERFILE'
@@ -285,6 +289,7 @@ ARG CACHE_BUST
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
   build-essential pkg-config libssl-dev musl-tools gcc-x86-64-linux-gnu g++-x86-64-linux-gnu \
+  libclang-dev llvm-dev clang llvm \
   curl wget ca-certificates git \
   gfortran \
   zlib1g-dev libbz2-dev liblzma-dev \
@@ -303,7 +308,7 @@ ENV PATH=/opt/x86_64-linux-musl-cross/bin:$PATH
 # Install Rust and add MUSL target
 RUN curl -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PKG_CONFIG_ALLOW_CROSS=1
-ENV PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig
+ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig
 ENV PATH="/root/.cargo/bin:${PATH}"
 RUN rustup target add x86_64-unknown-linux-musl
 RUN rustup update stable
@@ -315,9 +320,19 @@ ENV CC=x86_64-linux-musl-gcc
 ENV CXX=x86_64-linux-musl-g++
 ENV AR=ar
 ENV RANLIB=ranlib
+ENV FC=x86_64-linux-musl-gfortran
+ENV FFLAGS="-static-libgfortran"
+ENV BINDGEN_EXTRA_CLANG_ARGS="-I/opt/x86_64-linux-musl-cross/x86_64-linux-musl/include"
+
+ENV CFLAGS="--sysroot=/opt/x86_64-linux-musl-cross/x86_64-linux-musl -static-libstdc++ -static-libgcc"
+ENV CXXFLAGS="$CFLAGS"
+ENV CMAKE_SYSTEM_NAME=Linux
+ENV CMAKE_C_COMPILER=/opt/x86_64-linux-musl-cross/bin/x86_64-linux-musl-gcc
+ENV CMAKE_CXX_COMPILER=/opt/x86_64-linux-musl-cross/bin/x86_64-linux-musl-g++
 
 ENV CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=x86_64-linux-musl-gcc
 ENV LD=x86_64-linux-musl-g++
+ENV LDFLAGS="-lgfortran -lm -lpthread -lquadmath"
 
 # Install glslc
 RUN set -eux; \
@@ -328,6 +343,11 @@ RUN set -eux; \
 
 # CUDA (dynamic only)
 ARG WITH_CUDA=1
+ENV WITH_CUDA=${WITH_CUDA}
+ARG WITH_ROCM=0
+ENV WITH_ROCM=${WITH_ROCM}
+ARG WITH_VULKAN=0
+ENV WITH_VULKAN=${WITH_VULKAN}
 RUN if [ "$WITH_CUDA" = "1" ]; then \
       apt-get update && apt-get install -y --no-install-recommends nvidia-cuda-toolkit && \
       rm -rf /var/lib/apt/lists/* ; \
@@ -357,7 +377,45 @@ ENV OPENSSL_INCLUDE_DIR=/usr/local/include
 ENV OPENSSL_STATIC=1
 
 # -----------------------------
-# Build static OpenBLAS (amd64)
+# Build OpenMP for musl (amd64)
+# -----------------------------
+ENV OPENMP_DIR=/tmp/openmp
+ENV OPENMP_PREFIX=/usr/local/omp-musl
+
+ENV CFLAGS="--sysroot=/opt/x86_64-linux-musl-cross/x86_64-linux-musl -static-libstdc++ -static-libgcc -fopenmp"
+ENV CXXFLAGS="--sysroot=/opt/x86_64-linux-musl-cross/x86_64-linux-musl -static-libstdc++ -static-libgcc -fopenmp"
+
+ENV LLVM_SRC_URL="https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.0/llvm-project-22.1.0.src.tar.xz"
+
+RUN rm -rf "$OPENMP_DIR" \
+ && mkdir -p "$OPENMP_DIR" \
+ && mkdir -p "$OPENMP_PREFIX/lib" "$OPENMP_PREFIX/include"
+
+WORKDIR $OPENMP_DIR
+RUN wget -O llvm-project-22.1.0.src.tar.xz "$LLVM_SRC_URL" \
+ && tar xf llvm-project-22.1.0.src.tar.xz
+
+# Set correct OpenMP source paths
+WORKDIR $OPENMP_DIR/llvm-project-22.1.0.src/openmp
+
+
+RUN mkdir -p /tmp/openmp/build
+
+RUN cmake -S $OPENMP_DIR/llvm-project-22.1.0.src/openmp \
+      -B /tmp/openmp/build \
+      -DCMAKE_INSTALL_PREFIX=$OPENMP_PREFIX \
+      -DLIBOMP_ENABLE_SHARED=OFF \
+      -DLIBOMP_ENABLE_STATIC=ON \
+      -DCMAKE_BUILD_TYPE=Release
+
+RUN cmake --build /tmp/openmp/build --parallel $(nproc) --target install
+
+RUN echo "✔ OpenMP static library built!" \
+ && echo "Library: $OPENMP_PREFIX/lib/libomp.a" \
+ && echo "Headers: $OPENMP_PREFIX/include/"
+
+# -----------------------------
+# Build static OpenBLAS for musl (amd64)
 # -----------------------------
 RUN git clone --depth 1 https://github.com/xianyi/OpenBLAS.git /tmp/openblas
 
@@ -365,6 +423,9 @@ RUN git clone --depth 1 https://github.com/xianyi/OpenBLAS.git /tmp/openblas
 RUN cd /tmp/openblas && \
     set -eux; \
     make -j$(nproc) \
+        CFLAGS="$CFLAGS" \
+        LDFLAGS="$LDFLAGS -L$OPENMP_PREFIX/lib -lgomp -lpthread" \
+        USE_STATIC=1 \
         STATIC_ONLY=1 \
         NO_SHARED=1 \
         USE_OPENMP=1 \
@@ -380,11 +441,34 @@ RUN set -eux; \
     make install PREFIX=/usr/local STATIC_ONLY=1 NO_SHARED=1 && \
     cd / && rm -rf /tmp/openblas
 
-# Rust + musl target for static linking
-RUN curl -sSf https://sh.rustup.rs | sh -s -- -y
-ENV PATH="/root/.cargo/bin:${PATH}"
-RUN rustup update stable
-RUN rustup target add x86_64-unknown-linux-musl
+ENV OPENBLAS_PATH=/usr/local
+ENV BLAS_LIBRARIES=/usr/local/lib/libopenblas.a
+ENV BLAS_INCLUDE_DIRS=/usr/local/include
+
+# --------------------------------------------------
+# Build static whisper.cpp + ggml (linked to OpenBLAS)
+# --------------------------------------------------
+
+RUN git clone --depth 1 https://github.com/ggerganov/whisper.cpp.git /tmp/whisper.cpp
+
+RUN set -eux; \
+    mkdir -p /tmp/whisper.cpp/build; \
+    cd /tmp/whisper.cpp/build; \
+    cmake .. \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DGGML_OPENMP=ON \
+        -DGGML_BLAS=ON \
+        -DGGML_BLAS_STATIC=ON \
+        -DGGML_BLAS_VENDOR=OpenBLAS \
+        -DBLAS_LIBRARIES=$BLAS_LIBRARIES \
+        -DBLAS_INCLUDE_DIRS=$BLAS_INCLUDE_DIRS \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        -DCMAKE_BUILD_TYPE=Release; \
+    cmake --build . --config Release; \
+    cmake --install . --prefix /usr/local
+
+ENV WHISPER_PREBUILT_LIB=/tmp/whisper.cpp/build
+
 WORKDIR /work
 DOCKERFILE
 
@@ -423,21 +507,10 @@ DOCKERFILE
         echo "---- Building linux/${ARCH} [$variant] features: $feats"
 
         # Force static linking for system libraries except CUDA
-        export OPENBLAS_STATIC=1
-        export GGML_BLAS=ON
-        export GGML_BLAS_VENDOR=OpenBLAS
-        export BLAS_INCLUDE_DIRS=/usr/local/include
-        export BLAS_LIBRARIES=/usr/local/lib/libopenblas.a
         export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
         export CARGO_PROFILE_RELEASE_DEBUG=false
         export CARGO_PROFILE_RELEASE_STRIP=symbols
         export CARGO_PROFILE_RELEASE_INCREMENTAL=false
-        export OPENSSL_DIR=/usr/local
-        export OPENSSL_LIB_DIR=/usr/local/lib
-        export OPENSSL_INCLUDE_DIR=/usr/local/include
-        export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig
-
-        export ESPEAK_NG_DIR="/work/deps/espeak-ng-install"
 
         # -----------------------------
         # Build protobuf musl version (AMD64 musl)
@@ -447,7 +520,10 @@ DOCKERFILE
         git clone -b v3.21.12 https://github.com/protocolbuffers/protobuf.git
         cd protobuf
         mkdir build && cd build
-        cmake ../cmake -DCMAKE_BUILD_TYPE=Release -Dprotobuf_BUILD_TESTS=OFF
+        cmake ../cmake \
+          -DCMAKE_EXE_LINKER_FLAGS="-static" \
+          -DBUILD_SHARED_LIBS=OFF \
+          -DCMAKE_BUILD_TYPE=Release -Dprotobuf_BUILD_TESTS=OFF
         make -j$(nproc)
         make install DESTDIR=/tmp/protoc/protobuf/install
         # export PATH=/tmp/protoc/build:$PATH
@@ -475,35 +551,67 @@ DOCKERFILE
 
         # Configure musl static build
         cmake ../cmake \
-            -D CMAKE_SYSTEM_PROCESSOR=AMD64 \
-            -D CMAKE_C_FLAGS="-march=x86-64" \
-            -D CMAKE_CXX_FLAGS="-march=x86-64" \
-            -D CMAKE_C_COMPILER=$CC \
-            -D CMAKE_CXX_COMPILER=$CXX \
-            -D CMAKE_LINKER=$LD \
-            -D CMAKE_BUILD_TYPE=Release \
-            -D CMAKE_COMPILE_WARNING_AS_ERROR=OFF \
-            -D CMAKE_POSITION_INDEPENDENT_CODE=ON \
-            -D CMAKE_INSTALL_PREFIX="$ONNX_DIR" \
-            -D onnxruntime_BUILD_SHARED_LIB=OFF \
-            -D onnxruntime_USE_CUDA=$USE_CUDA \
-            -D onnxruntime_BUILD_UNIT_TESTS=OFF \
-            -D onnxruntime_RUN_ONNX_TESTS=OFF \
-            -D onnxruntime_USE_XNNPACK=OFF \
-            -D ONNX_CUSTOM_PROTOC_EXECUTABLE=/usr/bin/protoc \
-            -D Protobuf_ROOT=/tmp/protoc/protobuf/install/usr/local \
-            -D onnxruntime_USE_AVX=OFF \
-            -D onnxruntime_USE_AVX2=OFF \
-            -D onnxruntime_USE_AVX512=OFF
+            -DCMAKE_SYSTEM_PROCESSOR=AMD64 \
+            -DCMAKE_C_FLAGS="-march=x86-64" \
+            -DCMAKE_CXX_FLAGS="-march=x86-64 -static-libstdc++ -static-libgcc -std=c++17" \
+            -DCMAKE_EXE_LINKER_FLAGS="-static" \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_C_COMPILER=$CC \
+            -DCMAKE_CXX_COMPILER=$CXX \
+            -DCMAKE_LINKER=$LD \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DCMAKE_INSTALL_PREFIX="$ONNX_DIR" \
+            -Donnxruntime_BUILD_SHARED_LIB=OFF \
+            -Donnxruntime_USE_CUDA=$USE_CUDA \
+            -Donnxruntime_BUILD_UNIT_TESTS=OFF \
+            -Donnxruntime_RUN_ONNX_TESTS=OFF \
+            -Donnxruntime_USE_XNNPACK=OFF \
+            -DONNX_CUSTOM_PROTOC_EXECUTABLE=/usr/bin/protoc \
+            -DProtobuf_ROOT=/tmp/protoc/protobuf/install/usr/local \
+            -Donnxruntime_USE_AVX=OFF \
+            -Donnxruntime_USE_AVX2=OFF \
+            -Donnxruntime_USE_AVX512=OFF
 
         # Build and install
         make -j"$(nproc)" VERBOSE=1
-        # make install
+        make install
 
         # Make ort crate find the onnx musl static build
         export ORT_STRATEGY=system
         export ORT_LIB_LOCATION=/work/deps/onnxruntime
-        export RUSTFLAGS="-C target-feature=+crt-static -C target-cpu=native -C codegen-units=1 -C opt-level=3 -C link-arg=/usr/local/lib/libopenblas.a"
+        export RUSTFLAGS="-C target-feature=+crt-static -C target-cpu=native -C codegen-units=1 -C opt-level=3 -C link-arg=/usr/local/lib/libopenblas.a -C link-arg=-lm -C link-arg=-lgfortran -C link-arg=-lpthread"
+
+        export LIB_DIR=/usr/local/lib
+
+        # -----------------------------
+        # Create musl CMake toolchain file (inside container)
+        # -----------------------------
+        mkdir -p /work/toolchain
+        cat > /work/toolchain/musl-x86_64.cmake <<'EOF'
+# musl cross-compilation toolchain file for x86_64
+set(CMAKE_SYSTEM_NAME Linux)
+set(CMAKE_SYSTEM_PROCESSOR x86_64)
+
+# Compiler paths
+set(CMAKE_C_COMPILER   /opt/x86_64-linux-musl-cross/bin/x86_64-linux-musl-gcc)
+set(CMAKE_CXX_COMPILER /opt/x86_64-linux-musl-cross/bin/x86_64-linux-musl-g++)
+
+# Search paths for libraries and headers
+set(CMAKE_FIND_ROOT_PATH /usr/local /opt/x86_64-linux-musl-cross)
+
+# How CMake searches
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+EOF
+
+        # Export for subsequent cargo/cmake builds
+        export CMAKE_TOOLCHAIN_FILE=/work/toolchain/musl-x86_64.cmake
+        export CMAKE_FIND_LIBRARY_SUFFIXES=".a"
+        export CMAKE_EXE_LINKER_FLAGS=-static
 
         cd /work
         CARGO_TARGET_DIR="$ctd" \
@@ -585,7 +693,7 @@ ENV LD_LIBRARY_PATH=/usr/lib/llvm-20/lib
 # Install Rust and add MUSL target
 RUN curl -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PKG_CONFIG_ALLOW_CROSS=1
-ENV PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig
+ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig
 ENV PATH="/root/.cargo/bin:${PATH}"
 RUN rustup update stable
 RUN rustup target add aarch64-unknown-linux-musl
@@ -742,6 +850,7 @@ DOCKERFILE
 
         # Export for Rust build
         export ORT_DIR="$ONNX_DIR"
+        export GGML_BLAS_VENDOR="OpenBLAS"
 
         GGML_CMAKE_ARGS="-DGGML_BLAS=ON \
           -DGGML_BLAS_VENDOR=OpenBLAS \
