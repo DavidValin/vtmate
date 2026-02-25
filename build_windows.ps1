@@ -331,7 +331,7 @@ if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
         "-DCMAKE_BUILD_TYPE=Release",
         "-DBUILD_SHARED_LIBS=OFF",
         "-DCMAKE_COMPILE_WARNING_AS_ERROR=OFF",
-        "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
+        "-DCMAKE_POSITION_INDEPENDENT_CODE=OFF",
         "-Donnxruntime_BUILD_SHARED_LIB=OFF",
         "-Donnxruntime_ENABLE_STATIC_ANALYSIS=OFF",
         "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded",
@@ -354,7 +354,6 @@ if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
         "-DONNX_USE_MSVC_STATIC_RUNTIME=ON",
         "-DONNX_USE_PROTOBUF_SHARED_LIBS=OFF",
         "-Donnxruntime_USE_FULL_PROTOBUF=ON",
-        "-DCMAKE_PREFIX_PATH=$PROTOC_INSTALL",
         "-Donnxruntime_USE_CUDA=$ONNX_CUDA_FLAG"
     )
 
