@@ -389,8 +389,6 @@ if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
     # Build ONNX Runtime
     # -----------------------------
     cmake --build $ONNX_BUILD --config Release
-
-    $ORT_LIB_LOCATION = Join-Path $ONNX_BUILD "Release"
 }
 
 
@@ -399,7 +397,7 @@ if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
 # ==========================================================
 $env:ONNXRUNTIME_INCLUDE_DIR = Join-Path $ONNX_SRC "include"
 $env:ORT_STRATEGY            = "system"
-$env:ORT_LIB_LOCATION        = $ORT_LIB_LOCATION
+$env:ORT_LIB_LOCATION        = $ONNX_BUILD
 $env:ORT_PREFER_DYNAMIC_LINK = "0"
 $env:ONNXRUNTIME_LIB_DIR     = Join-Path $ONNX_BUILD "Release"
 # -----------------------------------------------------------
@@ -420,22 +418,22 @@ $env:ORT_SYS_STATIC_CRT      = "1"
 $env:ESPEAK_RS_STATIC_CRT    = "1"
 $env:ESPEAK_NG_DIR           = $ESPEAK_INSTALL
 
-Write-Host "`n=== ONNX .lib files BEFORE move ==="
-$allLibs = Get-ChildItem -Path $ONNX_BUILD -Filter *.lib -Recurse
-$allLibs | ForEach-Object { Write-Host $_.FullName }
-New-Item -ItemType Directory -Force -Path $ORT_LIB_LOCATION | Out-Null
-Write-Host "`n=== Moving all .lib files to $ORT_LIB_LOCATION ==="
-foreach ($lib in $allLibs) {
-    $dest = Join-Path $ORT_LIB_LOCATION $lib.Name
-    if (Test-Path $dest) {
-        $uniqueName = [System.IO.Path]::GetFileNameWithoutExtension($lib.Name) + "_" +
-                      ([System.Guid]::NewGuid().ToString("N").Substring(0,8)) + ".lib"
-        $dest = Join-Path $ORT_LIB_LOCATION $uniqueName
-    }
-    Move-Item -Path $lib.FullName -Destination $dest
-}
-Write-Host "`n=== FINAL .lib files in $ORT_LIB_LOCATION ==="
-Get-ChildItem "$ORT_LIB_LOCATION" -Filter *.lib |
+# Write-Host "`n=== ONNX .lib files BEFORE move ==="
+# $allLibs = Get-ChildItem -Path $ONNX_BUILD -Filter *.lib -Recurse
+# $allLibs | ForEach-Object { Write-Host $_.FullName }
+# New-Item -ItemType Directory -Force -Path $ONNX_BUILD | Out-Null
+# Write-Host "`n=== Moving all .lib files to $ONNX_BUILD ==="
+# foreach ($lib in $allLibs) {
+#     $dest = Join-Path $ONNX_BUILD $lib.Name
+#     if (Test-Path $dest) {
+#         $uniqueName = [System.IO.Path]::GetFileNameWithoutExtension($lib.Name) + "_" +
+#                       ([System.Guid]::NewGuid().ToString("N").Substring(0,8)) + ".lib"
+#         $dest = Join-Path $ONNX_BUILD $uniqueName
+#     }
+#     Move-Item -Path $lib.FullName -Destination $dest
+# }
+Write-Host "`n=== FINAL .lib files in $ONNX_BUILD ==="
+Get-ChildItem "$ONNX_BUILD" -Filter *.lib |
     ForEach-Object { Write-Host $_.FullName }
 
 
