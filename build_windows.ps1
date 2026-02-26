@@ -420,17 +420,23 @@ $env:ORT_SYS_STATIC_CRT      = "1"
 $env:ESPEAK_RS_STATIC_CRT    = "1"
 $env:ESPEAK_NG_DIR           = $ESPEAK_INSTALL
 
-# Merge all ORT + deps libs into one (onnx produces multiple .lib files)
-# Write-Host "`n=== ONNX .lib files BEFORE merge ==="
-# $allLibs = Get-ChildItem -Path $ONNX_BUILD -Filter *.lib -Recurse | Select-Object -ExpandProperty FullName
-# $allLibs | ForEach-Object { Write-Host $_ }
-# lib /OUT:"$ORT_LIB_LOCATION\onnxruntime_merged.lib" $allLibs
-# # Remove all original .lib files except merged one
-# Get-ChildItem "$ORT_LIB_LOCATION" -Filter *.lib | Where-Object { $_.Name -ne "onnxruntime_merged.lib" } | Remove-Item
-# # Rename merged lib
-# Rename-Item "$ORT_LIB_LOCATION\onnxruntime_merged.lib" "onnxruntime.lib"
-Write-Host "`n=== ONNX .lib files ==="
-Get-ChildItem "$ORT_LIB_LOCATION" -Filter *.lib | ForEach-Object { Write-Host $_.FullName }
+Write-Host "`n=== ONNX .lib files BEFORE move ==="
+$allLibs = Get-ChildItem -Path $ONNX_BUILD -Filter *.lib -Recurse
+$allLibs | ForEach-Object { Write-Host $_.FullName }
+New-Item -ItemType Directory -Force -Path $ORT_LIB_LOCATION | Out-Null
+Write-Host "`n=== Moving all .lib files to $ORT_LIB_LOCATION ==="
+foreach ($lib in $allLibs) {
+    $dest = Join-Path $ORT_LIB_LOCATION $lib.Name
+    if (Test-Path $dest) {
+        $uniqueName = [System.IO.Path]::GetFileNameWithoutExtension($lib.Name) + "_" +
+                      ([System.Guid]::NewGuid().ToString("N").Substring(0,8)) + ".lib"
+        $dest = Join-Path $ORT_LIB_LOCATION $uniqueName
+    }
+    Move-Item -Path $lib.FullName -Destination $dest
+}
+Write-Host "`n=== FINAL .lib files in $ORT_LIB_LOCATION ==="
+Get-ChildItem "$ORT_LIB_LOCATION" -Filter *.lib |
+    ForEach-Object { Write-Host $_.FullName }
 
 
 # Set ORT crate feature flags
