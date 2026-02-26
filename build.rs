@@ -194,7 +194,7 @@ fn main() {
     }
   }
 
-  println!("cargo:warning=Downloaded assets to {}", dest.display());
+  println!("cargo:info=Downloaded assets to {}", dest.display());
 
   for (_, name) in &files {
     let src = Path::new(&home).join(name);

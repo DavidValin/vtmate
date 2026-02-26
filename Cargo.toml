@@ -15,7 +15,7 @@ readme = "README.md"
 clap = { version = "4", features = ["derive", "env"] }
 cpal = "0.15"
 crossbeam-channel = "0.5"
-reqwest = { version = "0.12", features = ["stream", "multipart", "blocking", "json", "native-tls-vendored"] }
+reqwest = { version = "0.12", features = ["stream", "multipart", "blocking", "json", "rustls-tls"] }
 futures-util = "0.3"   # for StreamExt
 bytes = "1.4"          # for Bytes in streaming
 serde = { version = "1", features = ["derive"] }
@@ -26,7 +26,7 @@ hound = "3"
 crossterm = "0.27"
 tokio = { version = "1", features = ["rt", "macros"] }
 kokoro-tiny = { version = "0.2.0", git = "https://github.com/DavidValin/kokoro-tiny.git", rev = "cd9524a", features = ["as-lib"] }
-ort = { version = "2.0.0-rc.11", default-features = false, features = [ "std", "ndarray", "tls-native", "copy-dylibs" ] }
+ort = { version = "2.0.0-rc.11", default-features = false, features = [ "std", "ndarray", "tls-rustls" ] }
 flate2 = "1"
 tar = "0.4"
 sha2 = "0.10"

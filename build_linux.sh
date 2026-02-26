@@ -192,7 +192,7 @@ build_static_espeak_ng() {
   tmp="$(mktemp -d)"
   df="${tmp}/Dockerfile.espeak.static"
   CACHE_BUST="$(date +%s)"
-  img="local/espeak-ng-static:${arch}-${VERSION}-fixed"
+  img="local/espeak-ng-static-${arch}:cache"
 
   cat > "$df" <<DOCKERFILE
 FROM ubuntu:noble
@@ -234,8 +234,15 @@ DOCKERFILE
   local build_args=(--pull)
   [[ "${DOCKER_NO_CACHE}" -eq 1 ]] && build_args+=(--no-cache)
 
+  if docker image inspect "$img" >/dev/null 2>&1; then
+    echo "Docker image '$img' already exists. Skipping build."
+  else
+    local build_args=(--pull)
+    [[ "${DOCKER_NO_CACHE}" -eq 1 ]] && build_args+=(--no-cache)
+    docker build "${build_args[@]}" --platform="${docker_platform}" -f "$df" -t "$img" "$tmp"
+  fi
+
   # Mount host folder to receive the dictionaries
-  docker build "${build_args[@]}" --platform="${docker_platform}" -f "$df" -t "$img" "$tmp"
 
   # Run container and copy out the dictionaries
   docker run --rm --platform="${docker_platform}" \
@@ -476,11 +483,20 @@ DOCKERFILE
   [[ "${DOCKER_NO_CACHE}" -eq 1 ]] && build_args+=(--no-cache)
 
   echo "== Linux amd64 build (Docker image) =="
-  docker build "${build_args[@]}" --platform=linux/amd64 \
-    --build-arg WITH_CUDA="${WITH_CUDA}" \
-    --build-arg WITH_ROCM="${WITH_ROCM}" \
-    --build-arg CACHE_BUST="${CACHE_BUST}" \
-    -f "$df" -t "$img" "$tmp"
+
+  if docker image inspect "$img" >/dev/null 2>&1; then
+    echo "Docker image '$img' already exists. Skipping build."
+  else
+    local build_args=(--pull)
+    [[ "${DOCKER_NO_CACHE}" -eq 1 ]] && build_args+=(--no-cache)
+
+    echo "== Linux amd64 build (Docker image) =="
+    docker build "${build_args[@]}" --platform=linux/amd64 \
+        --build-arg WITH_CUDA="${WITH_CUDA}" \
+        --build-arg WITH_ROCM="${WITH_ROCM}" \
+        --build-arg CACHE_BUST="${CACHE_BUST}" \
+        -f "$df" -t "$img" "$tmp"
+   fi
 
   echo "== Linux amd64 cargo builds (cpu + optional variants) =="
   docker run --rm --platform=linux/amd64 \
@@ -494,7 +510,7 @@ DOCKERFILE
     -e CMAKE_INSTALL_RPATH_USE_LINK_PATH=OFF \
     "$img" \
     bash -lc '
-      set -euo pipefail
+      # set -euo pipefail
 
       ARCH=amd64
       target=x86_64-unknown-linux-musl
@@ -580,42 +596,24 @@ DOCKERFILE
 
         # Make ort crate find the onnx musl static build
         export ORT_STRATEGY=system
-        export ORT_LIB_LOCATION=/work/deps/onnxruntime
+        export ORT_LIB_LOCATION=/work/deps/onnxruntime/build-static
+        export ORT_DEBUG=1
         export RUSTFLAGS="-C target-feature=+crt-static -C target-cpu=native -C codegen-units=1 -C opt-level=3 -C link-arg=/usr/local/lib/libopenblas.a -C link-arg=-lm -C link-arg=-lgfortran -C link-arg=-lpthread"
+        export RUSTC_LINKER=x86_64-linux-musl-g++
+
+        echo "--- /work/deps/onnxruntime/build-static files ---------------------- "
+        ls -ltha $ORT_LIB_LOCATION
+        echo "------------------------------------------------------- "
 
         export LIB_DIR=/usr/local/lib
 
-        # -----------------------------
-        # Create musl CMake toolchain file (inside container)
-        # -----------------------------
-        mkdir -p /work/toolchain
-        cat > /work/toolchain/musl-x86_64.cmake <<'EOF'
-# musl cross-compilation toolchain file for x86_64
-set(CMAKE_SYSTEM_NAME Linux)
-set(CMAKE_SYSTEM_PROCESSOR x86_64)
-
-# Compiler paths
-set(CMAKE_C_COMPILER   /opt/x86_64-linux-musl-cross/bin/x86_64-linux-musl-gcc)
-set(CMAKE_CXX_COMPILER /opt/x86_64-linux-musl-cross/bin/x86_64-linux-musl-g++)
-
-# Search paths for libraries and headers
-set(CMAKE_FIND_ROOT_PATH /usr/local /opt/x86_64-linux-musl-cross)
-
-# How CMake searches
-set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
-set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
-set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
-set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
-EOF
-
         # Export for subsequent cargo/cmake builds
-        export CMAKE_TOOLCHAIN_FILE=/work/toolchain/musl-x86_64.cmake
         export CMAKE_FIND_LIBRARY_SUFFIXES=".a"
         export CMAKE_EXE_LINKER_FLAGS=-static
 
         cd /work
         CARGO_TARGET_DIR="$ctd" \
-        cargo build --release --target "$target" --features "$feats"
+        cargo build --release --target "$target" --features "$feats" -vv  2>&1 | tee /work/build_full_logs.log
       }
 
       build_variant cpu "'"${FEATURES_CPU}"'"
