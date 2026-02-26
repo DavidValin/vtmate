@@ -333,9 +333,21 @@ if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
     # -----------------------------
     # Configure ONNX Runtime using CMake
     # -----------------------------
+    # Create a CMake initial cache file to force static runtime for all dependencies
+    $cacheFile = Join-Path $ONNX_BUILD "initial-cache.cmake"
+    New-Item -ItemType Directory -Force -Path $ONNX_BUILD | Out-Null
+    @"
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded`$<`$<CONFIG:Debug>:Debug>" CACHE STRING "")
+set(CMAKE_POLICY_DEFAULT_CMP0091 NEW CACHE STRING "")
+set(ABSL_MSVC_STATIC_RUNTIME ON CACHE BOOL "")
+set(ONNX_USE_MSVC_STATIC_RUNTIME ON CACHE BOOL "")
+set(onnxruntime_MSVC_STATIC_RUNTIME ON CACHE BOOL "")
+"@ | Out-File -FilePath $cacheFile -Encoding ASCII
+
     $ONNX_CMAKE_ARGS = @(
         "-S", "$ONNX_SRC/cmake",
         "-B", "$ONNX_BUILD",
+        "-C", "$cacheFile",
         "-G", "Visual Studio 17 2022",
         "-A", "x64",
         "-DCMAKE_BUILD_TYPE=Release",
@@ -343,10 +355,10 @@ if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
         "-DBUILD_SHARED_LIBS=OFF",
         "-DCMAKE_COMPILE_WARNING_AS_ERROR=OFF",
         "-DCMAKE_POSITION_INDEPENDENT_CODE=OFF",
-        "-DFETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER",
         "-Donnxruntime_BUILD_SHARED_LIB=OFF",
         "-Donnxruntime_ENABLE_STATIC_ANALYSIS=OFF",
         "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded",
+        "-DCMAKE_POLICY_DEFAULT_CMP0091=NEW",
         "-DCMAKE_C_FLAGS=/MT /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS",
         "-DCMAKE_CXX_FLAGS=/MT /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS",
         "-DCMAKE_C_FLAGS_RELEASE=/MT /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS",
@@ -357,17 +369,20 @@ if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
         "-DCMAKE_CXX_FLAGS_DEBUG=/MTd /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS",
         "-DCMAKE_EXE_LINKER_FLAGS=/DEFAULTLIB:legacy_stdio_definitions.lib /DEFAULTLIB:OLDNAMES.lib",
         "-DCMAKE_STATIC_LINKER_FLAGS=/DEFAULTLIB:legacy_stdio_definitions.lib /DEFAULTLIB:OLDNAMES.lib",
-        "-Donnxruntime_BUILD_UNIT_TESTS=ON",
+        "-Donnxruntime_BUILD_UNIT_TESTS=OFF",
         "-Donnxruntime_USE_AVX=OFF",
         "-Donnxruntime_USE_AVX2=OFF",
         "-Donnxruntime_USE_AVX512=OFF",
-        "-Donnxruntime_RUN_ONNX_TESTS=ON",
+        "-Donnxruntime_RUN_ONNX_TESTS=OFF",
         "-Donnxruntime_USE_XNNPACK=OFF",
         "-Donnxruntime_USE_DML=OFF",
-        "-DBUILD_TESTING=ON",
+        "-DBUILD_TESTING=OFF",
         "-DONNX_USE_MSVC_STATIC_RUNTIME=ON",
         "-DONNX_USE_PROTOBUF_SHARED_LIBS=OFF",
         "-Donnxruntime_USE_FULL_PROTOBUF=OFF",
+        "-Donnxruntime_MSVC_STATIC_RUNTIME=ON",
+        "-DABSL_ENABLE_INSTALL=ON",
+        "-DABSL_MSVC_STATIC_RUNTIME=ON",
         "-Donnxruntime_USE_CUDA=$ONNX_CUDA_FLAG"
     )
 
