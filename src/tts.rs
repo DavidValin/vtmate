@@ -3,7 +3,7 @@
 // ------------------------------------------------------------------
 
 use crossbeam_channel::{Receiver, Sender};
-use kokoro_tiny::TtsEngine;
+use kokoro_micro::TtsEngine;
 mod kokoro_tts;
 use reqwest;
 use std::io::{BufReader, Read};
