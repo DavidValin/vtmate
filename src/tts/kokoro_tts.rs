@@ -4,7 +4,7 @@
 
 use crate::audio::AudioChunk;
 use crossbeam_channel::Sender;
-use kokoro_tiny::TtsEngine;
+use kokoro_micro::TtsEngine;
 use std::sync::{
   Arc, Mutex,
   atomic::{AtomicBool, Ordering},
