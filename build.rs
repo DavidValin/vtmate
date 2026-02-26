@@ -100,12 +100,6 @@ fn main() {
                           let stem = path.file_stem().unwrap().to_string_lossy();
                           println!("cargo:rustc-link-lib=static={}", stem);
                       }
-                      Some("so") | Some("dylib") => {
-                          let stem = path.file_stem().unwrap().to_string_lossy();
-                          // On Unix, dynamic libraries are linked without the "lib" prefix
-                          let lib_name = stem.strip_prefix("lib").unwrap_or(&stem);
-                          println!("cargo:rustc-link-lib={}", lib_name);
-                      }
                       _ => {}
                   }
               }

@@ -306,6 +306,10 @@ if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
             $ONNX_CUDA_FLAG   = "OFF"
             $ONNX_VULKAN_FLAG = "OFF"
             $ONNX_USE_BLAS    = "ON"
+
+            $ORT_EXTRA_CMAKE_ARGS = @(
+              "-DORT_MINIMAL_BUILD=ON"
+            )
         }
         "vulkan" {
             $ONNX_CUDA_FLAG   = "OFF"
@@ -333,6 +337,7 @@ if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
         "-G", "Visual Studio 17 2022",
         "-A", "x64",
         "-DCMAKE_BUILD_TYPE=Release",
+        "-DFETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER",
         "-DBUILD_SHARED_LIBS=OFF",
         "-DCMAKE_COMPILE_WARNING_AS_ERROR=OFF",
         "-DCMAKE_POSITION_INDEPENDENT_CODE=OFF",
@@ -363,6 +368,10 @@ if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
         "-Donnxruntime_USE_FULL_PROTOBUF=ON",
         "-Donnxruntime_USE_CUDA=$ONNX_CUDA_FLAG"
     )
+
+    if ($ORT_EXTRA_CMAKE_ARGS) {
+      $ONNX_CMAKE_ARGS += $ORT_EXTRA_CMAKE_ARGS
+    }
 
     # Conditionally add CUDA-specific options only if CUDA is ON
     if ($ONNX_CUDA_FLAG -eq "ON") {
@@ -443,12 +452,10 @@ if ($WITH_CUDA)     { $CARGO_FEATURES += "whisper-cuda" }
 
 # Before cargo build
 $env:RUSTFLAGS = "-C target-feature=+crt-static `
--C codegen-units=1 `
--C opt-level=3 `
--l static=libcmt `
--l static=libcpmt `
--C link-arg=/DEFAULTLIB:legacy_stdio_definitions.lib `
--C link-arg=/DEFAULTLIB:OLDNAMES.lib"
+                  -C codegen-units=1 `
+                  -C opt-level=3 `
+                  -C link-arg=/DEFAULTLIB:legacy_stdio_definitions.lib `
+                  -C link-arg=/DEFAULTLIB:OLDNAMES.lib"
 
 
 Write-Host "Ensuring Rust target $TARGET is installed..."
