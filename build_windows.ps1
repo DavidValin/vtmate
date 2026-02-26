@@ -295,6 +295,8 @@ if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
 
     # Update submodules
     Push-Location $ONNX_SRC
+    git fetch --tags
+    git checkout tags/v1.23.2 -b build-v1.23.2
     git submodule update --init --recursive --force
     Pop-Location
 
@@ -433,7 +435,7 @@ $env:ESPEAK_NG_DIR           = $ESPEAK_INSTALL
 #     Move-Item -Path $lib.FullName -Destination $dest
 # }
 Write-Host "`n=== FINAL .lib files in $ONNX_BUILD ==="
-Get-ChildItem "$ONNX_BUILD" -Filter *.lib |
+Get-ChildItem -Path $ONNX_BUILD -Filter *.lib -Recurse -File |
     ForEach-Object { Write-Host $_.FullName }
 
 
