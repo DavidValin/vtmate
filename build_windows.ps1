@@ -192,7 +192,7 @@ if (-not (Test-Path $ESPEAK_LIB)) {
       -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="/MT /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS" `
       -DCMAKE_C_FLAGS_DEBUG="/MTd /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS" `
       -DCMAKE_CXX_FLAGS_DEBUG="/MTd /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS" `
-      -DCMAKE_INSTALL_PREFIX=$ESPEAK_INSTALL `
+      -DCMAKE_INSTALL_PREFIX="$ESPEAK_INSTALL" `
       -DBUILD_SHARED_LIBS=OFF `
       -DESPEAKNG_BUILD_TESTS=OFF `
       -DESPEAKNG_BUILD_EXAMPLES=OFF `
@@ -301,122 +301,123 @@ if ($WITH_OPENBLAS) {
 # ==========================================================
 # BUILD ONNX RUNTIME (Single Block, No Duplicates)
 # ==========================================================
-if (-not (Test-Path (Join-Path $ONNX_BUILD "Release\onnxruntime.lib"))) {
+Write-Host "=== Building ONNX Runtime ==="
 
-    Write-Host "=== Building ONNX Runtime ==="
+if (Test-Path $ONNX_SRC) {
+    Write-Host "Removing existing ONNX Runtime source folder..."
+    Remove-Item -Recurse -Force $ONNX_SRC
+}
 
-    # Clone ONNX Runtime if not present
-    if (-not (Test-Path (Join-Path $ONNX_SRC "cmake\CMakeLists.txt"))) {
-        git clone --recursive https://github.com/microsoft/onnxruntime $ONNX_SRC
-    }
+# Clone ONNX Runtime if not present
+if (-not (Test-Path (Join-Path $ONNX_SRC "cmake\CMakeLists.txt"))) {
+    git clone --recursive https://github.com/microsoft/onnxruntime $ONNX_SRC
+}
 
-    # Update submodules
-    Push-Location $ONNX_SRC
-    git fetch --tags
-    git checkout tags/v1.23.2 -b build-v1.23.2
-    git submodule update --init --recursive --force
-    Pop-Location
+# Update submodules
+Push-Location $ONNX_SRC
+git fetch --tags
+git checkout tags/v1.23.2 -b build-v1.23.2
+git submodule update --init --recursive --force
+Pop-Location
 
-    # -----------------------------
-    # Set ONNX flags depending on variant
-    # -----------------------------
-    switch ($VARIANT) {
-        "cpu" {
-            $ONNX_CUDA_FLAG   = "OFF"
-            $ONNX_VULKAN_FLAG = "OFF"
-            $ONNX_USE_BLAS    = "ON"
+# -----------------------------
+# Set ONNX flags depending on variant
+# -----------------------------
+switch ($VARIANT) {
+    "cpu" {
+        $ONNX_CUDA_FLAG   = "OFF"
+        $ONNX_VULKAN_FLAG = "OFF"
+        $ONNX_USE_BLAS    = "ON"
 
-            $ORT_EXTRA_CMAKE_ARGS = @(
-              "-DORT_MINIMAL_BUILD=ON"
-            )
-        }
-        "vulkan" {
-            $ONNX_CUDA_FLAG   = "OFF"
-            $ONNX_VULKAN_FLAG = "ON"
-            $ONNX_USE_BLAS    = "ON"
-        }
-        "cuda" {
-            $ONNX_CUDA_FLAG   = "ON"
-            $ONNX_VULKAN_FLAG = "OFF"
-            $ONNX_USE_BLAS    = "ON"
-        }
-    }
-
-    # Make sure the build directory exists
-    if (-not (Test-Path $ONNX_BUILD)) {
-        New-Item -ItemType Directory -Path $ONNX_BUILD | Out-Null
-    }
-
-    # -----------------------------
-    # Configure ONNX Runtime using CMake
-    # -----------------------------
-
-
-    $ONNX_CMAKE_ARGS = @(
-        "-S", "$ONNX_SRC/cmake",
-        "-B", "$ONNX_BUILD",
-        "-C", "$cacheFile",
-        "-G", "Visual Studio 17 2022",
-        "-A", "x64",
-        "-DCMAKE_CXX_STANDARD=17",
-        "-DCMAKE_CXX_STANDARD_REQUIRED=ON",
-        "-DCMAKE_BUILD_TYPE=Release",
-        "-DFETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER",
-        "-DBUILD_SHARED_LIBS=OFF",
-        "-DCMAKE_COMPILE_WARNING_AS_ERROR=OFF",
-        "-DCMAKE_POSITION_INDEPENDENT_CODE=OFF",
-        "-Donnxruntime_BUILD_SHARED_LIB=OFF",
-        "-Donnxruntime_ENABLE_STATIC_ANALYSIS=OFF",
-        "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded",
-        "-DCMAKE_POLICY_DEFAULT_CMP0091=NEW",
-        "-DCMAKE_C_FLAGS=/MT /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS",
-        "-DCMAKE_CXX_FLAGS=/MT /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS",
-        "-DCMAKE_C_FLAGS_RELEASE=/MT /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS",
-        "-DCMAKE_CXX_FLAGS_RELEASE=/MT /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS",
-        "-DCMAKE_C_FLAGS_RELWITHDEBINFO=/MT /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS",
-        "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=/MT /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS",
-        "-DCMAKE_C_FLAGS_DEBUG=/MTd /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS",
-        "-DCMAKE_CXX_FLAGS_DEBUG=/MTd /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS",
-        "-DCMAKE_EXE_LINKER_FLAGS=/DEFAULTLIB:legacy_stdio_definitions.lib /DEFAULTLIB:OLDNAMES.lib",
-        "-DCMAKE_STATIC_LINKER_FLAGS=/DEFAULTLIB:legacy_stdio_definitions.lib /DEFAULTLIB:OLDNAMES.lib",
-        "-Donnxruntime_BUILD_UNIT_TESTS=OFF",
-        "-Donnxruntime_USE_AVX=OFF",
-        "-Donnxruntime_USE_AVX2=OFF",
-        "-Donnxruntime_USE_AVX512=OFF",
-        "-Donnxruntime_RUN_ONNX_TESTS=OFF",
-        "-Donnxruntime_USE_XNNPACK=OFF",
-        "-Donnxruntime_USE_DML=OFF",
-        "-DBUILD_TESTING=OFF",
-        "-DONNX_USE_MSVC_STATIC_RUNTIME=ON",
-        "-DONNX_USE_PROTOBUF_SHARED_LIBS=OFF",
-        "-Donnxruntime_USE_FULL_PROTOBUF=OFF",
-        "-Donnxruntime_MSVC_STATIC_RUNTIME=ON",
-        "-DABSL_ENABLE_INSTALL=ON",
-        "-DABSL_MSVC_STATIC_RUNTIME=ON",
-        "-Donnxruntime_USE_CUDA=$ONNX_CUDA_FLAG"
-    )
-
-    if ($ORT_EXTRA_CMAKE_ARGS) {
-      $ONNX_CMAKE_ARGS += $ORT_EXTRA_CMAKE_ARGS
-    }
-
-    # Conditionally add CUDA-specific options only if CUDA is ON
-    if ($ONNX_CUDA_FLAG -eq "ON") {
-        $cuda_root = $env:CUDAToolkit_ROOT
-        $ONNX_CMAKE_ARGS += @(
-            "-DCUDAToolkit_ROOT=$cuda_root"
-            # Add other CUDA-related flags here if needed
+        $ORT_EXTRA_CMAKE_ARGS = @(
+          "-DORT_MINIMAL_BUILD=ON"
         )
     }
-
-    # Run CMake with the assembled arguments
-    cmake @ONNX_CMAKE_ARGS
-
-    # -----------------------------
-    # Build ONNX Runtime
-    # -----------------------------
-    cmake --build $ONNX_BUILD --config Release
+    "vulkan" {
+        $ONNX_CUDA_FLAG   = "OFF"
+        $ONNX_VULKAN_FLAG = "ON"
+        $ONNX_USE_BLAS    = "ON"
+    }
+    "cuda" {
+        $ONNX_CUDA_FLAG   = "ON"
+        $ONNX_VULKAN_FLAG = "OFF"
+        $ONNX_USE_BLAS    = "ON"
+    }
 }
+
+# Make sure the build directory exists
+if (-not (Test-Path $ONNX_BUILD)) {
+    New-Item -ItemType Directory -Path $ONNX_BUILD | Out-Null
+}
+
+# -----------------------------
+# Configure ONNX Runtime using CMake
+# -----------------------------
+
+$ONNX_CMAKE_ARGS = @(
+    "-S", "$ONNX_SRC/cmake",
+    "-B", "$ONNX_BUILD",
+    "-C", "$cacheFile",
+    "-G", "Visual Studio 17 2022",
+    "-A", "x64",
+    "-DCMAKE_CXX_STANDARD=17",
+    "-DCMAKE_CXX_STANDARD_REQUIRED=ON",
+    "-DCMAKE_BUILD_TYPE=Release",
+    "-DFETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER",
+    "-DBUILD_SHARED_LIBS=OFF",
+    "-DCMAKE_COMPILE_WARNING_AS_ERROR=OFF",
+    "-DCMAKE_POSITION_INDEPENDENT_CODE=OFF",
+    "-Donnxruntime_BUILD_SHARED_LIB=OFF",
+    "-Donnxruntime_ENABLE_STATIC_ANALYSIS=OFF",
+    "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded",
+    "-DCMAKE_POLICY_DEFAULT_CMP0091=NEW",
+    "-DCMAKE_C_FLAGS=/MT /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS",
+    "-DCMAKE_CXX_FLAGS=/MT /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS",
+    "-DCMAKE_C_FLAGS_RELEASE=/MT /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS",
+    "-DCMAKE_CXX_FLAGS_RELEASE=/MT /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS",
+    "-DCMAKE_C_FLAGS_RELWITHDEBINFO=/MT /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS",
+    "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=/MT /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS",
+    "-DCMAKE_C_FLAGS_DEBUG=/MTd /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS",
+    "-DCMAKE_CXX_FLAGS_DEBUG=/MTd /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS",
+    "-DCMAKE_EXE_LINKER_FLAGS=/DEFAULTLIB:legacy_stdio_definitions.lib /DEFAULTLIB:OLDNAMES.lib",
+    "-DCMAKE_STATIC_LINKER_FLAGS=/DEFAULTLIB:legacy_stdio_definitions.lib /DEFAULTLIB:OLDNAMES.lib",
+    "-Donnxruntime_BUILD_UNIT_TESTS=OFF",
+    "-Donnxruntime_USE_AVX=OFF",
+    "-Donnxruntime_USE_AVX2=OFF",
+    "-Donnxruntime_USE_AVX512=OFF",
+    "-Donnxruntime_RUN_ONNX_TESTS=OFF",
+    "-Donnxruntime_USE_XNNPACK=OFF",
+    "-Donnxruntime_USE_DML=OFF",
+    "-DBUILD_TESTING=OFF",
+    "-DONNX_USE_MSVC_STATIC_RUNTIME=ON",
+    "-DONNX_USE_PROTOBUF_SHARED_LIBS=OFF",
+    "-Donnxruntime_USE_FULL_PROTOBUF=OFF",
+    "-Donnxruntime_MSVC_STATIC_RUNTIME=ON",
+    "-DABSL_ENABLE_INSTALL=ON",
+    "-DABSL_MSVC_STATIC_RUNTIME=ON",
+    "-Donnxruntime_USE_CUDA=$ONNX_CUDA_FLAG"
+)
+
+if ($ORT_EXTRA_CMAKE_ARGS) {
+  $ONNX_CMAKE_ARGS += $ORT_EXTRA_CMAKE_ARGS
+}
+
+# Conditionally add CUDA-specific options only if CUDA is ON
+if ($ONNX_CUDA_FLAG -eq "ON") {
+    $cuda_root = $env:CUDAToolkit_ROOT
+    $ONNX_CMAKE_ARGS += @(
+        "-DCUDAToolkit_ROOT=$cuda_root"
+        # Add other CUDA-related flags here if needed
+    )
+}
+
+# Run CMake with the assembled arguments
+cmake @ONNX_CMAKE_ARGS
+
+# -----------------------------
+# Build ONNX Runtime
+# -----------------------------
+cmake --build $ONNX_BUILD --config Release
 
 
 # ==========================================================
@@ -557,13 +558,25 @@ $env:RUSTFLAGS = "-C target-feature=+crt-static `
                   -C link-arg=$ONNX_BUILD/_deps/abseil_cpp-build/absl/time/Release/absl_civil_time.lib `
                   -C link-arg=$ONNX_BUILD/_deps/abseil_cpp-build/absl/time/Release/absl_time_zone.lib `
                   -C link-arg=$ONNX_BUILD/_deps/abseil_cpp-build/absl/time/Release/absl_time.lib `
-                  -L native=$env:VCPKG_ROOT/installed/x64-windows-static/lib `
-                  -L native=$ONNX_BUILD/_deps/flatbuffers-build/Release `
-                  -L native=$ONNX_BUILD/_deps/onnx-build/Release `
-                  -L native=$ONNX_BUILD/_deps/protobuf-build/Release `
-                  -L native=$ONNX_BUILD/_deps/pytorch_cpuinfo-build/Release `
-                  -L native=$ONNX_BUILD/_deps/onnx-build/Release `
-                  -L native=$ONNX_BUILD/Release `
+                  -C native=$env:VCPKG_ROOT/installed/x64-windows-static/lib `
+                  -C native=$ONNX_BUILD/_deps/protobuf-build/Release/libprotobuf-lite.lib `
+                  -C native=$ONNX_BUILD/_deps/protobuf-build/Release/libprotobuf.lib `
+                  -C native=$ONNX_BUILD/_deps/protobuf-build/Release/libprotoc.lib `
+                  -C native=$ONNX_BUILD/_deps/pytorch_cpuinfo-build/Release/cpuinfo.lib `
+                  -C native=$ONNX_BUILD/_deps/flatbuffers-build/Release/flatbuffers.lib `
+                  -C native=$ONNX_BUILD/Release/onnxruntime_common.lib `
+                  -C native=$ONNX_BUILD/Release/onnxruntime_flatbuffers.lib `
+                  -C native=$ONNX_BUILD/Release/onnxruntime_framework.lib `
+                  -C native=$ONNX_BUILD/Release/onnxruntime_graph.lib `
+                  -C native=$ONNX_BUILD/Release/onnxruntime_lora.lib `
+                  -C native=$ONNX_BUILD/Release/onnxruntime_mlas.lib `
+                  -C native=$ONNX_BUILD/Release/onnxruntime_optimizer.lib `
+                  -C native=$ONNX_BUILD/Release/onnxruntime_providers_shared.lib `
+                  -C native=$ONNX_BUILD/Release/onnxruntime_providers.lib `
+                  -C native=$ONNX_BUILD/Release/onnxruntime_session.lib `
+                  -C native=$ONNX_BUILD/Release/onnxruntime_util.lib `
+                  -C native=$ONNX_BUILD/_deps/onnx-build/Release/onnx_proto.lib `
+                  -C native=$ONNX_BUILD/_deps/onnx-build/Release/onnx.lib `
                   -C link-arg=/DEFAULTLIB:legacy_stdio_definitions.lib `
                   -C link-arg=/DEFAULTLIB:OLDNAMES.lib "
 
