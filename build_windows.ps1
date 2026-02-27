@@ -483,9 +483,26 @@ if ($WITH_CUDA)     { $CARGO_FEATURES += "whisper-cuda" }
 $env:RUSTFLAGS = "-C target-feature=+crt-static `
                   -C codegen-units=1 `
                   -C opt-level=3 `
+                  -L native=$ONNX_BUILD\_deps\onnx-build\Release `
                   -L native=$env:VCPKG_ROOT\installed\x64-windows-static\lib `
+                  -L native=$ONNX_BUILD\Release `
+                  -L native=$ONNX_BUILD\_deps\abseil_cpp-build\absl\base\Release `
+                  -L native=$ONNX_BUILD\_deps\abseil_cpp-build\absl\container\Release `
+                  -L native=$ONNX_BUILD\_deps\abseil_cpp-build\absl\crc\Release `
+                  -L native=$ONNX_BUILD\_deps\abseil_cpp-build\absl\flags\Release `
+                  -L native=$ONNX_BUILD\_deps\abseil_cpp-build\absl\hash\Release `
+                  -L native=$ONNX_BUILD\_deps\abseil_cpp-build\absl\log\Release `
+                  -L native=$ONNX_BUILD\_deps\abseil_cpp-build\absl\numeric\Release `
+                  -L native=$ONNX_BUILD\_deps\abseil_cpp-build\absl\profiling\Release `
+                  -L native=$ONNX_BUILD\_deps\abseil_cpp-build\absl\strings\Release `
+                  -L native=$ONNX_BUILD\_deps\abseil_cpp-build\absl\synchronization\Release `
+                  -L native=$ONNX_BUILD\_deps\abseil_cpp-build\absl\time\Release `
+                  -L native=$ONNX_BUILD\_deps\flatbuffers-build\Release `
+                  -L native=$ONNX_BUILD\_deps\onnx-build\Release `
+                  -L native=$ONNX_BUILD\_deps\protobuf-build\Release `
+                  -L native=$ONNX_BUILD\_deps\pytorch_cpuinfo-build\Release `
                   -C link-arg=/DEFAULTLIB:legacy_stdio_definitions.lib `
-                  -C link-arg=/DEFAULTLIB:OLDNAMES.lib"
+                  -C link-arg=/DEFAULTLIB:OLDNAMES.lib "
 
 
 Write-Host "Ensuring Rust target $TARGET is installed..."
