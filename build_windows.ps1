@@ -500,7 +500,7 @@ $env:RUSTFLAGS = "-C target-feature=+crt-static `
                   -C link-arg=$ONNX_BUILD/_deps/abseil_cpp-build/absl/time/Release/absl_civil_time.lib `
                   -C link-arg=$ONNX_BUILD/_deps/abseil_cpp-build/absl/time/Release/absl_time_zone.lib `
                   -C link-arg=$ONNX_BUILD/_deps/abseil_cpp-build/absl/time/Release/absl_time.lib `
-                  -C link-arg=$env:VCPKG_ROOT/packages/re2_x64-windows-static/lib/re2.lib `
+                  -C link-arg=$env:VCPKG_ROOT/installed/x64-windows-static/lib/re2.lib `
                   -C link-arg=$ONNX_BUILD/_deps/protobuf-build/Release/libprotobuf-lite.lib `
                   -C link-arg=$ONNX_BUILD/_deps/protobuf-build/Release/libprotobuf.lib `
                   -C link-arg=$ONNX_BUILD/_deps/protobuf-build/Release/libprotoc.lib `
