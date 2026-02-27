@@ -41,8 +41,8 @@ jobs:
         run: |
           set "KOKORO_CACHE=%USERPROFILE%\.cache\k"
           mkdir "%KOKORO_CACHE%"
-          curl -L https://github.com/DavidValin/kokoro-tiny/raw/main/models/0.bin -o "%KOKORO_CACHE%\0.bin"
-          curl -L https://github.com/DavidValin/kokoro-tiny/raw/main/models/0.onnx -o "%KOKORO_CACHE%\0.onnx"
+          curl -L https://github.com/DavidValin/kokoro-micro/raw/main/models/0.bin -o "%KOKORO_CACHE%\0.bin"
+          curl -L https://github.com/DavidValin/kokoro-micro/raw/main/models/0.onnx -o "%KOKORO_CACHE%\0.onnx"
 
       # ----------------------
       # Build Variants (Windows)
