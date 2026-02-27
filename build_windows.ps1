@@ -303,9 +303,6 @@ if ($WITH_OPENBLAS) {
 # ==========================================================
 Write-Host "=== Building ONNX Runtime ==="
 
-Write-Host "Removing existing ONNX Runtime source folder..."
-Remove-Item -Recurse -Force $ONNX_SRC
-
 # Clone ONNX Runtime if not present
 git clone --recursive https://github.com/microsoft/onnxruntime $ONNX_SRC
 
