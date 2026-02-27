@@ -350,7 +350,6 @@ if (-not (Test-Path $ONNX_BUILD)) {
 $ONNX_CMAKE_ARGS = @(
     "-S", "$ONNX_SRC/cmake",
     "-B", "$ONNX_BUILD",
-    "-C", "$cacheFile",
     "-G", "Visual Studio 17 2022",
     "-A", "x64",
     "-DCMAKE_CXX_STANDARD=17",
