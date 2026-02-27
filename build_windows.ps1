@@ -142,19 +142,6 @@ else {
     Remove-Item Env:CUDA_ROOT -ErrorAction SilentlyContinue
 }
 
-# Create a CMake initial cache file to force static runtime for all dependencies
-# $cacheFile = Join-Path $ONNX_BUILD "initial-cache.cmake"
-# New-Item -ItemType Directory -Force -Path $ONNX_BUILD | Out-Null
-# @"
-# set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded" CACHE STRING "")
-# set(CMAKE_POLICY_DEFAULT_CMP0091 NEW CACHE STRING "")
-# set(ABSL_MSVC_STATIC_RUNTIME ON CACHE BOOL "")
-# set(ONNX_USE_MSVC_STATIC_RUNTIME ON CACHE BOOL "")
-# set(onnxruntime_MSVC_STATIC_RUNTIME ON CACHE BOOL "")
-# set(CMAKE_CXX_STANDARD 17 CACHE STRING "Use C++17 standard")
-# SET(CMAKE_CXX_STANDARD_REQUIRED ON CACHE BOOL "")
-# "@ | Out-File -FilePath $cacheFile -Encoding ASCII
-
 # ==========================================================
 # BUILD ESPEAK-NG STATIC
 # ==========================================================
@@ -269,34 +256,6 @@ if ($WITH_OPENBLAS) {
     $env:OpenBLAS_LIBRARIES = $OPENBLAS_LIB
     $env:OpenBLAS_INCLUDE_DIR = $INCLUDE_DIR
 }
-
-# ==========================================================
-# BUILD PROTOC STATIC
-# ==========================================================
-
-# git clone -b v3.21.12 https://github.com/protocolbuffers/protobuf.git $PROTOC_SRC
-# ensure directories
-# New-Item -ItemType Directory -Force -Path $PROTOC_BUILD, $PROTOC_INSTALL
-# cd $PROTOC_BUILD
-# cmake $PROTOC_SRC\cmake `
-#     -G "Visual Studio 17 2022" `
-#     -A x64 `
-#     -DCMAKE_BUILD_TYPE=Release `
-#     -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
-#     -DCMAKE_C_FLAGS_RELEASE=/MT `
-#     -DCMAKE_CXX_FLAGS_RELEASE=/MT `
-#     -DCMAKE_C_FLAGS_RELWITHDEBINFO=/MT `
-#     -DCMAKE_CXX_FLAGS_RELWITHDEBINFO=/MT `
-#     -DCMAKE_C_FLAGS_DEBUG=/MTd `
-#     -DCMAKE_CXX_FLAGS_DEBUG=/MTd `
-#     -Dprotobuf_MSVC_STATIC_RUNTIME=ON `
-#     -DPROTOBUF_USE_DLLS=OFF `
-#     -DMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=ON `
-#     -DBUILD_SHARED_LIBS=OFF `
-#     -DCMAKE_INSTALL_PREFIX="$PROTOC_INSTALL" `
-#     -Dprotobuf_BUILD_TESTS=OFF
-# cmake --build . --config Release --target INSTALL
-# $PROTOC_BIN = "$PROTOC_INSTALL\bin\protoc.exe"
 
 # ==========================================================
 # BUILD ONNX RUNTIME (Single Block, No Duplicates)
@@ -446,22 +405,13 @@ $env:ORT_SYS_STATIC_CRT      = "1"
 $env:ESPEAK_RS_STATIC_CRT    = "1"
 $env:ESPEAK_NG_DIR           = $ESPEAK_INSTALL
 
-# Write-Host "`n=== ONNX .lib files BEFORE move ==="
-# $allLibs = Get-ChildItem -Path $ONNX_BUILD -Filter *.lib -Recurse
-# $allLibs | ForEach-Object { Write-Host $_.FullName }
-# New-Item -ItemType Directory -Force -Path $ONNX_BUILD | Out-Null
-# Write-Host "`n=== Moving all .lib files to $ONNX_BUILD ==="
-# foreach ($lib in $allLibs) {
-#     $dest = Join-Path $ONNX_BUILD $lib.Name
-#     if (Test-Path $dest) {
-#         $uniqueName = [System.IO.Path]::GetFileNameWithoutExtension($lib.Name) + "_" +
-#                       ([System.Guid]::NewGuid().ToString("N").Substring(0,8)) + ".lib"
-#         $dest = Join-Path $ONNX_BUILD $uniqueName
-#     }
-#     Move-Item -Path $lib.FullName -Destination $dest
-# }
+
 Write-Host "`n=== FINAL .lib files in $ONNX_BUILD ==="
 Get-ChildItem -Path $ONNX_BUILD -Filter *.lib -Recurse -File |
+    ForEach-Object { Write-Host $_.FullName }
+
+Write-Host "`n=== VCPKG .lib files in $env:VCPKG_ROOT ==="
+Get-ChildItem -Path "$env:VCPKG_ROOT" -Recurse -File -Filter *.lib |
     ForEach-Object { Write-Host $_.FullName }
 
 
@@ -550,7 +500,7 @@ $env:RUSTFLAGS = "-C target-feature=+crt-static `
                   -C link-arg=$ONNX_BUILD/_deps/abseil_cpp-build/absl/time/Release/absl_civil_time.lib `
                   -C link-arg=$ONNX_BUILD/_deps/abseil_cpp-build/absl/time/Release/absl_time_zone.lib `
                   -C link-arg=$ONNX_BUILD/_deps/abseil_cpp-build/absl/time/Release/absl_time.lib `
-                  -C link-arg=$env:VCPKG_ROOT/installed/x64-windows-static/lib `
+                  -C link-arg=$env:VCPKG_ROOT/packages/re2_x64-windows-static/lib/re2.lib `
                   -C link-arg=$ONNX_BUILD/_deps/protobuf-build/Release/libprotobuf-lite.lib `
                   -C link-arg=$ONNX_BUILD/_deps/protobuf-build/Release/libprotobuf.lib `
                   -C link-arg=$ONNX_BUILD/_deps/protobuf-build/Release/libprotoc.lib `
