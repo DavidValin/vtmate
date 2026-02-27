@@ -596,7 +596,7 @@ DOCKERFILE
 
         # Make ort crate find the onnx musl static build
         export ORT_STRATEGY=system
-        export ORT_LIB_LOCATION=/work/deps/onnxruntime/build-static
+        export ORT_LIB_LOCATION=/work/deps/onnxruntime
         export ORT_DEBUG=1
         export RUSTFLAGS="-C target-feature=+crt-static -C target-cpu=native -C codegen-units=1 -C opt-level=3 -C link-arg=/usr/local/lib/libopenblas.a -C link-arg=-lm -C link-arg=-lgfortran -C link-arg=-lpthread"
         export RUSTC_LINKER=x86_64-linux-musl-g++
