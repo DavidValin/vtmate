@@ -79,16 +79,16 @@ fn main() {
       // Iterate over all library files in the directory
       if cfg!(windows) {
           // On Windows, link all .lib files statically
-          for entry in fs::read_dir(lib_path).expect("Failed to read ORT_LIB_LOCATION") {
-              let entry = entry.expect("Failed to read entry in ORT_LIB_LOCATION");
-              let path = entry.path();
-              if let Some(ext) = path.extension() {
-                  if ext == "lib" {
-                      let stem = path.file_stem().unwrap().to_string_lossy();
-                      println!("cargo:rustc-link-lib=static={}", stem);
-                  }
-              }
-          }
+          // for entry in fs::read_dir(lib_path).expect("Failed to read ORT_LIB_LOCATION") {
+          //     let entry = entry.expect("Failed to read entry in ORT_LIB_LOCATION");
+          //     let path = entry.path();
+          //     if let Some(ext) = path.extension() {
+          //         if ext == "lib" {
+          //             let stem = path.file_stem().unwrap().to_string_lossy();
+          //             println!("cargo:rustc-link-lib=static={}", stem);
+          //         }
+          //     }
+          // }
       } else if cfg!(unix) {
           // On Unix/macOS, link all .a (static) or .so/.dylib (dynamic) files
           for entry in fs::read_dir(lib_path).expect("Failed to read ORT_LIB_LOCATION") {
