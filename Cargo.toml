@@ -25,7 +25,7 @@ whisper-rs = { version = "0.15.1" }
 hound = "3"
 crossterm = "0.27"
 tokio = { version = "1", features = ["rt", "macros"] }
-kokoro-tiny = { version = "0.2.0", git = "https://github.com/DavidValin/kokoro-tiny.git", rev = "cd9524a", features = ["as-lib"] }
+kokoro-micro = { version = "1.0.0" }
 ort = { version = "2.0.0-rc.11", default-features = false, features = [ "std", "ndarray", "tls-rustls" ] }
 flate2 = "1"
 tar = "0.4"
