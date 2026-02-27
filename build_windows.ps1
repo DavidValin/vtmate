@@ -143,17 +143,17 @@ else {
 }
 
 # Create a CMake initial cache file to force static runtime for all dependencies
-$cacheFile = Join-Path $ONNX_BUILD "initial-cache.cmake"
-New-Item -ItemType Directory -Force -Path $ONNX_BUILD | Out-Null
-@"
-set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded" CACHE STRING "")
-set(CMAKE_POLICY_DEFAULT_CMP0091 NEW CACHE STRING "")
-set(ABSL_MSVC_STATIC_RUNTIME ON CACHE BOOL "")
-set(ONNX_USE_MSVC_STATIC_RUNTIME ON CACHE BOOL "")
-set(onnxruntime_MSVC_STATIC_RUNTIME ON CACHE BOOL "")
-set(CMAKE_CXX_STANDARD 17 CACHE STRING "Use C++17 standard")
-SET(CMAKE_CXX_STANDARD_REQUIRED ON CACHE BOOL "")
-"@ | Out-File -FilePath $cacheFile -Encoding ASCII
+# $cacheFile = Join-Path $ONNX_BUILD "initial-cache.cmake"
+# New-Item -ItemType Directory -Force -Path $ONNX_BUILD | Out-Null
+# @"
+# set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded" CACHE STRING "")
+# set(CMAKE_POLICY_DEFAULT_CMP0091 NEW CACHE STRING "")
+# set(ABSL_MSVC_STATIC_RUNTIME ON CACHE BOOL "")
+# set(ONNX_USE_MSVC_STATIC_RUNTIME ON CACHE BOOL "")
+# set(onnxruntime_MSVC_STATIC_RUNTIME ON CACHE BOOL "")
+# set(CMAKE_CXX_STANDARD 17 CACHE STRING "Use C++17 standard")
+# SET(CMAKE_CXX_STANDARD_REQUIRED ON CACHE BOOL "")
+# "@ | Out-File -FilePath $cacheFile -Encoding ASCII
 
 # ==========================================================
 # BUILD ESPEAK-NG STATIC
@@ -303,15 +303,11 @@ if ($WITH_OPENBLAS) {
 # ==========================================================
 Write-Host "=== Building ONNX Runtime ==="
 
-if (Test-Path $ONNX_SRC) {
-    Write-Host "Removing existing ONNX Runtime source folder..."
-    Remove-Item -Recurse -Force $ONNX_SRC
-}
+Write-Host "Removing existing ONNX Runtime source folder..."
+Remove-Item -Recurse -Force $ONNX_SRC
 
 # Clone ONNX Runtime if not present
-if (-not (Test-Path (Join-Path $ONNX_SRC "cmake\CMakeLists.txt"))) {
-    git clone --recursive https://github.com/microsoft/onnxruntime $ONNX_SRC
-}
+git clone --recursive https://github.com/microsoft/onnxruntime $ONNX_SRC
 
 # Update submodules
 Push-Location $ONNX_SRC
