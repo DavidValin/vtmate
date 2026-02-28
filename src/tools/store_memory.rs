@@ -1,13 +1,21 @@
+// ------------------------------------------------------------------
+//  Tool: Store memory
+// ------------------------------------------------------------------
+
 use serde_json::json;
 use serde_json::Value;
-
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
-
 use super::Tool;
 use crate::memory::{KnowledgeUnit, Memory, Predicate};
 
+// API
+// ------------------------------------------------------------------
+
 pub struct StoreMemoryTool;
+
+// PRIVATE
+// ------------------------------------------------------------------
 
 impl StoreMemoryTool {
   pub fn new() -> Self {
@@ -20,24 +28,24 @@ impl Tool for StoreMemoryTool {
     "store_memory"
   }
 
-  fn handle(&self, args: &Value) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+  fn handle(&self, tool_call_args: &Value) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     // Extract required fields
-    let subject = args
+    let subject = tool_call_args
       .get("subject")
       .and_then(|v| v.as_str())
       .ok_or("Missing or invalid 'subject'")?;
-    let predicate = args
+    let predicate = tool_call_args
       .get("predicate")
       .and_then(|v| v.as_str())
       .ok_or("Missing or invalid 'predicate'")?;
-    let object = args
+    let object = tool_call_args
       .get("object")
       .and_then(|v| v.as_str())
       .ok_or("Missing or invalid 'object'")?;
 
     // Optional fields
-    let location = args.get("location").and_then(|v| v.as_str());
-    let timestamp = match args.get("timestamp") {
+    let location = tool_call_args.get("location").and_then(|v| v.as_str());
+    let timestamp = match tool_call_args.get("timestamp") {
       Some(v) => {
         let secs = v.as_i64().ok_or("Invalid 'timestamp'")?;
         Some(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs as u64))

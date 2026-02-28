@@ -1,3 +1,7 @@
+// ------------------------------------------------------------------
+//  Memory
+// ------------------------------------------------------------------
+
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::{HashMap, HashSet};
 use hnsw_rs::prelude::*;
@@ -9,6 +13,9 @@ use std::io::{BufReader, BufWriter};
 use serde_json::Value;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
+
+// API
+// ------------------------------------------------------------------
 
 // Sample of LLM use
 // 
@@ -41,11 +48,13 @@ pub struct Predicate {
   pub inverse: String,
 }
 
+
 impl Predicate {
   pub fn to_string(&self) -> String {
     self.name.clone()
   }
 }
+
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KnowledgeUnit {
@@ -56,12 +65,12 @@ pub struct KnowledgeUnit {
   pub timestamp: SystemTime,
 }
 
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct VecKnowledgeUnit {
   pub embedding: Vec<f32>,
   pub knowledge: KnowledgeUnit,
 }
-
 
 
 pub struct Memory {
@@ -308,7 +317,7 @@ impl Memory {
     let max_layer = 16.min((expected_elements as f32).ln().trunc() as usize);
     let ef_construction = 200;
 
-    let mut hnsw: Hnsw<'static, f32, DistL2> = Hnsw::new(
+    let hnsw: Hnsw<'static, f32, DistL2> = Hnsw::new(
       max_nb_connection,
       expected_elements,
       max_layer,
@@ -343,7 +352,11 @@ impl Memory {
 
 }
 
+// PRIVATE
+// ------------------------------------------------------------------
+
 static AVAILABLE_PREDICATES: &[(&str, &str)] = &[
+  // predicate          // inverse
   ("believed",          "was believed by"),
   ("assumed",           "was assumed by"),
   ("made",              "was made by"),

@@ -1,10 +1,20 @@
+// ------------------------------------------------------------------
+//  Tool: Remember
+// ------------------------------------------------------------------
+
 use super::Tool;
 use crate::memory::Memory;
 use serde_json::json;
 use serde_json::Value;
 use std::path::Path;
 
+// API
+// ------------------------------------------------------------------
+
 pub struct RememberTool;
+
+// PRIVATE
+// ------------------------------------------------------------------
 
 impl RememberTool {
   pub fn new() -> Self {
@@ -17,10 +27,10 @@ impl Tool for RememberTool {
     "remember"
   }
 
-  fn handle(&self, args: &Value) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+  fn handle(&self, tool_call_args: &Value) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     // Validation handled in tools.rs
     // Extract query string
-    let query = args
+    let query = tool_call_args
       .get("query")
       .and_then(|v| v.as_str())
       .ok_or("Missing or invalid 'query'")?;

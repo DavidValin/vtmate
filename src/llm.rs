@@ -5,14 +5,25 @@
 use std::sync::{Arc, atomic::AtomicU64};
 use crossbeam_channel::Receiver;
 use reqwest::StatusCode;
+use crate::tools::{get_available_tools};
+use crate::tools::remember::RememberTool;
+use crate::tools::store_memory::StoreMemoryTool;
+use crate::tools::Tool;
 use futures_util::StreamExt;
+use serde_json::{Value, json};
 use bytes::Bytes;
+
+fn extract_tool_calls_from_choice(choice: &Value) -> Option<String> {
+  let wrapper = json!({"choices":[choice]});
+  crate::tools::handle_tool_call_from_json(&wrapper.to_string())
+}
 
 /// Stream response from Llama/Ollama endpoints, fallback if one fails, and mid-stream cancellation support
 pub async fn llama_server_stream_response_into(
   prompt: &str,
   llama_host: &str,
   llama_model: &str,
+  
   server_type: &str,
   stop_all_rx: &Receiver<()>,
   interrupt_counter: Arc<AtomicU64>,
@@ -20,6 +31,7 @@ pub async fn llama_server_stream_response_into(
   on_piece: &mut dyn FnMut(&str),
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
+  let mut full_payload = String::new();
   #[derive(Clone, Copy, Debug)]
   enum ApiKind { OaiChat, OllamaGenerate, OllamaChat, LegacyCompletion }
 
@@ -27,13 +39,33 @@ pub async fn llama_server_stream_response_into(
   struct ChatMessage<'a> { role: &'a str, content: &'a str }
 
   #[derive(serde::Serialize)]
-  struct OaiChatReq<'a> { model: &'a str, messages: Vec<ChatMessage<'a>>, stream: bool }
+  struct OaiChatReq<'a> {
+    model: &'a str,
+    messages: Vec<ChatMessage<'a>>,
+    stream: bool,
+    tools: Option<Vec<serde_json::Value>>,
+    tool_choice: &'a str
+  }
 
   #[derive(serde::Serialize)]
-  struct OllamaGenerateReq<'a> { model: &'a str, prompt: &'a str, stream: bool, #[serde(skip_serializing_if = "Option::is_none")] max_tokens: Option<u32> }
+  struct OllamaGenerateReq<'a> {
+    model: &'a str,
+    prompt: &'a str,
+    stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<u32>,
+    tools: Option<Vec<serde_json::Value>>,
+    tool_choice: &'a str
+  }
 
   #[derive(serde::Serialize)]
-  struct OllamaChatReq<'a> { model: &'a str, messages: Vec<ChatMessage<'a>>, stream: bool }
+  struct OllamaChatReq<'a> {
+    model: &'a str,
+    messages: Vec<ChatMessage<'a>>,
+    stream: bool,
+    tools: Option<Vec<serde_json::Value>>,
+    tool_choice: &'a str
+  }
 
   #[derive(serde::Serialize)]
   struct LegacyCompletionReq<'a> {
@@ -61,6 +93,8 @@ pub async fn llama_server_stream_response_into(
     cache_prompt: bool,
     api_key: &'a str,
     slot_id: i32,
+    tools: Option<Vec<serde_json::Value>>,
+    tool_choice: &'a str
   }
 
   fn should_fallback_status(code: StatusCode) -> bool {
@@ -101,6 +135,7 @@ pub async fn llama_server_stream_response_into(
   let client = reqwest::Client::new();
   let tries = candidates(llama_host, server_type);
   let mut last_err: Option<String> = None;
+  let tool_schemas = get_available_tools()?;
 
   for (url, kind) in tries {
     if stop_all_rx.try_recv().is_ok() ||
@@ -116,25 +151,53 @@ pub async fn llama_server_stream_response_into(
           ChatMessage { role: "system", content: "You are a helpful assistant." },
           ChatMessage { role: "user", content: prompt },
         ];
-        client.post(&url).json(&OaiChatReq { model: llama_model, messages, stream: true })
+        let payload = serde_json::to_value(OaiChatReq {
+          model: llama_model,
+          messages,
+          stream: true,
+          tools: Some(tool_schemas.clone()),
+          tool_choice: "auto"
+        })?;
+        // crate::log::log("debug", &format!("LLM payload: {}", payload));
+        client.post(&url).json(&payload)
       }
+
       ApiKind::OllamaGenerate => {
-        client.post(&url).json(&OllamaGenerateReq { model: llama_model, prompt, stream: true, max_tokens: Some(1024) })
+        let payload = serde_json::to_value(OllamaGenerateReq {
+          model: llama_model,
+          prompt: prompt,
+          stream: true,
+          max_tokens: Some(1024),
+          tools: Some(tool_schemas.clone()),
+          tool_choice: "auto"
+        })?;
+        //crate::log::log("debug", &format!("LLM payload: {}", payload));
+        client.post(&url).json(&payload)
       }
+
       ApiKind::OllamaChat => {
         let messages = vec![
           ChatMessage { role: "system", content: "You are a helpful assistant." },
           ChatMessage { role: "user", content: prompt },
         ];
-        client.post(&url).json(&OllamaChatReq { model: llama_model, messages, stream: true })
+        let payload = serde_json::to_value(OllamaChatReq {
+          model: llama_model,
+          messages: messages,
+          stream: true,
+          tools: Some(tool_schemas.clone()),
+          tool_choice: "auto"
+        })?;
+        //crate::log::log("debug", &format!("LLM payload: {}", payload));
+        client.post(&url).json(&payload)
       }
+
       ApiKind::LegacyCompletion => {
-        client.post(&url).json(&LegacyCompletionReq {
-          prompt,
+        let payload = serde_json::to_value(LegacyCompletionReq {
+          prompt: prompt,
           stream: true,
           n_predict: 400,
           temperature: 0.7,
-          stop: vec!["</s>", "Assistant:", "User:"],
+          stop: ["</s>", "Assistant:", "User:"].to_vec(),
           repeat_last_n: 256,
           repeat_penalty: 1.18,
           top_k: 40,
@@ -150,11 +213,15 @@ pub async fn llama_server_stream_response_into(
           grammar: "",
           n_probs: 0,
           min_keep: 0,
-          image_data: vec![],
+          image_data: [].to_vec(),
           cache_prompt: true,
           api_key: "",
           slot_id: -1,
-        })
+          tools: Some(tool_schemas.clone()),
+          tool_choice: "auto"
+        })?;
+        //crate::log::log("debug", &format!("LLM payload: {}", payload));
+        client.post(&url).json(&payload)
       }
     };
 
@@ -203,14 +270,20 @@ pub async fn llama_server_stream_response_into(
         // crate::log::log("debug", &format!("chunk: {}", text));
         for line in text.lines() {
           let payload = line.trim().strip_prefix("data:").unwrap_or(line).trim();
-          if payload == "[DONE]" { return Ok(()); }
+          if payload == "[DONE]" {
+            // crate::log::log("info", &format!("Full payload: {}", full_payload.to_string()));
+            return Ok(());
+          }
 
           // parse JSON safely
           if let Ok(v) = serde_json::from_str::<serde_json::Value>(payload) {
             // Handle new Llama3.2 style: {"message":{"content":...}}
             if let Some(message) = v.get("message") {
               if let Some(content) = message.get("content").and_then(|c| c.as_str()) {
-                if !content.is_empty() { on_piece(content); }
+                if !content.is_empty() {
+                  on_piece(&content);
+                  full_payload.push_str(&content);
+                }
               }
             } else {
               match kind {
@@ -219,10 +292,14 @@ pub async fn llama_server_stream_response_into(
                     for choice in choices {
                       if let Some(delta) = choice.get("delta") {
                         if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
-                          if !content.is_empty() { on_piece(content); }
+                          if !content.is_empty() {
+                            on_piece(content);
+                            full_payload.push_str(&content);
+                          }
                         }
                       }
                       if choice.get("finish_reason").and_then(|r| r.as_str()) == Some("stop") {
+                        // crate::log::log("info", &format!("Full payload: {}", full_payload.to_string()));
                         return Ok(());
                       }
                     }
@@ -230,12 +307,19 @@ pub async fn llama_server_stream_response_into(
                   if v.get("done").and_then(|x| x.as_bool()) == Some(true)
                     || v.get("status").and_then(|x| x.as_str()) == Some("completed")
                   {
+                    // crate::log::log("info", &format!("Full payload: {}", full_payload.to_string()));
                     return Ok(());
                   }
                 }
                 ApiKind::LegacyCompletion => {
-                  if let Some(content) = v.get("content").and_then(|c| c.as_str()) { on_piece(content); }
-                  if v.get("stop").and_then(|s| s.as_bool()) == Some(true) { return Ok(()); }
+                  if let Some(content) = v.get("content").and_then(|c| c.as_str()) {
+                    on_piece(content);
+                    full_payload.push_str(content);
+                  }
+                  if v.get("stop").and_then(|s| s.as_bool()) == Some(true) {
+                    // crate::log::log("info", &format!("Full payload: {}", full_payload.to_string()));
+                    return Ok(());
+                  }
                 }
               }
             }

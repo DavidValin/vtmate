@@ -1,19 +1,49 @@
+// ------------------------------------------------------------------
+//  Tool handling
+// ------------------------------------------------------------------
+
 use remember::RememberTool;
-use serde_json::Value;
+use serde_json::{Value, json};
 use store_memory::StoreMemoryTool;
+
+// API
+// ------------------------------------------------------------------
+
 
 pub mod remember;
 pub mod store_memory;
 
-// Represents a tool with handle and schema
 pub trait Tool {
   fn name(&self) -> &str;
-  fn handle(&self, args: &Value) -> Result<String, Box<dyn std::error::Error + Send + Sync>>;
+  fn handle(&self, tool_call_args: &Value) -> Result<String, Box<dyn std::error::Error + Send + Sync>>;
   fn json_schema() -> Result<Value, Box<dyn std::error::Error + Send + Sync>>;
 }
 
-pub fn validate(
-  args: &Value,
+pub fn get_available_tools() -> Result<Vec<Value>, Box<dyn std::error::Error + Send + Sync>> {
+  let remember_schema = RememberTool::json_schema()?;
+  let store_schema = StoreMemoryTool::json_schema()?;
+  Ok(vec![
+    json!({
+        "type": "function",
+        "function": {
+            "name": "remember",
+            "description": "",
+            "parameters": remember_schema
+        }
+    }),
+    json!({
+        "type": "function",
+        "function": {
+            "name": "store_memory",
+            "description": "",
+            "parameters": store_schema
+        }
+    }),
+  ])
+}
+
+pub fn validate_tool_call(
+  tool_call_args: &Value,
   schema: &Value,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   // Locate parameters section: function.parameters
@@ -23,7 +53,7 @@ pub fn validate(
     if let Some(required) = schema_params.get("required").and_then(|v| v.as_array()) {
       for key in required {
         if let Some(k) = key.as_str() {
-          if !args.get(k).is_some() {
+          if !tool_call_args.get(k).is_some() {
             return Err(format!("Missing required field: {}", k).into());
           }
         }
@@ -32,7 +62,7 @@ pub fn validate(
     // properties validation
     if let Some(schema_props) = schema_params.get("properties").and_then(|v| v.as_object()) {
       for (name, schema_prop_def) in schema_props {
-        if let Some(arg_val) = args.get(name) {
+        if let Some(arg_val) = tool_call_args.get(name) {
           if let Some(type_str) = schema_prop_def.get("type").and_then(|v| v.as_str()) {
             let type_ok = match type_str {
               "string" => arg_val.is_string(),
@@ -75,7 +105,7 @@ pub fn handle_tool_call(
     "remember" => RememberTool::json_schema()?,
     _ => return Err(format!("Unknown tool: {}", name).into()),
   };
-  validate(args, &schema)?;
+  validate_tool_call(args, &schema)?;
   match name {
     "store_memory" => StoreMemoryTool::new().handle(args),
     "remember" => RememberTool::new().handle(args),
@@ -100,7 +130,6 @@ pub fn handle_tool_call_from_json(chunk: &str) -> Option<String> {
 
     crate::log::log("debug", name);
     crate::log::log("debug", arguments);
-    
 
     match handle_tool_call(&payload) {
       Ok(out) => outputs.push(out),
