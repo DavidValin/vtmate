@@ -17,8 +17,8 @@ use std::time::Duration;
 //   Construct the prompt for llm:
 //     1. provide a list of available predicates
 //     2. provide sample tool call (example json at src/tools/store_memory_sample.json)
-//     3. add original user prompt
-//     4. execute tool call from LLM
+//     3. add original user prompt to tool call sample and submit it
+//     4. execute tool call from LLM response
 //
 // Retrieve memories:
 // ----------------------------------------------

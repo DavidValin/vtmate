@@ -21,6 +21,7 @@ mod tts;
 mod ui;
 mod util;
 mod memory;
+mod tools;
 
 static START_INSTANT: OnceLock<Instant> = OnceLock::new();
 
