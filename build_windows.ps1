@@ -472,9 +472,9 @@ if ($WITH_CUDA)     { $CARGO_FEATURES += "whisper-cuda" }
 # Move vcpkg re2.lib dep to target folder so ort-sys can find it
 # NOTE: (for some reason onnx runtime doesnt build re2.lib)
 # Copy-Item -Path "C:\vcpkg\installed\x64-windows-static\lib\re2.lib" -Destination "$ONNX_BUILD\_deps\onnx-build\Release\re2.lib" -Force
-Remove-Item -Path "C:\vcpkg\installed\*" -Recurse -Force
-Remove-Item -Path "C:\vcpkg\buildtrees\*" -Recurse -Force
-Remove-Item -Path "C:\vcpkg\packages\*" -Recurse -Force
+# Remove-Item -Path "C:\vcpkg\installed\*" -Recurse -Force
+# Remove-Item -Path "C:\vcpkg\buildtrees\*" -Recurse -Force
+# Remove-Item -Path "C:\vcpkg\packages\*" -Recurse -Force
 
 # Before cargo build
 $env:RUSTFLAGS = "-C target-feature=+crt-static `
