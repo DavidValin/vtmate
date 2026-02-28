@@ -91,19 +91,19 @@ fn main() {
           // }
       } else if cfg!(unix) {
           // On Unix/macOS, link all .a (static) or .so/.dylib (dynamic) files
-          for entry in fs::read_dir(lib_path).expect("Failed to read ORT_LIB_LOCATION") {
-              let entry = entry.expect("Failed to read entry in ORT_LIB_LOCATION");
-              let path = entry.path();
-              if let Some(ext) = path.extension() {
-                  match ext.to_str() {
-                      Some("a") => {
-                          let stem = path.file_stem().unwrap().to_string_lossy();
-                          println!("cargo:rustc-link-lib=static={}", stem);
-                      }
-                      _ => {}
-                  }
-              }
-          }
+          // for entry in fs::read_dir(lib_path).expect("Failed to read ORT_LIB_LOCATION") {
+          //     let entry = entry.expect("Failed to read entry in ORT_LIB_LOCATION");
+          //     let path = entry.path();
+          //     if let Some(ext) = path.extension() {
+          //         match ext.to_str() {
+          //             Some("a") => {
+          //                 let stem = path.file_stem().unwrap().to_string_lossy();
+          //                 println!("cargo:rustc-link-lib=static={}", stem);
+          //             }
+          //             _ => {}
+          //         }
+          //     }
+          // }
       }
 
       // Set include path for ONNX Runtime headers

@@ -374,7 +374,8 @@ cmake --build $ONNX_BUILD --config Release
 # ==========================================================
 # INSTALL RE2 as static lib
 # ==========================================================
-$env:VCPKG_ROOT = "C:\vcpkg"
+$VCPKG_ROOT = "C:\vcpkg"
+$env:VCPKG_ROOT = $VCPKG_ROOT
 & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat"
 & "$env:VCPKG_ROOT\vcpkg.exe" install re2:x64-windows-static
 
@@ -436,6 +437,7 @@ if ($WITH_CUDA)     { $CARGO_FEATURES += "whisper-cuda" }
 $env:RUSTFLAGS = "-C target-feature=+crt-static `
                   -C codegen-units=1 `
                   -C opt-level=3 `
+                  -L link-arg=C:/vcpkg/installed/x64-windows-static/lib `
                   -C link-arg=$ONNX_BUILD/_deps/abseil_cpp-build/absl/base/Release/absl_base.lib `
                   -C link-arg=$ONNX_BUILD/_deps/abseil_cpp-build/absl/base/Release/absl_log_severity.lib `
                   -C link-arg=$ONNX_BUILD/_deps/abseil_cpp-build/absl/base/Release/absl_malloc_internal.lib `
@@ -500,7 +502,6 @@ $env:RUSTFLAGS = "-C target-feature=+crt-static `
                   -C link-arg=$ONNX_BUILD/_deps/abseil_cpp-build/absl/time/Release/absl_civil_time.lib `
                   -C link-arg=$ONNX_BUILD/_deps/abseil_cpp-build/absl/time/Release/absl_time_zone.lib `
                   -C link-arg=$ONNX_BUILD/_deps/abseil_cpp-build/absl/time/Release/absl_time.lib `
-                  -C link-arg=$env:VCPKG_ROOT/installed/x64-windows-static/lib/re2.lib `
                   -C link-arg=$ONNX_BUILD/_deps/protobuf-build/Release/libprotobuf-lite.lib `
                   -C link-arg=$ONNX_BUILD/_deps/protobuf-build/Release/libprotobuf.lib `
                   -C link-arg=$ONNX_BUILD/_deps/protobuf-build/Release/libprotoc.lib `
