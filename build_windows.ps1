@@ -568,6 +568,8 @@ $env:RUSTFLAGS = "-C target-feature=+crt-static `
 
 $env:CXXFLAGS="/std:c++17 /MT /D_CRT_SECURE_NO_WARNINGS /D_CRT_NONSTDC_NO_DEPRECATE"
 
+Set-Location $PROJECT_ROOT
+
 Write-Host "Ensuring Rust target $TARGET is installed..."
 rustup target add $TARGET
 
