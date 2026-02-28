@@ -381,6 +381,10 @@ $Re2ZipUrl = "https://github.com/google/re2/archive/refs/tags/2024-07-02.zip"
 $DownloadDir = "C:\Temp\re2_download"
 $InstallDir  = "$ONNX_BUILD/_deps/onnx-build/Release"
 
+Write-Host "All files under $ONNX_BUILD/_deps/abseil_cpp-build :"
+Get-ChildItem "$ONNX_BUILD/_deps/abseil_cpp-build" -Recurse -File -Force
+Write-Host "====================================================="
+
 # Create folders
 New-Item -ItemType Directory -Path $DownloadDir -Force
 New-Item -ItemType Directory -Path $InstallDir -Force
@@ -482,7 +486,7 @@ if ($WITH_CUDA)     { $CARGO_FEATURES += "whisper-cuda" }
 $env:RUSTFLAGS = "-C target-feature=+crt-static `
                   -C codegen-units=1 `
                   -C opt-level=3 `
-                  -C link-arg=$ONNX_BUILD/_deps\onnx-build\Release\re2.lib `
+                  -C link-arg=$ONNX_BUILD/_deps/onnx-build/Release/re2.lib `
                   -C link-arg=$ONNX_BUILD/_deps/abseil_cpp-build/absl/base/Release/absl_base.lib `
                   -C link-arg=$ONNX_BUILD/_deps/abseil_cpp-build/absl/base/Release/absl_log_severity.lib `
                   -C link-arg=$ONNX_BUILD/_deps/abseil_cpp-build/absl/base/Release/absl_malloc_internal.lib `
