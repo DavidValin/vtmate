@@ -374,9 +374,6 @@ cmake --build $ONNX_BUILD --config Release
 # ==========================================================
 # INSTALL RE2 as static lib
 # ==========================================================
-# -----------------------------
-# CONFIG
-# -----------------------------
 $Re2ZipUrl = "https://github.com/google/re2/archive/refs/tags/2024-07-02.zip"
 $DownloadDir = "C:\Temp\re2_download"
 $InstallDir  = "$ONNX_BUILD/_deps/onnx-build/Release"
@@ -403,23 +400,97 @@ $BuildDir = Join-Path $SourceDir "build"
 New-Item -ItemType Directory -Path $BuildDir -Force
 Set-Location $BuildDir
 
+$AbslInclude  = "$ONNX_BUILD/_deps/abseil_cpp-build"
+
+$AbslLibs = @(
+    "$AbslInclude/absl/base/Release/absl_base.lib",
+    "$AbslInclude/absl/base/Release/absl_log_severity.lib",
+    "$AbslInclude/absl/base/Release/absl_malloc_internal.lib",
+    "$AbslInclude/absl/base/Release/absl_raw_logging_internal.lib",
+    "$AbslInclude/absl/base/Release/absl_spinlock_wait.lib",
+    "$AbslInclude/absl/base/Release/absl_strerror.lib",
+    "$AbslInclude/absl/base/Release/absl_throw_delegate.lib",
+    "$AbslInclude/absl/base/Release/absl_tracing_internal.lib",
+    "$AbslInclude/absl/container/Release/absl_hashtablez_sampler.lib",
+    "$AbslInclude/absl/container/Release/absl_raw_hash_set.lib",
+    "$AbslInclude/absl/crc/Release/absl_crc_cord_state.lib",
+    "$AbslInclude/absl/crc/Release/absl_crc_cpu_detect.lib",
+    "$AbslInclude/absl/crc/Release/absl_crc_internal.lib",
+    "$AbslInclude/absl/crc/Release/absl_crc32c.lib",
+    "$AbslInclude/absl/debugging/Release/absl_debugging_internal.lib",
+    "$AbslInclude/absl/debugging/Release/absl_decode_rust_punycode.lib",
+    "$AbslInclude/absl/debugging/Release/absl_demangle_internal.lib",
+    "$AbslInclude/absl/debugging/Release/absl_demangle_rust.lib",
+    "$AbslInclude/absl/debugging/Release/absl_examine_stack.lib",
+    "$AbslInclude/absl/debugging/Release/absl_leak_check.lib",
+    "$AbslInclude/absl/debugging/Release/absl_stacktrace.lib",
+    "$AbslInclude/absl/debugging/Release/absl_symbolize.lib",
+    "$AbslInclude/absl/debugging/Release/absl_utf8_for_code_point.lib",
+    "$AbslInclude/absl/flags/Release/absl_flags_commandlineflag_internal.lib",
+    "$AbslInclude/absl/flags/Release/absl_flags_commandlineflag.lib",
+    "$AbslInclude/absl/flags/Release/absl_flags_config.lib",
+    "$AbslInclude/absl/flags/Release/absl_flags_internal.lib",
+    "$AbslInclude/absl/flags/Release/absl_flags_marshalling.lib",
+    "$AbslInclude/absl/flags/Release/absl_flags_private_handle_accessor.lib",
+    "$AbslInclude/absl/flags/Release/absl_flags_program_name.lib",
+    "$AbslInclude/absl/flags/Release/absl_flags_reflection.lib",
+    "$AbslInclude/absl/hash/Release/absl_city.lib",
+    "$AbslInclude/absl/hash/Release/absl_hash.lib",
+    "$AbslInclude/absl/hash/Release/absl_low_level_hash.lib",
+    "$AbslInclude/absl/log/Release/absl_log_globals.lib",
+    "$AbslInclude/absl/log/Release/absl_log_internal_check_op.lib",
+    "$AbslInclude/absl/log/Release/absl_log_internal_conditions.lib",
+    "$AbslInclude/absl/log/Release/absl_log_internal_fnmatch.lib",
+    "$AbslInclude/absl/log/Release/absl_log_internal_format.lib",
+    "$AbslInclude/absl/log/Release/absl_log_internal_globals.lib",
+    "$AbslInclude/absl/profiling/Release/absl_exponential_biased.lib",
+    "$AbslInclude/absl/strings/Release/absl_log_internal_log_sink_set.lib",
+    "$AbslInclude/absl/strings/Release/absl_log_internal_message.lib",
+    "$AbslInclude/absl/strings/Release/absl_log_internal_nullguard.lib",
+    "$AbslInclude/absl/strings/Release/absl_log_internal_proto.lib",
+    "$AbslInclude/absl/strings/Release/absl_log_internal_structured_proto.lib",
+    "$AbslInclude/absl/strings/Release/absl_log_sink.lib",
+    "$AbslInclude/absl/strings/Release/absl_vlog_config_internal.lib",
+    "$AbslInclude/absl/numeric/Release/absl_int128.lib",
+    "$AbslInclude/absl/strings/Release/absl_cord_internal.lib",
+    "$AbslInclude/absl/strings/Release/absl_cord.lib",
+    "$AbslInclude/absl/strings/Release/absl_cordz_functions.lib",
+    "$AbslInclude/absl/strings/Release/absl_cordz_handle.lib",
+    "$AbslInclude/absl/strings/Release/absl_cordz_info.lib",
+    "$AbslInclude/absl/strings/Release/absl_str_format_internal.lib",
+    "$AbslInclude/absl/strings/Release/absl_string_view.lib",
+    "$AbslInclude/absl/strings/Release/absl_strings_internal.lib",
+    "$AbslInclude/absl/strings/Release/absl_strings.lib",
+    "$AbslInclude/absl/synchronization/Release/absl_graphcycles_internal.lib",
+    "$AbslInclude/absl/synchronization/Release/absl_kernel_timeout_internal.lib",
+    "$AbslInclude/absl/synchronization/Release/absl_synchronization.lib",
+    "$AbslInclude/absl/time/Release/absl_civil_time.lib",
+    "$AbslInclude/absl/time/Release/absl_time_zone.lib",
+    "$AbslInclude/absl/time/Release/absl_time.lib"
+)
+
+# Convert the array to a semicolon-separated string for CMake
+$AbslLibsString = [string]::Join(";", $AbslLibs)
+$re2InstallDir   = "$ONNX_BUILD/_deps/onnx-build/Release/re2"
+
 Write-Host "Configuring CMake..."
 cmake -G "Visual Studio 17 2022" `
       -A x64 `
       -DCMAKE_BUILD_TYPE=Release `
-      -DCMAKE_INSTALL_PREFIX=$InstallDir `
-      -DCMAKE_PREFIX_PATH="$ONNX_BUILD/_deps/abseil_cpp-build" `
-      -Dabsl_DIR="$ONNX_BUILD/_deps/abseil_cpp-build" `
+      -DCMAKE_INSTALL_PREFIX=$re2InstallDir `
       -DBUILD_SHARED_LIBS=OFF `
       -DRE2_BUILD_TESTING=OFF `
+      -DRE2_USE_EXTERNAL_ABSL=ON `
+      -DABSL_INCLUDE_DIR=$AbslInclude `
+      -DABSL_LIBRARY=$AbslLibsString `
       $SourceDir
 
 cmake --build . --config Release
 cmake --build . --config Release --target INSTALL
 
 Write-Host "Done installing re2.lib!"
-Write-Host "Static library: $InstallDir\lib"
-Write-Host "Headers: $InstallDir\include"
+Write-Host "Static library: $re2InstallDir\lib"
+Write-Host "Headers: $re2InstallDir\include"
 
 
 # ==========================================================
@@ -486,7 +557,7 @@ if ($WITH_CUDA)     { $CARGO_FEATURES += "whisper-cuda" }
 $env:RUSTFLAGS = "-C target-feature=+crt-static `
                   -C codegen-units=1 `
                   -C opt-level=3 `
-                  -C link-arg=$ONNX_BUILD/_deps/onnx-build/Release/re2.lib `
+                  -C link-arg=$ONNX_BUILD/_deps/onnx-build/Release/re2/lib/re2.lib `
                   -C link-arg=$ONNX_BUILD/_deps/abseil_cpp-build/absl/base/Release/absl_base.lib `
                   -C link-arg=$ONNX_BUILD/_deps/abseil_cpp-build/absl/base/Release/absl_log_severity.lib `
                   -C link-arg=$ONNX_BUILD/_deps/abseil_cpp-build/absl/base/Release/absl_malloc_internal.lib `
