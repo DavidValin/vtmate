@@ -374,6 +374,433 @@ cmake --build $ONNX_BUILD --config Release
 # ==========================================================
 # INSTALL RE2 as static lib
 # ==========================================================
+
+$AbslCMakePath = "$ONNX_BUILD/_deps/abseil_cpp-build/UseAbsl.cmake"
+$AbslInclude  = "$ONNX_BUILD/_deps/abseil_cpp-build"
+
+Set-Content -Path $AbslCMakePath -Value @"
+# UseAbsl.cmake - Imported Abseil targets for RE2
+# Set AbslInclude to your ONNXRuntime Abseil build folder
+set(AbslInclude "C:/path/to/onnx/_deps/abseil_cpp-build")
+
+# --------------------
+# Base
+# --------------------
+add_library(absl::base STATIC IMPORTED)
+set_target_properties(absl::base PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/base/Release/absl_base.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::absl_log STATIC IMPORTED)
+set_target_properties(absl::absl_log PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/base/Release/absl_log_severity.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::malloc_internal STATIC IMPORTED)
+set_target_properties(absl::malloc_internal PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/base/Release/absl_malloc_internal.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::raw_logging_internal STATIC IMPORTED)
+set_target_properties(absl::raw_logging_internal PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/base/Release/absl_raw_logging_internal.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::spinlock_wait STATIC IMPORTED)
+set_target_properties(absl::spinlock_wait PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/base/Release/absl_spinlock_wait.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::strerror STATIC IMPORTED)
+set_target_properties(absl::strerror PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/base/Release/absl_strerror.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::throw_delegate STATIC IMPORTED)
+set_target_properties(absl::throw_delegate PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/base/Release/absl_throw_delegate.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::tracing_internal STATIC IMPORTED)
+set_target_properties(absl::tracing_internal PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/base/Release/absl_tracing_internal.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+# --------------------
+# Container
+# --------------------
+add_library(absl::hashtablez_sampler STATIC IMPORTED)
+set_target_properties(absl::hashtablez_sampler PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/container/Release/absl_hashtablez_sampler.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::raw_hash_set STATIC IMPORTED)
+set_target_properties(absl::raw_hash_set PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/container/Release/absl_raw_hash_set.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+# --------------------
+# CRC
+# --------------------
+add_library(absl::crc_cord_state STATIC IMPORTED)
+set_target_properties(absl::crc_cord_state PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/crc/Release/absl_crc_cord_state.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::crc_cpu_detect STATIC IMPORTED)
+set_target_properties(absl::crc_cpu_detect PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/crc/Release/absl_crc_cpu_detect.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::crc_internal STATIC IMPORTED)
+set_target_properties(absl::crc_internal PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/crc/Release/absl_crc_internal.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::crc32c STATIC IMPORTED)
+set_target_properties(absl::crc32c PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/crc/Release/absl_crc32c.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+# --------------------
+# Debugging
+# --------------------
+add_library(absl::debugging_internal STATIC IMPORTED)
+set_target_properties(absl::debugging_internal PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/debugging/Release/absl_debugging_internal.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::decode_rust_punycode STATIC IMPORTED)
+set_target_properties(absl::decode_rust_punycode PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/debugging/Release/absl_decode_rust_punycode.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::demangle_internal STATIC IMPORTED)
+set_target_properties(absl::demangle_internal PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/debugging/Release/absl_demangle_internal.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::demangle_rust STATIC IMPORTED)
+set_target_properties(absl::demangle_rust PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/debugging/Release/absl_demangle_rust.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::examine_stack STATIC IMPORTED)
+set_target_properties(absl::examine_stack PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/debugging/Release/absl_examine_stack.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::leak_check STATIC IMPORTED)
+set_target_properties(absl::leak_check PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/debugging/Release/absl_leak_check.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::stacktrace STATIC IMPORTED)
+set_target_properties(absl::stacktrace PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/debugging/Release/absl_stacktrace.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::symbolize STATIC IMPORTED)
+set_target_properties(absl::symbolize PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/debugging/Release/absl_symbolize.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::utf8_for_code_point STATIC IMPORTED)
+set_target_properties(absl::utf8_for_code_point PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/debugging/Release/absl_utf8_for_code_point.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+# --------------------
+# Flags
+# --------------------
+add_library(absl::flags_commandlineflag_internal STATIC IMPORTED)
+set_target_properties(absl::flags_commandlineflag_internal PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/flags/Release/absl_flags_commandlineflag_internal.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::flags_commandlineflag STATIC IMPORTED)
+set_target_properties(absl::flags_commandlineflag PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/flags/Release/absl_flags_commandlineflag.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::flags_config STATIC IMPORTED)
+set_target_properties(absl::flags_config PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/flags/Release/absl_flags_config.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::flags_internal STATIC IMPORTED)
+set_target_properties(absl::flags_internal PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/flags/Release/absl_flags_internal.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::flags_marshalling STATIC IMPORTED)
+set_target_properties(absl::flags_marshalling PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/flags/Release/absl_flags_marshalling.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::flags_private_handle_accessor STATIC IMPORTED)
+set_target_properties(absl::flags_private_handle_accessor PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/flags/Release/absl_flags_private_handle_accessor.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::flags_program_name STATIC IMPORTED)
+set_target_properties(absl::flags_program_name PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/flags/Release/absl_flags_program_name.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::flags_reflection STATIC IMPORTED)
+set_target_properties(absl::flags_reflection PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/flags/Release/absl_flags_reflection.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+# --------------------
+# Hash
+# --------------------
+add_library(absl::city STATIC IMPORTED)
+set_target_properties(absl::city PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/hash/Release/absl_city.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::hash STATIC IMPORTED)
+set_target_properties(absl::hash PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/hash/Release/absl_hash.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::low_level_hash STATIC IMPORTED)
+set_target_properties(absl::low_level_hash PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/hash/Release/absl_low_level_hash.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+# --------------------
+# Log
+# --------------------
+add_library(absl::log_globals STATIC IMPORTED)
+set_target_properties(absl::log_globals PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/log/Release/absl_log_globals.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::log_internal_check_op STATIC IMPORTED)
+set_target_properties(absl::log_internal_check_op PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/log/Release/absl_log_internal_check_op.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::log_internal_conditions STATIC IMPORTED)
+set_target_properties(absl::log_internal_conditions PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/log/Release/absl_log_internal_conditions.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::log_internal_fnmatch STATIC IMPORTED)
+set_target_properties(absl::log_internal_fnmatch PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/log/Release/absl_log_internal_fnmatch.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::log_internal_format STATIC IMPORTED)
+set_target_properties(absl::log_internal_format PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/log/Release/absl_log_internal_format.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::log_internal_globals STATIC IMPORTED)
+set_target_properties(absl::log_internal_globals PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/log/Release/absl_log_internal_globals.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+# --------------------
+# Profiling
+# --------------------
+add_library(absl::exponential_biased STATIC IMPORTED)
+set_target_properties(absl::exponential_biased PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/profiling/Release/absl_exponential_biased.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+# --------------------
+# Strings
+# --------------------
+add_library(absl::log_internal_log_sink_set STATIC IMPORTED)
+set_target_properties(absl::log_internal_log_sink_set PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/strings/Release/absl_log_internal_log_sink_set.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::log_internal_message STATIC IMPORTED)
+set_target_properties(absl::log_internal_message PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/strings/Release/absl_log_internal_message.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::log_internal_nullguard STATIC IMPORTED)
+set_target_properties(absl::log_internal_nullguard PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/strings/Release/absl_log_internal_nullguard.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::log_internal_proto STATIC IMPORTED)
+set_target_properties(absl::log_internal_proto PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/strings/Release/absl_log_internal_proto.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::log_internal_structured_proto STATIC IMPORTED)
+set_target_properties(absl::log_internal_structured_proto PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/strings/Release/absl_log_internal_structured_proto.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::log_sink STATIC IMPORTED)
+set_target_properties(absl::log_sink PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/strings/Release/absl_log_sink.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::vlog_config_internal STATIC IMPORTED)
+set_target_properties(absl::vlog_config_internal PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/strings/Release/absl_vlog_config_internal.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::int128 STATIC IMPORTED)
+set_target_properties(absl::int128 PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/numeric/Release/absl_int128.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::cord_internal STATIC IMPORTED)
+set_target_properties(absl::cord_internal PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/strings/Release/absl_cord_internal.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::cord STATIC IMPORTED)
+set_target_properties(absl::cord PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/strings/Release/absl_cord.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::cordz_functions STATIC IMPORTED)
+set_target_properties(absl::cordz_functions PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/strings/Release/absl_cordz_functions.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::cordz_handle STATIC IMPORTED)
+set_target_properties(absl::cordz_handle PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/strings/Release/absl_cordz_handle.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::cordz_info STATIC IMPORTED)
+set_target_properties(absl::cordz_info PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/strings/Release/absl_cordz_info.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::str_format_internal STATIC IMPORTED)
+set_target_properties(absl::str_format_internal PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/strings/Release/absl_str_format_internal.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::string_view STATIC IMPORTED)
+set_target_properties(absl::string_view PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/strings/Release/absl_string_view.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::strings_internal STATIC IMPORTED)
+set_target_properties(absl::strings_internal PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/strings/Release/absl_strings_internal.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::strings STATIC IMPORTED)
+set_target_properties(absl::strings PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/strings/Release/absl_strings.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+# --------------------
+# Synchronization
+# --------------------
+add_library(absl::graphcycles_internal STATIC IMPORTED)
+set_target_properties(absl::graphcycles_internal PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/synchronization/Release/absl_graphcycles_internal.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::kernel_timeout_internal STATIC IMPORTED)
+set_target_properties(absl::kernel_timeout_internal PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/synchronization/Release/abbl_kernel_timeout_internal.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::synchronization STATIC IMPORTED)
+set_target_properties(absl::synchronization PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/synchronization/Release/absl_synchronization.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+# --------------------
+# Time
+# --------------------
+add_library(absl::civil_time STATIC IMPORTED)
+set_target_properties(absl::civil_time PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/time/Release/absl_civil_time.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::time_zone STATIC IMPORTED)
+set_target_properties(absl::time_zone PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/time/Release/absl_time_zone.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+
+add_library(absl::time STATIC IMPORTED)
+set_target_properties(absl::time PROPERTIES
+    IMPORTED_LOCATION "${AbslInclude}/absl/time/Release/absl_time.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${AbslInclude}"
+)
+"@
+
 $Re2ZipUrl = "https://github.com/google/re2/archive/refs/tags/2024-07-02.zip"
 $DownloadDir = "C:\Temp\re2_download"
 $InstallDir  = "$ONNX_BUILD/_deps/onnx-build/Release"
@@ -400,77 +827,74 @@ $BuildDir = Join-Path $SourceDir "build"
 New-Item -ItemType Directory -Path $BuildDir -Force
 Set-Location $BuildDir
 
-$AbslInclude  = "$ONNX_BUILD/_deps/abseil_cpp-build"
-
-$AbslLibs = @(
-    "$AbslInclude/absl/base/Release/absl_base.lib",
-    "$AbslInclude/absl/base/Release/absl_log_severity.lib",
-    "$AbslInclude/absl/base/Release/absl_malloc_internal.lib",
-    "$AbslInclude/absl/base/Release/absl_raw_logging_internal.lib",
-    "$AbslInclude/absl/base/Release/absl_spinlock_wait.lib",
-    "$AbslInclude/absl/base/Release/absl_strerror.lib",
-    "$AbslInclude/absl/base/Release/absl_throw_delegate.lib",
-    "$AbslInclude/absl/base/Release/absl_tracing_internal.lib",
-    "$AbslInclude/absl/container/Release/absl_hashtablez_sampler.lib",
-    "$AbslInclude/absl/container/Release/absl_raw_hash_set.lib",
-    "$AbslInclude/absl/crc/Release/absl_crc_cord_state.lib",
-    "$AbslInclude/absl/crc/Release/absl_crc_cpu_detect.lib",
-    "$AbslInclude/absl/crc/Release/absl_crc_internal.lib",
-    "$AbslInclude/absl/crc/Release/absl_crc32c.lib",
-    "$AbslInclude/absl/debugging/Release/absl_debugging_internal.lib",
-    "$AbslInclude/absl/debugging/Release/absl_decode_rust_punycode.lib",
-    "$AbslInclude/absl/debugging/Release/absl_demangle_internal.lib",
-    "$AbslInclude/absl/debugging/Release/absl_demangle_rust.lib",
-    "$AbslInclude/absl/debugging/Release/absl_examine_stack.lib",
-    "$AbslInclude/absl/debugging/Release/absl_leak_check.lib",
-    "$AbslInclude/absl/debugging/Release/absl_stacktrace.lib",
-    "$AbslInclude/absl/debugging/Release/absl_symbolize.lib",
-    "$AbslInclude/absl/debugging/Release/absl_utf8_for_code_point.lib",
-    "$AbslInclude/absl/flags/Release/absl_flags_commandlineflag_internal.lib",
-    "$AbslInclude/absl/flags/Release/absl_flags_commandlineflag.lib",
-    "$AbslInclude/absl/flags/Release/absl_flags_config.lib",
-    "$AbslInclude/absl/flags/Release/absl_flags_internal.lib",
-    "$AbslInclude/absl/flags/Release/absl_flags_marshalling.lib",
-    "$AbslInclude/absl/flags/Release/absl_flags_private_handle_accessor.lib",
-    "$AbslInclude/absl/flags/Release/absl_flags_program_name.lib",
-    "$AbslInclude/absl/flags/Release/absl_flags_reflection.lib",
-    "$AbslInclude/absl/hash/Release/absl_city.lib",
-    "$AbslInclude/absl/hash/Release/absl_hash.lib",
-    "$AbslInclude/absl/hash/Release/absl_low_level_hash.lib",
-    "$AbslInclude/absl/log/Release/absl_log_globals.lib",
-    "$AbslInclude/absl/log/Release/absl_log_internal_check_op.lib",
-    "$AbslInclude/absl/log/Release/absl_log_internal_conditions.lib",
-    "$AbslInclude/absl/log/Release/absl_log_internal_fnmatch.lib",
-    "$AbslInclude/absl/log/Release/absl_log_internal_format.lib",
-    "$AbslInclude/absl/log/Release/absl_log_internal_globals.lib",
-    "$AbslInclude/absl/profiling/Release/absl_exponential_biased.lib",
-    "$AbslInclude/absl/strings/Release/absl_log_internal_log_sink_set.lib",
-    "$AbslInclude/absl/strings/Release/absl_log_internal_message.lib",
-    "$AbslInclude/absl/strings/Release/absl_log_internal_nullguard.lib",
-    "$AbslInclude/absl/strings/Release/absl_log_internal_proto.lib",
-    "$AbslInclude/absl/strings/Release/absl_log_internal_structured_proto.lib",
-    "$AbslInclude/absl/strings/Release/absl_log_sink.lib",
-    "$AbslInclude/absl/strings/Release/absl_vlog_config_internal.lib",
-    "$AbslInclude/absl/numeric/Release/absl_int128.lib",
-    "$AbslInclude/absl/strings/Release/absl_cord_internal.lib",
-    "$AbslInclude/absl/strings/Release/absl_cord.lib",
-    "$AbslInclude/absl/strings/Release/absl_cordz_functions.lib",
-    "$AbslInclude/absl/strings/Release/absl_cordz_handle.lib",
-    "$AbslInclude/absl/strings/Release/absl_cordz_info.lib",
-    "$AbslInclude/absl/strings/Release/absl_str_format_internal.lib",
-    "$AbslInclude/absl/strings/Release/absl_string_view.lib",
-    "$AbslInclude/absl/strings/Release/absl_strings_internal.lib",
-    "$AbslInclude/absl/strings/Release/absl_strings.lib",
-    "$AbslInclude/absl/synchronization/Release/absl_graphcycles_internal.lib",
-    "$AbslInclude/absl/synchronization/Release/absl_kernel_timeout_internal.lib",
-    "$AbslInclude/absl/synchronization/Release/absl_synchronization.lib",
-    "$AbslInclude/absl/time/Release/absl_civil_time.lib",
-    "$AbslInclude/absl/time/Release/absl_time_zone.lib",
-    "$AbslInclude/absl/time/Release/absl_time.lib"
-)
+# $AbslLibs = @(
+#     "$AbslInclude/absl/base/Release/absl_base.lib",
+#     "$AbslInclude/absl/base/Release/absl_log_severity.lib",
+#     "$AbslInclude/absl/base/Release/absl_malloc_internal.lib",
+#     "$AbslInclude/absl/base/Release/absl_raw_logging_internal.lib",
+#     "$AbslInclude/absl/base/Release/absl_spinlock_wait.lib",
+#     "$AbslInclude/absl/base/Release/absl_strerror.lib",
+#     "$AbslInclude/absl/base/Release/absl_throw_delegate.lib",
+#     "$AbslInclude/absl/base/Release/absl_tracing_internal.lib",
+#     "$AbslInclude/absl/container/Release/absl_hashtablez_sampler.lib",
+#     "$AbslInclude/absl/container/Release/absl_raw_hash_set.lib",
+#     "$AbslInclude/absl/crc/Release/absl_crc_cord_state.lib",
+#     "$AbslInclude/absl/crc/Release/absl_crc_cpu_detect.lib",
+#     "$AbslInclude/absl/crc/Release/absl_crc_internal.lib",
+#     "$AbslInclude/absl/crc/Release/absl_crc32c.lib",
+#     "$AbslInclude/absl/debugging/Release/absl_debugging_internal.lib",
+#     "$AbslInclude/absl/debugging/Release/absl_decode_rust_punycode.lib",
+#     "$AbslInclude/absl/debugging/Release/absl_demangle_internal.lib",
+#     "$AbslInclude/absl/debugging/Release/absl_demangle_rust.lib",
+#     "$AbslInclude/absl/debugging/Release/absl_examine_stack.lib",
+#     "$AbslInclude/absl/debugging/Release/absl_leak_check.lib",
+#     "$AbslInclude/absl/debugging/Release/absl_stacktrace.lib",
+#     "$AbslInclude/absl/debugging/Release/absl_symbolize.lib",
+#     "$AbslInclude/absl/debugging/Release/absl_utf8_for_code_point.lib",
+#     "$AbslInclude/absl/flags/Release/absl_flags_commandlineflag_internal.lib",
+#     "$AbslInclude/absl/flags/Release/absl_flags_commandlineflag.lib",
+#     "$AbslInclude/absl/flags/Release/absl_flags_config.lib",
+#     "$AbslInclude/absl/flags/Release/absl_flags_internal.lib",
+#     "$AbslInclude/absl/flags/Release/absl_flags_marshalling.lib",
+#     "$AbslInclude/absl/flags/Release/absl_flags_private_handle_accessor.lib",
+#     "$AbslInclude/absl/flags/Release/absl_flags_program_name.lib",
+#     "$AbslInclude/absl/flags/Release/absl_flags_reflection.lib",
+#     "$AbslInclude/absl/hash/Release/absl_city.lib",
+#     "$AbslInclude/absl/hash/Release/absl_hash.lib",
+#     "$AbslInclude/absl/hash/Release/absl_low_level_hash.lib",
+#     "$AbslInclude/absl/log/Release/absl_log_globals.lib",
+#     "$AbslInclude/absl/log/Release/absl_log_internal_check_op.lib",
+#     "$AbslInclude/absl/log/Release/absl_log_internal_conditions.lib",
+#     "$AbslInclude/absl/log/Release/absl_log_internal_fnmatch.lib",
+#     "$AbslInclude/absl/log/Release/absl_log_internal_format.lib",
+#     "$AbslInclude/absl/log/Release/absl_log_internal_globals.lib",
+#     "$AbslInclude/absl/profiling/Release/absl_exponential_biased.lib",
+#     "$AbslInclude/absl/strings/Release/absl_log_internal_log_sink_set.lib",
+#     "$AbslInclude/absl/strings/Release/absl_log_internal_message.lib",
+#     "$AbslInclude/absl/strings/Release/absl_log_internal_nullguard.lib",
+#     "$AbslInclude/absl/strings/Release/absl_log_internal_proto.lib",
+#     "$AbslInclude/absl/strings/Release/absl_log_internal_structured_proto.lib",
+#     "$AbslInclude/absl/strings/Release/absl_log_sink.lib",
+#     "$AbslInclude/absl/strings/Release/absl_vlog_config_internal.lib",
+#     "$AbslInclude/absl/numeric/Release/absl_int128.lib",
+#     "$AbslInclude/absl/strings/Release/absl_cord_internal.lib",
+#     "$AbslInclude/absl/strings/Release/absl_cord.lib",
+#     "$AbslInclude/absl/strings/Release/absl_cordz_functions.lib",
+#     "$AbslInclude/absl/strings/Release/absl_cordz_handle.lib",
+#     "$AbslInclude/absl/strings/Release/absl_cordz_info.lib",
+#     "$AbslInclude/absl/strings/Release/absl_str_format_internal.lib",
+#     "$AbslInclude/absl/strings/Release/absl_string_view.lib",
+#     "$AbslInclude/absl/strings/Release/absl_strings_internal.lib",
+#     "$AbslInclude/absl/strings/Release/absl_strings.lib",
+#     "$AbslInclude/absl/synchronization/Release/absl_graphcycles_internal.lib",
+#     "$AbslInclude/absl/synchronization/Release/absl_kernel_timeout_internal.lib",
+#     "$AbslInclude/absl/synchronization/Release/absl_synchronization.lib",
+#     "$AbslInclude/absl/time/Release/absl_civil_time.lib",
+#     "$AbslInclude/absl/time/Release/absl_time_zone.lib",
+#     "$AbslInclude/absl/time/Release/absl_time.lib"
+# )
 
 # Convert the array to a semicolon-separated string for CMake
-$AbslLibsString = [string]::Join(";", $AbslLibs)
 $re2InstallDir   = "$ONNX_BUILD/_deps/onnx-build/Release/re2"
 
 Write-Host "Configuring CMake..."
@@ -481,8 +905,7 @@ cmake -G "Visual Studio 17 2022" `
       -DBUILD_SHARED_LIBS=OFF `
       -DRE2_BUILD_TESTING=OFF `
       -DRE2_USE_EXTERNAL_ABSL=ON `
-      -DABSL_INCLUDE_DIR=$AbslInclude `
-      -DABSL_LIBRARY=$AbslLibsString `
+      -C $AbslCMakePath `
       $SourceDir
 
 cmake --build . --config Release
