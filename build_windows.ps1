@@ -375,13 +375,13 @@ cmake --build $ONNX_BUILD --config Release
 # INSTALL RE2 as static lib
 # ==========================================================
 
-$AbslCMakePath = "$ONNX_BUILD/_deps/abseil_cpp-build/UseAbsl.cmake"
+$AbslCMakePath = "$ONNX_BUILD/_deps/abseil_cpp-build/Findabsl.cmake"
 $AbslInclude  = "$ONNX_BUILD/_deps/abseil_cpp-build"
 
 Set-Content -Path $AbslCMakePath -Value @"
 # UseAbsl.cmake - Imported Abseil targets for RE2
 # Set AbslInclude to your ONNXRuntime Abseil build folder
-set(AbslInclude "C:/path/to/onnx/_deps/abseil_cpp-build")
+set(AbslInclude "$ONNX_BUILD/_deps/abseil_cpp-build")
 
 # --------------------
 # Base
@@ -905,7 +905,7 @@ cmake -G "Visual Studio 17 2022" `
       -DBUILD_SHARED_LIBS=OFF `
       -DRE2_BUILD_TESTING=OFF `
       -DRE2_USE_EXTERNAL_ABSL=ON `
-      -C $AbslCMakePath `
+      -DCMAKE_MODULE_PATH=$AbslInclude `
       $SourceDir
 
 cmake --build . --config Release
