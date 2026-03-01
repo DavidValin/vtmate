@@ -416,11 +416,8 @@ pub fn speak_via_kokoro_stream(
   }
 }
 
-pub fn start_kokoro_engine() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-  let rt = tokio::runtime::Builder::new_current_thread()
-    .enable_all()
-    .build()?;
-  let engine = rt.block_on(TtsEngine::new())?;
+pub async fn start_kokoro_engine() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  let engine = TtsEngine::new().await?;
   KOKORO_ENGINE.set(Arc::new(Mutex::new(engine))).ok();
   Ok(())
 }

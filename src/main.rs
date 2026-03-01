@@ -25,7 +25,8 @@ mod tools;
 
 static START_INSTANT: OnceLock<Instant> = OnceLock::new();
 
-fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   env_logger::init();
   whisper_rs::install_logging_hooks();
 
@@ -62,6 +63,14 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let _ = START_INSTANT.get_or_init(Instant::now);
   let args = crate::config::Args::parse();
 
+    // Determine base URL for LLM
+    let base_url = if args.llm == "ollama" {
+        args.ollama_url.clone()
+    } else {
+        args.llama_server_url.clone()
+    };
+    
+
   if args.list_voices {
     tts::print_voices();
     process::exit(0);
@@ -78,6 +87,14 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   // Resolve Whisper model path and log it
   let whisper_path = args.resolved_whisper_model_path();
   crate::log::log("info", &format!("Whisper model path: {}", whisper_path));
+
+  // Check if the LLM supports tool calls and set the global flag
+  let tools_supported = crate::llm::supports_tool_calls(&args.model, &args.llm, &base_url).await?;
+  crate::llm::TOOLS_SUPPORTED.set(tools_supported).ok();
+  log::log(
+    "info",
+    &format!("Model supports tools: {}", tools_supported)
+  );
 
   let vad_thresh: f32 = args.sound_threshold_peak;
   let end_silence_ms: u64 = args.end_silence_ms;
@@ -211,7 +228,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   }
   log::log("info", &format!("TTS system: {}", args.tts));
   if args.tts == "kokoro" {
-    tts::start_kokoro_engine()?;
+    tts::start_kokoro_engine().await?;
   }
   log::log("info", &format!("Language: {}", args.language));
   log::log("info", &format!("TTS voice: {}", voice_selected));
