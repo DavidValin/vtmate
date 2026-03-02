@@ -1,0 +1,38 @@
+Domain:
+---------------------------------------------------------------------------------------------------
+  ai voice assistant for the terminal
+  includes integrated stt and tts systems
+  integrates with ollama and llama.cpp engines
+
+Tech Stack:
+---------------------------------------------------------------------------------------------------
+  Language: Rust
+  Key libraries: whisper-rs, kokoro-micro (onnx runtime bindings), cpal, crossbeam-channel
+  Testing: no testing framework
+  Data persistance: memories stored as .json files
+
+Architecture:
+---------------------------------------------------------------------------------------------------
+  Multithreaded event-driven terminal application using terminal raw mode
+  Consists of several main threads:
+    UI thread: receives messages with new state and draws the terminal ui continuously
+    TTS thread: receives sentences to turn into audio
+    Playback thread: receives audio to be played
+    Record thread: records audio from the microphone and sends the audio chunks to TTS thread
+    Conversation thread: handles a single conversation with an agent, orchestrating user input and agent responses
+    Keyword thread: handles keyboard events from the user
+
+Features:
+---------------------------------------------------------------------------------------------------
+  - 📌 Continuous Voice chat (live conversation): `records user continuously and stops on silence, submitting the request to the agent`
+  - 📌 Voice interrupt: `the agent stops talking if you interrupt via voice`
+  - 📌 Recording Pause / Resume: `toggle "<SPACE>" key to pause / resume voice recording only`
+  - 📌 Push to Talk mode (PTT): `run it with --ptt and keep <SPACE> while talking and release to stop recording`
+  - 📌 Voice speed change: `change the agent voice speed by pressing <ARROW_UP> / <ARROW_DOWN> (applicable to next response)`
+  - 📌 Voice change (realtime): `change the agent voice by pressing <ARROW_LEFT> / <ARROW_RIGHT> (applicable to next response)`
+  - 📌 Integrated `whisper`
+  - 📌 Integrated `kokoro TTS` system
+  - 📌 Interface with `OpenTTS` system
+  - 📌 Supports `ollama` or `llama-server` or `llamafile`
+  - 📌 28 languages supported (`ai-mate --list-voices`)
+  - 📌 Use any gguf model from huggingface.com or ollama models (small models reply faster)
