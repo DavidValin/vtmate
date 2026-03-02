@@ -22,31 +22,6 @@ pub static TX_UI: OnceLock<Sender<String>> = OnceLock::new();
 // API
 // ------------------------------------------------------------------
 
-// Sample of LLM use
-//
-// Store memories:
-// ----------------------------------------------
-//   Construct the prompt for llm:
-//     1. provide a list of available predicates
-//     2. provide sample tool call (example json at src/tools/store_memory_sample.json)
-//     3. add original user prompt to tool call sample and submit it
-//     4. execute tool call from LLM response
-//
-// Retrieve memories:
-// ----------------------------------------------
-//   Process the prompt before submitting to llm:
-//     1. Spawn N llm requests to provide a list of memories to retrieve based on llm response and available predicates
-//     2. For each memory to search, execute the search:
-//
-//       let query = "Who did Alice meet recently in NYC?";
-//       let top_k = 5;
-//       let ef_search = 50;
-//       let retrieved_units = memory.query(query, top_k, ef_search);
-//       let context_text = build_context_from_units(&retrieved_units);
-//       println!("Context for LLM:\n{}", context_text);
-//
-//     3. Provide context sentences to the LLM
-
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Predicate {
   pub name: String,
