@@ -337,20 +337,22 @@ fn render_bottom_bar<W: Write>(
   y: u16,
 ) -> String {
   let state = GLOBAL_STATE.get().expect("AppState not initialized");
-
-  let speak = state.ui.agent_speaking.load(Ordering::Relaxed);
-  let play = state.playback.playback_active.load(Ordering::Relaxed);
+  let speak = ui_state.agent_speaking.load(Ordering::Relaxed);
+  let think = ui_state.thinking.load(Ordering::Relaxed);
+  let play = ui_state.playing.load(Ordering::Relaxed);
   let recording_paused = state.recording_paused.load(Ordering::Relaxed);
   let conversation_paused = state.conversation_paused.load(Ordering::Relaxed);
 
   let status = if recording_paused {
     "⏸️".to_string()
   } else if play {
-    format!("🔊 {}", spinner[ui_state.spinner_index])
+    format!("🔊 ")
   } else if speak {
-    format!("🎤 {}", spinner[ui_state.spinner_index])
+    format!("🎤 ")
+  } else if think {
+    format!("🤔 {}", spinner[ui_state.spinner_index % spinner.len()])
   } else {
-    format!("🎤 {}", spinner[ui_state.spinner_index])
+    format!("🎤 ")
   };
 
   let speed_str = format!("[{:.1}x]", get_speed());
