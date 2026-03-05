@@ -2,18 +2,18 @@
 // ui.rs – real scroll, streaming chunks, bottom bar pinned
 // ------------------------------------------------------------------
 
-use crate::state::{GLOBAL_STATE, get_speed, get_voice};
+use crate::state::{get_speed, get_voice, GLOBAL_STATE};
 use crossbeam_channel::Receiver;
 use crossterm::{
-  cursor::MoveTo,
+  cursor::{Hide, MoveTo, Show},
   execute,
   style::{Print, ResetColor},
   terminal::{self, Clear, ClearType, ScrollUp},
 };
 use std::io::{self, Write};
 use std::sync::{
-  Arc, Mutex,
   atomic::{AtomicBool, Ordering},
+  Arc, Mutex,
 };
 use std::thread;
 use std::time::Duration;
@@ -53,6 +53,7 @@ pub fn spawn_ui_thread(
 ) -> thread::JoinHandle<()> {
   thread::spawn(move || {
     let mut out = io::stdout();
+    execute!(out, Hide).unwrap();
     let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     let mut ui_state = UiState {
       peak: 0.0,
@@ -100,9 +101,10 @@ pub fn spawn_ui_thread(
             let msg_str = "🛑 USER interrupted";
             // No need to modify parts iterator
             // let msg_str = parts.next().unwrap_or(msg.as_str());
+
             // Mark streaming to stop immediately
             STOP_STREAM.store(true, Ordering::Relaxed);
-
+            
             handle_line_message(
               &mut out,
               msg_str,
@@ -139,6 +141,7 @@ pub fn spawn_ui_thread(
 
       thread::sleep(Duration::from_millis(10));
     }
+    execute!(out, Show).unwrap();
   })
 }
 
@@ -174,6 +177,10 @@ fn handle_line_message<W: Write>(
 
   // Update viewport and clear last line for display
   let (_view_start, visible) = viewport(buffer.len(), terminal::size().unwrap_or((80, 24)).1);
+
+  if buffer.len() > visible {
+    execute!(out, ScrollUp(1)).unwrap();
+  }
 
   execute!(
     out,
