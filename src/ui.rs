@@ -1,33 +1,49 @@
 // ------------------------------------------------------------------
-//  UI
+// ui.rs – real scroll, streaming chunks, bottom bar pinned
 // ------------------------------------------------------------------
 
-use crate::log;
-use crate::state::{get_speed, get_voice, GLOBAL_STATE};
+use crate::state::{GLOBAL_STATE, get_speed, get_voice};
 use crossbeam_channel::Receiver;
 use crossterm::{
-  cursor::{Hide, MoveTo},
+  cursor::MoveTo,
   execute,
   style::{Print, ResetColor},
-  terminal::{self, Clear, ClearType},
+  terminal::{self, Clear, ClearType, ScrollUp},
 };
 use std::io::{self, Write};
 use std::sync::{
-  atomic::{AtomicBool, Ordering},
   Arc, Mutex,
+  atomic::{AtomicBool, Ordering},
 };
 use std::thread;
 use std::time::Duration;
 
-// API
-
 pub static STOP_STREAM: AtomicBool = AtomicBool::new(false);
+
+// ANSI labels
+pub const USER_LABEL: &str = "\x1b[47;30mUSER:\x1b[0m";
+pub const ASSIST_LABEL: &str = "\x1b[48;5;22;37mASSISTANT:\x1b[0m";
+
+const CHAR_DELAY_MS: u64 = 10;
+
+#[derive(Clone)]
+struct UiState {
+  peak: f32,
+  spinner_index: usize,
+}
+
 // ------------------------------------------------------------------
+// Helper: compute viewport for scroll
+// ------------------------------------------------------------------
+fn viewport(buffer_len: usize, term_height: u16) -> (usize, usize) {
+  let visible = term_height.saturating_sub(1) as usize; // terminal_height - 1
+  let view_start = buffer_len.saturating_sub(visible);
+  (view_start, visible)
+}
 
-// ANSI label styling
-pub const USER_LABEL: &str = "\x1b[47;30mUSER:\x1b[0m"; // white bg, black text
-pub const ASSIST_LABEL: &str = "\x1b[48;5;22;37mASSISTANT:\x1b[0m"; // dark green bg, white text
-
+// ------------------------------------------------------------------
+// Spawn UI thread
+// ------------------------------------------------------------------
 pub fn spawn_ui_thread(
   ui: crate::state::UiState,
   stop_all_rx: Receiver<()>,
@@ -35,293 +51,292 @@ pub fn spawn_ui_thread(
   peak: Arc<Mutex<f32>>,
   ui_rx: Receiver<String>,
 ) -> thread::JoinHandle<()> {
-  // separate thread for bottom bar update + render
   thread::spawn(move || {
     let mut out = io::stdout();
     let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-    let i = 0usize;
-
-    let ui_for_bg = ui.clone();
-    let status_line_for_bg = status_line.clone();
-    let peak_for_bg = peak.clone();
-
-    let mut out_for_closure = io::stdout();
-    let ui_rx_for_closure = ui_rx.clone();
-    let stop_all_rx_for_closure = stop_all_rx.clone();
-    thread::spawn(move || {
-      let mut i_for_bg = i;
-      loop {
-        i_for_bg = (i_for_bg + 1) % spinner.len();
-        let full_bar = update_bottom_bar(
-          &ui_for_bg,
-          &status_line_for_bg,
-          &peak_for_bg,
-          &spinner,
-          &mut i_for_bg,
-        );
-        print_bottom_bar(&mut out_for_closure, &full_bar).unwrap();
-
-        if stop_all_rx_for_closure.try_recv().is_ok() {
-          while let Ok(_) = ui_rx_for_closure.try_recv() {}
-        }
-        thread::sleep(Duration::from_millis(35));
-      }
-    });
-
-    // hide cursor
-    execute!(out, Hide).unwrap();
-
-    // buffer for top region
-    let mut top_lines: Vec<String> = Vec::new();
-    let mut exit_ui = false;
+    let mut ui_state = UiState {
+      peak: 0.0,
+      spinner_index: 0,
+    };
+    let mut bottom_bar = String::new();
+    let mut buffer: Vec<String> = Vec::new();
 
     loop {
-      if stop_all_rx.try_recv().is_ok() {
-        while let Ok(_) = ui_rx.try_recv() {}
-        break;
-      }
-      let state = GLOBAL_STATE.get().expect("AppState not initialized");
-      let conversation_paused = state.conversation_paused.load(Ordering::Relaxed);
-
-      let (cols_raw, terminal_height) = terminal::size().unwrap_or((80, 24));
-      let cols = cols_raw as usize;
-
+      // Process UI messages
       while let Ok(msg) = ui_rx.try_recv() {
-        if stop_all_rx.try_recv().is_ok() {
-          while let Ok(_) = ui_rx.try_recv() {}
-          break;
-        }
-
         let mut parts = msg.splitn(2, '|');
         let msg_type = parts.next().unwrap_or("");
-        let msg_str = parts.next().unwrap_or(msg.as_str());
 
-        if !conversation_paused {
-          match msg_type {
-            "line" => {
-              let (label, body) = if msg_str.starts_with(USER_LABEL) {
-                (
-                  USER_LABEL,
-                  msg_str.strip_prefix(USER_LABEL).unwrap_or("").trim(),
-                )
-              } else if msg_str.starts_with(ASSIST_LABEL) {
-                (
-                  ASSIST_LABEL,
-                  msg_str.strip_prefix(ASSIST_LABEL).unwrap_or("").trim(),
-                )
-              } else {
-                ("", msg_str)
-              };
-
-              if !label.is_empty() {
-                print_line(&mut top_lines, label);
-              }
-
-              if !body.is_empty() {
-                print_inline_chunk(&mut out, &mut top_lines, body, terminal_height - 1, cols);
-              }
-              // skip_stream = false;
-            }
-
-            "stream" => {
-              // Skip if stream rendering is paused but reset flag
-              if STOP_STREAM.load(Ordering::Relaxed) {
-                break;
-              }
-              print_inline_chunk(&mut out, &mut top_lines, msg_str, terminal_height - 1, cols);
-            }
-            "stop_ui" => {
-              print_line(&mut top_lines, "");
-              print_line(&mut top_lines, "🛑 USER interrupted");
-              while let Ok(_) = ui_rx.try_recv() {}
-              exit_ui = true;
-              STOP_STREAM.store(true, Ordering::Relaxed);
-              break;
-            }
-            _ => {}
+        match msg_type {
+          "line" => {
+            let msg_str = parts.next().unwrap_or(msg.as_str());
+            handle_line_message(
+              &mut out,
+              msg_str,
+              &mut buffer,
+              &mut ui_state,
+              &peak,
+              &spinner,
+              &status_line,
+              &ui,
+              &mut bottom_bar,
+            );
           }
-        }
-        if stop_all_rx.try_recv().is_ok() {
-          while let Ok(_) = ui_rx.try_recv() {}
-          break;
+          "stream" => {
+            let msg_str = parts.next().unwrap_or(msg.as_str());
+            handle_stream_message(
+              &mut out,
+              msg_str,
+              &mut buffer,
+              &mut ui_state,
+              &peak,
+              &spinner,
+              &status_line,
+              &ui,
+              &mut bottom_bar,
+            );
+          }
+          "stop_ui" => {
+            let msg_str = "🛑 USER interrupted";
+            // No need to modify parts iterator
+            // let msg_str = parts.next().unwrap_or(msg.as_str());
+            // Mark streaming to stop immediately
+            STOP_STREAM.store(true, Ordering::Relaxed);
+
+            handle_line_message(
+              &mut out,
+              msg_str,
+              &mut buffer,
+              &mut ui_state,
+              &peak,
+              &spinner,
+              &status_line,
+              &ui,
+              &mut bottom_bar,
+            );
+
+            // Exit the UI thread loop
+            break;
+          }
+          _ => {}
         }
       }
-      if exit_ui {
-        // Reset flags and clear stream stop
-        STOP_STREAM.store(false, Ordering::Relaxed);
-        exit_ui = false;
-        continue;
-      }
+
+      // Spinner update
+      ui_state.spinner_index = (ui_state.spinner_index + 1) % spinner.len();
+
+      // Render bottom bar
+      let (_cols, term_height) = terminal::size().unwrap_or((80, 24));
+      bottom_bar = render_bottom_bar(
+        &mut out,
+        &ui_state,
+        &spinner,
+        &status_line,
+        &ui,
+        &bottom_bar,
+        term_height - 1,
+      );
+
+      thread::sleep(Duration::from_millis(10));
     }
   })
 }
 
-// PRIVATE
-// ------------------------------------------------------------------
+fn handle_line_message<W: Write>(
+  out: &mut W,
+  msg_str: &str,
+  buffer: &mut Vec<String>,
+  ui_state: &mut UiState,
+  peak: &Arc<Mutex<f32>>,
+  spinner: &[&str],
+  status_line: &Arc<Mutex<String>>,
+  ui: &crate::state::UiState,
+  bottom_bar: &mut String,
+) {
+  // Start a fresh line for line| messages
+  buffer.push(String::new());
 
-// delay per character for smooth typing
-const STREAM_DELAY_MS: u64 = 2;
+  // Stream the chunk on that new line
+  stream_chunk(
+    out,
+    msg_str,
+    buffer,
+    ui_state,
+    peak,
+    spinner,
+    status_line,
+    ui,
+    bottom_bar,
+  );
 
-fn print_line(buffer: &mut Vec<String>, line: &str) {
-  buffer.push(line.to_string());
-  buffer.push(String::new()); // force a fresh line after
+  // After message, push another empty line so next content starts fresh
+  buffer.push(String::new());
+
+  // Update viewport and clear last line for display
+  let (_view_start, visible) = viewport(buffer.len(), terminal::size().unwrap_or((80, 24)).1);
+
+  execute!(
+    out,
+    MoveTo(0, (std::cmp::min(buffer.len(), visible)) as u16 - 1),
+    Clear(ClearType::CurrentLine)
+  )
+  .unwrap();
+
+  // Redraw bottom bar
+  let (_cols, term_height) = terminal::size().unwrap_or((80, 24));
+  *bottom_bar = render_bottom_bar(
+    out,
+    ui_state,
+    spinner,
+    status_line,
+    ui,
+    bottom_bar,
+    term_height - 1,
+  );
 }
 
-fn print_inline_chunk<W: Write>(
+fn handle_stream_message<W: Write>(
   out: &mut W,
+  msg_str: &str,
   buffer: &mut Vec<String>,
-  chunk: &str,
-  terminal_height: u16,
-  cols: usize,
+  ui_state: &mut UiState,
+  peak: &Arc<Mutex<f32>>,
+  spinner: &[&str],
+  status_line: &Arc<Mutex<String>>,
+  ui: &crate::state::UiState,
+  bottom_bar: &mut String,
 ) {
-  let mut chars_since_redraw = 0;
+  // Just call stream_chunk directly; it handles wrapping / \n internally
+  stream_chunk(
+    out,
+    msg_str,
+    buffer,
+    ui_state,
+    peak,
+    spinner,
+    status_line,
+    ui,
+    bottom_bar,
+  );
+}
 
-  // Ensure there is at least one line
+// ------------------------------------------------------------------
+// Stream a chunk char-by-char, commit line at '\n' or wrap
+// ------------------------------------------------------------------
+fn stream_chunk<W: Write>(
+  out: &mut W,
+  chunk: &str,
+  buffer: &mut Vec<String>,
+  ui_state: &mut UiState,
+  peak: &Arc<Mutex<f32>>,
+  spinner: &[&str],
+  status_line: &Arc<Mutex<String>>,
+  ui: &crate::state::UiState,
+  bottom_bar: &mut String,
+) {
+  let (cols, term_height) = terminal::size().unwrap_or((80, 24));
+  let max_width = cols as usize;
+
   if buffer.is_empty() {
     buffer.push(String::new());
   }
 
   for ch in chunk.chars() {
-    // Stop early if interrupted
     if STOP_STREAM.load(Ordering::Relaxed) {
       STOP_STREAM.store(false, Ordering::Relaxed);
       return;
     }
 
-    // Wrap line if exceeds terminal width
+    let term_height_usize = term_height as usize;
+    let is_newline_or_wrap = ch == '\n' || get_visible_len_for(buffer.last().unwrap()) >= max_width;
 
-    if get_visible_len_for(buffer.last().unwrap()) >= cols {
+    if is_newline_or_wrap {
       buffer.push(String::new());
-    }
 
-    // Append character or create a new line for breaks
-    if ch == '\n' || ch == '.' {
-      buffer.push(String::new());
-    } else {
-      // Re-borrow last line only when appending
-      if let Some(last_line) = buffer.last_mut() {
-        last_line.push(ch);
+      let (_view_start, visible) = viewport(buffer.len(), term_height);
+
+      if buffer.len() > visible {
+        execute!(out, ScrollUp(1)).unwrap();
       }
-    }
 
-    // Redraw in batches
-    chars_since_redraw += 1;
-    if chars_since_redraw >= 5 {
-      redraw_top_region(out, buffer, terminal_height);
-      chars_since_redraw = 0;
-    }
+      execute!(
+        out,
+        MoveTo(0, (std::cmp::min(buffer.len(), visible)) as u16 - 1),
+        Clear(ClearType::CurrentLine)
+      )
+      .unwrap();
 
-    thread::sleep(Duration::from_millis(STREAM_DELAY_MS));
-  }
-
-  if chars_since_redraw > 0 {
-    redraw_top_region(out, buffer, terminal_height);
-  }
-}
-
-fn redraw_top_region<W: Write>(out: &mut W, buffer: &[String], max_height: u16) {
-  let draw_height = if log::is_verbose() {
-    // keep space in verbose mode to see the logs
-    ((max_height as f32) / 1.6).round() as usize
-  } else {
-    max_height.saturating_sub(2) as usize // leave 2 lines space for error logs
-  };
-
-  // Determine the start line so the bottom of the buffer is visible
-  let start = buffer.len().saturating_sub(draw_height);
-
-  for (i, line) in buffer[start..].iter().enumerate() {
-    execute!(
-      out,
-      MoveTo(0, i as u16),
-      Clear(ClearType::CurrentLine),
-      Print(line)
-    )
-    .unwrap();
-  }
-
-  // Fill remaining lines if buffer is shorter than draw_height
-  for i in buffer[start..].len()..draw_height {
-    execute!(out, MoveTo(0, i as u16), Clear(ClearType::CurrentLine)).unwrap();
-  }
-
-  out.flush().unwrap();
-}
-
-fn print_bottom_bar<W: Write>(out: &mut W, status: &str) -> std::io::Result<()> {
-  let (_, terminal_height) = terminal::size()?;
-  let last_y = terminal_height.saturating_sub(1);
-
-  execute!(out, MoveTo(0, last_y), Clear(ClearType::CurrentLine))?;
-  execute!(
-    out,
-    MoveTo(0, last_y),
-    ResetColor,
-    Print(status),
-    ResetColor
-  )?;
-  // keep cursor at bottom line
-  out.flush()?;
-  Ok(())
-}
-
-fn get_visible_len_for(s: &str) -> usize {
-  let mut len = 0usize;
-  let mut chars = s.chars();
-  while let Some(c) = chars.next() {
-    if c == '\x1b' {
-      // skip ANSI sequences
-      while let Some(next) = chars.next() {
-        if next == 'm' {
-          break;
-        }
-      }
+      *bottom_bar = render_bottom_bar(
+        out,
+        ui_state,
+        spinner,
+        status_line,
+        ui,
+        bottom_bar,
+        term_height - 1,
+      );
     } else {
-      let double = matches!(c, '🤔' | '🎤' | '🔊');
-      len += if double { 2 } else { 1 };
+      buffer.last_mut().unwrap().push(ch);
+
+      let (_view_start, visible) = viewport(buffer.len(), term_height);
+      let y_disp = if buffer.len() > visible {
+        visible - 1
+      } else {
+        buffer.len() - 1
+      };
+
+      execute!(
+        out,
+        MoveTo(0, y_disp as u16),
+        Clear(ClearType::CurrentLine),
+        Print(buffer.last().unwrap())
+      )
+      .unwrap();
     }
+
+    thread::sleep(Duration::from_millis(CHAR_DELAY_MS));
   }
-  len
 }
 
-fn update_bottom_bar(
-  ui: &crate::state::UiState,
-  status_line: &Arc<Mutex<String>>,
-  peak: &Arc<Mutex<f32>>,
+// ------------------------------------------------------------------
+// Render bottom bar
+// Returns updated bottom_bar string
+// ------------------------------------------------------------------
+fn render_bottom_bar<W: Write>(
+  out: &mut W,
+  ui_state: &UiState,
   spinner: &[&str],
-  i: &mut usize,
+  status_line: &Arc<Mutex<String>>,
+  ui: &crate::state::UiState,
+  bottom_bar: &str,
+  y: u16,
 ) -> String {
   let state = GLOBAL_STATE.get().expect("AppState not initialized");
+
   let speak = state.ui.agent_speaking.load(Ordering::Relaxed);
-  let think = ui.thinking.load(Ordering::Relaxed);
-  let play = state.ui.playing.load(Ordering::Relaxed);
+  let play = state.playback.playback_active.load(Ordering::Relaxed);
   let recording_paused = state.recording_paused.load(Ordering::Relaxed);
   let conversation_paused = state.conversation_paused.load(Ordering::Relaxed);
+
   let status = if recording_paused {
     "⏸️".to_string()
   } else if play {
-    format!("🔊 {}", spinner[*i % spinner.len()])
+    format!("🔊 {}", spinner[ui_state.spinner_index])
   } else if speak {
-    format!("🎤 {}", spinner[*i % spinner.len()])
-  } else if think {
-    format!("🤔 {}", spinner[*i % spinner.len()])
+    format!("🎤 {}", spinner[ui_state.spinner_index])
   } else {
-    format!("🎤 {}", spinner[*i % spinner.len()])
+    format!("🎤 {}", spinner[ui_state.spinner_index])
   };
-  let (cols_raw, _x) = terminal::size().unwrap_or((80, 24));
-  let cols = cols_raw as usize;
-  let peak_val = match peak.lock() {
-    Ok(v) => *v,
-    Err(_) => 0.0,
-  };
+
   let speed_str = format!("[{:.1}x]", get_speed());
   let voice_str = format!("({})", get_voice());
+
   let recording_paused_str = if recording_paused {
     "\x1b[43m\x1b[30m  paused  \x1b[0m"
   } else {
     "\x1b[41m\x1b[37m listening \x1b[0m"
   };
-  let recording_paused_vis_len = get_visible_len_for(recording_paused_str);
+
   let internal_status = format!(
     "{}{}{}{}",
     if recording_paused {
@@ -343,19 +358,24 @@ fn update_bottom_bar(
       "\x1b[47m█\x1b[0m"
     } else {
       "\x1b[100m█\x1b[0m"
-    }
+    },
   );
+
   let combined_status = format!("{} {} ", voice_str, internal_status);
+
+  let cols = crossterm::terminal::size().unwrap_or((80, 24)).0 as usize;
+
   let available = cols.saturating_sub(
     get_visible_len_for(&status)
       + 2
       + get_visible_len_for(&combined_status)
       + 1
       + get_visible_len_for(&speed_str)
-      + recording_paused_vis_len,
+      + get_visible_len_for(&recording_paused_str),
   );
+
   let max_bar_len = if available > 40 { 40 } else { available };
-  let mut bar_len = ((peak_val * (max_bar_len as f32)).round() as usize).min(max_bar_len);
+  let mut bar_len = ((ui_state.peak * (max_bar_len as f32)).round() as usize).min(max_bar_len);
   if recording_paused {
     bar_len = 0;
   }
@@ -367,21 +387,56 @@ fn update_bottom_bar(
     "\x1b[37m"
   };
   let bar = format!("{}{}\x1b[0m", bar_color, "█".repeat(bar_len));
+
   let spaces = cols.saturating_sub(
     get_visible_len_for(&status)
       + 2
       + bar_len
       + get_visible_len_for(&speed_str)
       + get_visible_len_for(&combined_status)
-      + recording_paused_vis_len,
+      + get_visible_len_for(&recording_paused_str),
   );
+
   let status_without_speed = format!("{} {}{}", status, bar, " ".repeat(spaces));
   let full_bar = format!(
     "{}{} {}{}",
     status_without_speed, speed_str, combined_status, recording_paused_str
   );
+
   if let Ok(mut st) = status_line.lock() {
     *st = full_bar.clone();
   }
+
+  execute!(
+    out,
+    MoveTo(0, y),
+    Clear(ClearType::CurrentLine),
+    Print(&full_bar),
+    ResetColor
+  )
+  .unwrap();
+
+  out.flush().unwrap();
   full_bar
+}
+
+// ------------------------------------------------------------------
+// Helper to compute visible length ignoring ANSI sequences
+// ------------------------------------------------------------------
+fn get_visible_len_for(s: &str) -> usize {
+  let mut len = 0usize;
+  let mut chars = s.chars();
+  while let Some(c) = chars.next() {
+    if c == '\x1b' {
+      while let Some(next) = chars.next() {
+        if next == 'm' {
+          break;
+        }
+      }
+    } else {
+      let double = matches!(c, '🤔' | '🎤' | '🔊');
+      len += if double { 2 } else { 1 };
+    }
+  }
+  len
 }
