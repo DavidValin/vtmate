@@ -181,7 +181,8 @@ pub fn conversation_thread(
               }
             })
           });
-          handle.join().unwrap()?;
+          // ignore join result to prevent panic on llama server error
+          let _join_result = handle.join();
 
         } else {
           let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
@@ -206,7 +207,8 @@ pub fn conversation_thread(
               }
             })
           });
-          handle.join().unwrap()?;
+          // ignore join result to prevent panic on llama server error
+          let _join_result = handle.join();
         }
 
         ui_thinking_cloned_for_closure.store(false, Ordering::Relaxed);
@@ -259,10 +261,7 @@ thread_local! {
   static IN_CODE_BLOCK: Cell<bool> = Cell::new(false);
 }
 
-fn handle_interruption(
-  interrupt_counter: &Arc<AtomicU64>,
-  current: u64,
-) -> bool {
+fn handle_interruption(interrupt_counter: &Arc<AtomicU64>, current: u64) -> bool {
   if interrupt_counter.load(Ordering::SeqCst) != current {
     true
   } else {
