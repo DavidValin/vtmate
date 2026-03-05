@@ -14,6 +14,7 @@ pub struct UiState {
   pub playing: Arc<AtomicBool>,
   pub agent_speaking: Arc<AtomicBool>, // voice activity flag
   pub peak: Arc<Mutex<f32>>,           // current audio peak
+  pub spinner_index: usize
 }
 
 #[derive(Debug)]
@@ -50,6 +51,7 @@ impl AppState {
         playing: Arc::new(AtomicBool::new(false)),
         agent_speaking: Arc::new(AtomicBool::new(false)), // tts synthesizing
         peak: Arc::new(Mutex::new(0.0)),
+        spinner_index: 0
       },
       speed: AtomicU32::new(12),
       conversation_history: std::sync::Arc::new(std::sync::Mutex::new(String::new())),
