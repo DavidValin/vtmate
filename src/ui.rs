@@ -1,11 +1,11 @@
 // ------------------------------------------------------------------
-// ui.rs – real scroll, streaming chunks, bottom bar pinned
+//  UI
 // ------------------------------------------------------------------
 
 use crate::state::{get_speed, get_voice, GLOBAL_STATE};
 use crossbeam_channel::Receiver;
 use crossterm::{
-  cursor::{Hide, MoveTo, Show},
+  cursor::{Hide, MoveTo},
   execute,
   style::{Print, ResetColor},
   terminal::{self, Clear, ClearType, ScrollUp},
@@ -18,68 +18,86 @@ use std::sync::{
 use std::thread;
 use std::time::Duration;
 
+// API
+// ------------------------------------------------------------------
+
 pub static STOP_STREAM: AtomicBool = AtomicBool::new(false);
 
 // ANSI labels
 pub const USER_LABEL: &str = "\x1b[47;30mUSER:\x1b[0m";
 pub const ASSIST_LABEL: &str = "\x1b[48;5;22;37mASSISTANT:\x1b[0m";
 
-const CHAR_DELAY_MS: u64 = 10;
+const CHAR_DELAY_MS: u64 = 4;
 
-#[derive(Clone)]
-struct UiState {
-  peak: f32,
-  spinner_index: usize,
-}
-
-// ------------------------------------------------------------------
-// Helper: compute viewport for scroll
-// ------------------------------------------------------------------
-fn viewport(buffer_len: usize, term_height: u16) -> (usize, usize) {
-  let visible = term_height.saturating_sub(1) as usize; // terminal_height - 1
-  let view_start = buffer_len.saturating_sub(visible);
-  (view_start, visible)
-}
-
-// ------------------------------------------------------------------
-// Spawn UI thread
-// ------------------------------------------------------------------
 pub fn spawn_ui_thread(
-  ui: crate::state::UiState,
-  stop_all_rx: Receiver<()>,
+  ui_state: crate::state::UiState,
   status_line: Arc<Mutex<String>>,
-  peak: Arc<Mutex<f32>>,
-  ui_rx: Receiver<String>,
+  rx_ui: Receiver<String>,
 ) -> thread::JoinHandle<()> {
   thread::spawn(move || {
+    // Make ui_state mutable for interior mutability
+    let mut ui_state = ui_state;
     let mut out = io::stdout();
     execute!(out, Hide).unwrap();
     let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-    let mut ui_state = UiState {
-      peak: 0.0,
-      spinner_index: 0,
-    };
     let mut bottom_bar = String::new();
     let mut buffer: Vec<String> = Vec::new();
+    let mut first_line_done = false;
+
+    crossterm::execute!(
+      std::io::stdout(),
+      crossterm::terminal::Clear(ClearType::All),
+      MoveTo(0, 0)
+    )
+    .unwrap();
+
+    let banner = r#"
+      █████╗ ██╗      ███╗   ███╗ █████╗ ████████╗███████╗
+     ██╔══██╗██║      ████╗ ████║██╔══██╗╚══██╔══╝██╔════╝
+     ███████║██║█████╗██╔████╔██║███████║   ██║   █████╗  
+     ██╔══██║██║╚════╝██║╚██╔╝██║██╔══██║   ██║   ██╔══╝  
+     ██║  ██║██║      ██║ ╚═╝ ██║██║  ██║   ██║   ███████╗
+     ╚═╝  ╚═╝╚═╝      ╚═╝     ╚═╝╚═╝  ╚═╝   ╚═╝   ╚══════╝
+     "#;
+    handle_line_message(
+      &mut out,
+      banner,
+      &mut buffer,
+      &mut ui_state,
+      &spinner,
+      &status_line,
+      &mut bottom_bar,
+    );
 
     loop {
       // Process UI messages
-      while let Ok(msg) = ui_rx.try_recv() {
+      while let Ok(msg) = rx_ui.try_recv() {
         let mut parts = msg.splitn(2, '|');
         let msg_type = parts.next().unwrap_or("");
 
         match msg_type {
           "line" => {
             let msg_str = parts.next().unwrap_or(msg.as_str());
+            if !first_line_done {
+              handle_line_message(
+                &mut out,
+                "",
+                &mut buffer,
+                &mut ui_state,
+                &spinner,
+                &status_line,
+                &mut bottom_bar,
+              );
+              thread::sleep(Duration::from_millis(10));
+              first_line_done = true;
+            }
             handle_line_message(
               &mut out,
               msg_str,
               &mut buffer,
               &mut ui_state,
-              &peak,
               &spinner,
               &status_line,
-              &ui,
               &mut bottom_bar,
             );
           }
@@ -90,10 +108,8 @@ pub fn spawn_ui_thread(
               msg_str,
               &mut buffer,
               &mut ui_state,
-              &peak,
               &spinner,
               &status_line,
-              &ui,
               &mut bottom_bar,
             );
           }
@@ -104,10 +120,8 @@ pub fn spawn_ui_thread(
               msg_str,
               &mut buffer,
               &mut ui_state,
-              &peak,
               &spinner,
               &status_line,
-              &ui,
               &mut bottom_bar,
             );
 
@@ -125,49 +139,84 @@ pub fn spawn_ui_thread(
 
       // Render bottom bar
       let (_cols, term_height) = terminal::size().unwrap_or((80, 24));
-      bottom_bar = render_bottom_bar(
-        &mut out,
-        &ui_state,
-        &spinner,
-        &status_line,
-        &ui,
-        &bottom_bar,
-        term_height - 1,
-      );
+      bottom_bar = render_bottom_bar(&mut out, &ui_state, &spinner, &status_line, term_height - 1);
 
       thread::sleep(Duration::from_millis(10));
     }
-    execute!(out, Show).unwrap();
   })
 }
 
+
+// PRIVATE
+// ------------------------------------------------------------------
+
+// computes viewport for scroll
+fn viewport(buffer_len: usize, term_height: u16) -> (usize, usize) {
+  let visible = term_height.saturating_sub(1) as usize;
+  let view_start = buffer_len.saturating_sub(visible);
+  (view_start, visible)
+}
+
+// handles a complete line print
 fn handle_line_message<W: Write>(
   out: &mut W,
   msg_str: &str,
   buffer: &mut Vec<String>,
-  ui_state: &mut UiState,
-  peak: &Arc<Mutex<f32>>,
+  ui_state: &mut crate::state::UiState,
   spinner: &[&str],
   status_line: &Arc<Mutex<String>>,
-  ui: &crate::state::UiState,
   bottom_bar: &mut String,
 ) {
-  // Start a fresh line for line| messages
-  buffer.push(String::new());
-  buffer.push(String::new());
+  let (cols, term_height) = terminal::size().unwrap_or((80, 24));
+  let max_width = cols as usize;
 
-  // Stream the chunk on that new line
-  stream_chunk(
-    out,
-    msg_str,
-    buffer,
-    ui_state,
-    peak,
-    spinner,
-    status_line,
-    ui,
-    bottom_bar,
-  );
+  if buffer.is_empty() {
+    buffer.push(String::new());
+  }
+  // If the last line is not full width, start a new line
+  if buffer.last().unwrap().len() != max_width {
+    buffer.push(String::new());
+  }
+
+  for ch in msg_str.chars() {
+    let is_newline_or_wrap = ch == '\n' || get_visible_len_for(buffer.last().unwrap()) >= max_width;
+
+    if is_newline_or_wrap {
+      buffer.push(String::new());
+
+      let (_view_start, visible) = viewport(buffer.len(), term_height);
+
+      if buffer.len() > visible {
+        execute!(out, ScrollUp(1)).unwrap();
+      }
+
+      execute!(
+        out,
+        MoveTo(0, (std::cmp::min(buffer.len(), visible)) as u16 - 1),
+        Clear(ClearType::CurrentLine)
+      )
+      .unwrap();
+
+      *bottom_bar = render_bottom_bar(out, ui_state, spinner, status_line, term_height - 1);
+    } else {
+      buffer.last_mut().unwrap().push(ch);
+
+      let (_view_start, visible) = viewport(buffer.len(), term_height);
+      let y_disp = if buffer.len() > visible {
+        visible - 1
+      } else {
+        buffer.len() - 1
+      };
+
+      execute!(
+        out,
+        MoveTo(0, y_disp as u16),
+        Clear(ClearType::CurrentLine),
+        Print(buffer.last().unwrap())
+      )
+      .unwrap();
+    }
+  }
 
   // After message, push another empty line so next content starts fresh
   buffer.push(String::new());
@@ -188,54 +237,37 @@ fn handle_line_message<W: Write>(
 
   // Redraw bottom bar
   let (_cols, term_height) = terminal::size().unwrap_or((80, 24));
-  *bottom_bar = render_bottom_bar(
-    out,
-    ui_state,
-    spinner,
-    status_line,
-    ui,
-    bottom_bar,
-    term_height - 1,
-  );
+  *bottom_bar = render_bottom_bar(out, ui_state, spinner, status_line, term_height - 1);
 }
 
 fn handle_stream_message<W: Write>(
   out: &mut W,
   msg_str: &str,
   buffer: &mut Vec<String>,
-  ui_state: &mut UiState,
-  peak: &Arc<Mutex<f32>>,
+  ui_state: &mut crate::state::UiState,
   spinner: &[&str],
   status_line: &Arc<Mutex<String>>,
-  ui: &crate::state::UiState,
   bottom_bar: &mut String,
 ) {
-  // Just call stream_chunk directly; it handles wrapping / \n internally
   stream_chunk(
     out,
     msg_str,
     buffer,
     ui_state,
-    peak,
     spinner,
     status_line,
-    ui,
     bottom_bar,
   );
 }
 
-// ------------------------------------------------------------------
 // Stream a chunk char-by-char, commit line at '\n' or wrap
-// ------------------------------------------------------------------
 fn stream_chunk<W: Write>(
   out: &mut W,
   chunk: &str,
   buffer: &mut Vec<String>,
-  ui_state: &mut UiState,
-  peak: &Arc<Mutex<f32>>,
+  ui_state: &mut crate::state::UiState,
   spinner: &[&str],
   status_line: &Arc<Mutex<String>>,
-  ui: &crate::state::UiState,
   bottom_bar: &mut String,
 ) {
   let (cols, term_height) = terminal::size().unwrap_or((80, 24));
@@ -243,6 +275,10 @@ fn stream_chunk<W: Write>(
 
   if buffer.is_empty() {
     buffer.push(String::new());
+    // If the last line is not full width, start a new line
+    if buffer.last().unwrap().len() != max_width {
+      buffer.push(String::new());
+    }
   }
 
   for ch in chunk.chars() {
@@ -251,7 +287,6 @@ fn stream_chunk<W: Write>(
       return;
     }
 
-    let term_height_usize = term_height as usize;
     let is_newline_or_wrap = ch == '\n' || get_visible_len_for(buffer.last().unwrap()) >= max_width;
 
     if is_newline_or_wrap {
@@ -270,15 +305,7 @@ fn stream_chunk<W: Write>(
       )
       .unwrap();
 
-      *bottom_bar = render_bottom_bar(
-        out,
-        ui_state,
-        spinner,
-        status_line,
-        ui,
-        bottom_bar,
-        term_height - 1,
-      );
+      *bottom_bar = render_bottom_bar(out, ui_state, spinner, status_line, term_height - 1);
     } else {
       buffer.last_mut().unwrap().push(ch);
 
@@ -302,17 +329,11 @@ fn stream_chunk<W: Write>(
   }
 }
 
-// ------------------------------------------------------------------
-// Render bottom bar
-// Returns updated bottom_bar string
-// ------------------------------------------------------------------
 fn render_bottom_bar<W: Write>(
   out: &mut W,
-  ui_state: &UiState,
+  ui_state: &crate::state::UiState,
   spinner: &[&str],
   status_line: &Arc<Mutex<String>>,
-  ui: &crate::state::UiState,
-  bottom_bar: &str,
   y: u16,
 ) -> String {
   let state = GLOBAL_STATE.get().expect("AppState not initialized");
@@ -379,7 +400,8 @@ fn render_bottom_bar<W: Write>(
   );
 
   let max_bar_len = if available > 40 { 40 } else { available };
-  let mut bar_len = ((ui_state.peak * (max_bar_len as f32)).round() as usize).min(max_bar_len);
+  let peak_val = *ui_state.peak.lock().unwrap();
+  let mut bar_len = ((peak_val * (max_bar_len as f32)).round() as usize).min(max_bar_len);
   if recording_paused {
     bar_len = 0;
   }
@@ -424,9 +446,7 @@ fn render_bottom_bar<W: Write>(
   full_bar
 }
 
-// ------------------------------------------------------------------
-// Helper to compute visible length ignoring ANSI sequences
-// ------------------------------------------------------------------
+// computes visible length ignoring ANSI sequences
 fn get_visible_len_for(s: &str) -> usize {
   let mut len = 0usize;
   let mut chars = s.chars();
