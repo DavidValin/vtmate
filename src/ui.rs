@@ -99,12 +99,6 @@ pub fn spawn_ui_thread(
           }
           "stop_ui" => {
             let msg_str = "🛑 USER interrupted";
-            // No need to modify parts iterator
-            // let msg_str = parts.next().unwrap_or(msg.as_str());
-
-            // Mark streaming to stop immediately
-            STOP_STREAM.store(true, Ordering::Relaxed);
-            
             handle_line_message(
               &mut out,
               msg_str,
@@ -117,6 +111,8 @@ pub fn spawn_ui_thread(
               &mut bottom_bar,
             );
 
+            // Mark streaming to stop immediately after printing
+            STOP_STREAM.store(true, Ordering::Relaxed);
             // Exit the UI thread loop
             break;
           }
@@ -157,6 +153,7 @@ fn handle_line_message<W: Write>(
   bottom_bar: &mut String,
 ) {
   // Start a fresh line for line| messages
+  buffer.push(String::new());
   buffer.push(String::new());
 
   // Stream the chunk on that new line
