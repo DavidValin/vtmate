@@ -127,6 +127,9 @@ pub fn conversation_thread(
             let _ = stop_all_tx_cloned_for_closure.try_send(());
             return;
           }
+          if piece.is_empty() {
+            return;
+          }
           if stop_all_rx_cloned_for_closure.try_recv().is_ok() {
             interrupted = true;
             speaker_arc_cloned_for_closure.lock().unwrap().buf.clear();
@@ -145,10 +148,9 @@ pub fn conversation_thread(
             hist.lock().unwrap().push_str(&format!("{}\n", phrase));
             // send the complete phrase to tts
             let _ = tts_tx_cloned_for_closure.send((strip_special_chars(&phrase), my_interrupt));
+            // send raw piece immediately
+            let _ = tx_ui_cloned_for_closure.send(format!("stream|{}", phrase));
           }
-
-          // send raw piece immediately
-          let _ = tx_ui_cloned_for_closure.send(format!("stream|{}", piece));
         };
 
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
