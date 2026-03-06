@@ -42,7 +42,7 @@ pub fn spawn_ui_thread(
     let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     let mut bottom_bar = String::new();
     let mut buffer: Vec<String> = Vec::new();
-    let mut first_line_done = false;
+    let mut last_term_size = terminal::size().unwrap_or((80, 24));
 
     crossterm::execute!(
       std::io::stdout(),
@@ -78,18 +78,6 @@ pub fn spawn_ui_thread(
         match msg_type {
           "line" => {
             let msg_str = parts.next().unwrap_or(msg.as_str());
-            if !first_line_done {
-              handle_line_message(
-                &mut out,
-                "",
-                &mut buffer,
-                &mut ui_state,
-                &spinner,
-                &status_line,
-                &mut bottom_bar,
-              );
-              first_line_done = true;
-            }
             handle_line_message(
               &mut out,
               msg_str,
@@ -130,18 +118,27 @@ pub fn spawn_ui_thread(
         }
       }
 
+      // Detect terminal resize
+      let (new_cols, new_term_height) = terminal::size().unwrap_or((80, 24));
+      if new_term_height != last_term_size.1 || new_cols != last_term_size.0 {
+        // Clear the whole screen
+        execute!(out, Clear(ClearType::All), Print("\x1b[3J"), MoveTo(0, 0)).unwrap();
+        out.flush().unwrap();
+        last_term_size = (new_cols, new_term_height);
+      }
+
       // Spinner update
       ui_state.spinner_index = (ui_state.spinner_index + 1) % spinner.len();
 
       // Render bottom bar
       let (_cols, term_height) = terminal::size().unwrap_or((80, 24));
       bottom_bar = render_bottom_bar(&mut out, &ui_state, &spinner, &status_line, term_height - 1);
+      out.flush().unwrap();
 
       thread::sleep(Duration::from_millis(10));
     }
   })
 }
-
 
 // PRIVATE
 // ------------------------------------------------------------------
@@ -171,7 +168,8 @@ fn handle_line_message<W: Write>(
   }
 
   for ch in msg_str.chars() {
-    let is_newline_or_wrap = ch == '\n' || get_visible_len_for(buffer.last().unwrap()) + 1 > max_width;
+    let is_newline_or_wrap =
+      ch == '\n' || get_visible_len_for(buffer.last().unwrap()) + 1 > max_width;
 
     if is_newline_or_wrap {
       buffer.push(String::new());
@@ -273,16 +271,16 @@ fn stream_chunk<W: Write>(
       return;
     }
 
-    let is_newline_or_wrap = ch == '\n' || get_visible_len_for(buffer.last().unwrap()) + 1 > max_width;
+    let is_newline_or_wrap =
+      ch == '\n' || get_visible_len_for(buffer.last().unwrap()) + 1 > max_width;
 
     if is_newline_or_wrap {
-      buffer.push(String::new());
-
       let (_view_start, visible) = viewport(buffer.len(), term_height);
 
       if buffer.len() > visible {
         execute!(out, ScrollUp(1)).unwrap();
       }
+      buffer.push(String::new());
 
       execute!(
         out,
@@ -436,7 +434,7 @@ fn render_bottom_bar<W: Write>(
   full_bar
 }
 
-// computes visible length ignoring ANSI sequences
+
 fn get_visible_len_for(s: &str) -> usize {
   let mut len = 0usize;
   let mut chars = s.chars();

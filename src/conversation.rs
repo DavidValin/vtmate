@@ -149,7 +149,7 @@ pub fn conversation_thread(
             // send the complete phrase to tts
             let _ = tts_tx_cloned_for_closure.send((strip_special_chars(&phrase), my_interrupt));
             // send raw piece immediately
-            let _ = tx_ui_cloned_for_closure.send(format!("stream|{}", phrase));
+            let _ = tx_ui_cloned_for_closure.send(format!("stream|{}", format!("{}\n", &phrase)));
           }
         };
 
@@ -279,7 +279,7 @@ fn strip_special_chars(s: &str) -> String {
     if !inside {
       result.extend(part.chars().filter(|c| {
         ![
-          '.', '~', '*', '&', '-', ',', ';', ':', '(', ')', '[', ']', '{', '}', '"', '\'',
+          '.', '~', '*', '&', '-', ',', ';', ':', '(', ')', '[', ']', '{', '}', '"', '\'', '#', '`',
         ]
         .contains(c)
       }));
