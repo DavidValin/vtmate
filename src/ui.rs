@@ -35,10 +35,10 @@ pub fn spawn_ui_thread(
   rx_ui: Receiver<String>,
 ) -> thread::JoinHandle<()> {
   thread::spawn(move || {
-    // Make ui_state mutable for interior mutability
     let mut ui_state = ui_state;
     let mut out = io::stdout();
     execute!(out, Hide).unwrap();
+
     let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     let mut bottom_bar = String::new();
     let mut buffer: Vec<String> = Vec::new();
@@ -88,7 +88,6 @@ pub fn spawn_ui_thread(
                 &status_line,
                 &mut bottom_bar,
               );
-              thread::sleep(Duration::from_millis(10));
               first_line_done = true;
             }
             handle_line_message(
@@ -102,7 +101,7 @@ pub fn spawn_ui_thread(
             );
           }
           "stream" => {
-            let msg_str = parts.next().unwrap_or(msg.as_str());
+            let msg_str = parts.next().unwrap();
             handle_stream_message(
               &mut out,
               msg_str,
@@ -114,21 +113,18 @@ pub fn spawn_ui_thread(
             );
           }
           "stop_ui" => {
-            let msg_str = "🛑 USER interrupted";
+            // Mark streaming to stop immediately
+            STOP_STREAM.store(true, Ordering::Relaxed);
+
             handle_line_message(
               &mut out,
-              msg_str,
+              "\n🛑 USER interrupted",
               &mut buffer,
               &mut ui_state,
               &spinner,
               &status_line,
               &mut bottom_bar,
             );
-
-            // Mark streaming to stop immediately after printing
-            STOP_STREAM.store(true, Ordering::Relaxed);
-            // Exit the UI thread loop
-            break;
           }
           _ => {}
         }
@@ -173,13 +169,9 @@ fn handle_line_message<W: Write>(
   if buffer.is_empty() {
     buffer.push(String::new());
   }
-  // If the last line is not full width, start a new line
-  if buffer.last().unwrap().len() != max_width {
-    buffer.push(String::new());
-  }
 
   for ch in msg_str.chars() {
-    let is_newline_or_wrap = ch == '\n' || get_visible_len_for(buffer.last().unwrap()) >= max_width;
+    let is_newline_or_wrap = ch == '\n' || get_visible_len_for(buffer.last().unwrap()) + 1 > max_width;
 
     if is_newline_or_wrap {
       buffer.push(String::new());
@@ -215,6 +207,8 @@ fn handle_line_message<W: Write>(
         Print(buffer.last().unwrap())
       )
       .unwrap();
+
+      out.flush().unwrap();
     }
   }
 
@@ -273,21 +267,13 @@ fn stream_chunk<W: Write>(
   let (cols, term_height) = terminal::size().unwrap_or((80, 24));
   let max_width = cols as usize;
 
-  if buffer.is_empty() {
-    buffer.push(String::new());
-    // If the last line is not full width, start a new line
-    if buffer.last().unwrap().len() != max_width {
-      buffer.push(String::new());
-    }
-  }
-
   for ch in chunk.chars() {
     if STOP_STREAM.load(Ordering::Relaxed) {
       STOP_STREAM.store(false, Ordering::Relaxed);
       return;
     }
 
-    let is_newline_or_wrap = ch == '\n' || get_visible_len_for(buffer.last().unwrap()) >= max_width;
+    let is_newline_or_wrap = ch == '\n' || get_visible_len_for(buffer.last().unwrap()) + 1 > max_width;
 
     if is_newline_or_wrap {
       buffer.push(String::new());
@@ -323,6 +309,8 @@ fn stream_chunk<W: Write>(
         Print(buffer.last().unwrap())
       )
       .unwrap();
+
+      out.flush().unwrap();
     }
 
     thread::sleep(Duration::from_millis(CHAR_DELAY_MS));
