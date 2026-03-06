@@ -1,5 +1,6 @@
 use clap::Parser;
 use cpal::traits::DeviceTrait;
+use crossterm::cursor::MoveTo;
 use crossbeam_channel::{bounded, unbounded};
 use std::process;
 use std::sync::{Arc, OnceLock, atomic::Ordering};
@@ -54,11 +55,11 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   // broadcast stop signal to all threads
   let (stop_all_tx, stop_all_rx) = unbounded::<()>();
   // channel for utterance audio chunks
-  let (tx_utt, rx_utt) = unbounded::<audio::AudioChunk>();
+  let (tx_utt, rx_utt) = bounded::<audio::AudioChunk>(1);
   // channel for tts phrases
   let (tx_tts, rx_tts) = bounded::<(String, u64)>(1);
   // channel for playback audio chunks
-  let (tx_play, rx_play) = unbounded::<audio::AudioChunk>();
+  let (tx_play, rx_play) = bounded::<audio::AudioChunk>(1);
 
   // Clones for threads
   let rx_play_for_playback = rx_play.clone();
