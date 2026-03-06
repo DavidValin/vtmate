@@ -32,7 +32,7 @@ pub struct AppState {
   pub voice: Arc<Mutex<String>>,
   pub ui: UiState,
   pub speed: AtomicU32,
-  pub conversation_history: std::sync::Arc<std::sync::Mutex<String>>,
+  pub conversation_history: std::sync::Arc<std::sync::Mutex<Vec<crate::llm::ChatMessage>>>,
   pub playback: PlaybackState,
   pub status_line: Arc<Mutex<String>>,
   pub interrupt_counter: Arc<AtomicU64>,
@@ -52,7 +52,7 @@ impl AppState {
         peak: Arc::new(Mutex::new(0.0)),
       },
       speed: AtomicU32::new(12),
-      conversation_history: std::sync::Arc::new(std::sync::Mutex::new(String::new())),
+      conversation_history: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
       playback: PlaybackState {
         // user initialized pause
         paused: Arc::new(AtomicBool::new(false)),

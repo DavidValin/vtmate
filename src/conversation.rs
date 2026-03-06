@@ -2,15 +2,17 @@
 //  Conversation
 // ------------------------------------------------------------------
 
-use crate::state::GLOBAL_STATE;
 use crate::START_INSTANT;
-use crossbeam_channel::{select, Receiver, Sender};
+use crate::llm::ChatMessage;
+use crate::state::GLOBAL_STATE;
+use crossbeam_channel::{Receiver, Sender, select};
 use std::cell::Cell;
 use std::sync::OnceLock;
 use std::sync::{
-  atomic::{AtomicU64, Ordering},
   Arc,
+  atomic::{AtomicU64, Ordering},
 };
+use tokio::spawn;
 
 static WHISPER_CTX: OnceLock<whisper_rs::WhisperContext> = OnceLock::new();
 
@@ -36,13 +38,15 @@ pub fn conversation_thread(
   model_path: String,
   args: crate::config::Args,
   ui: crate::state::UiState,
-  conversation_history: std::sync::Arc<std::sync::Mutex<String>>,
+  conversation_history: std::sync::Arc<std::sync::Mutex<Vec<crate::llm::ChatMessage>>>,
   tx_ui: Sender<String>,
   tts_tx: Sender<(String, u64)>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let ctx = init_whisper_context(&model_path);
   crate::log::log("info", &format!("LLM model: {}", args.model));
 
+  let tts_tx_cloned = tts_tx.clone();
+  let interrupt_counter_cloned = interrupt_counter.clone();
   loop {
     select! {
       recv(stop_all_rx) -> _ => break,
@@ -57,6 +61,7 @@ pub fn conversation_thread(
         // start rendering for this turn (agent response to user query)
         state.processing_response.store(true, Ordering::Relaxed);
         let pcm_f32: Vec<f32> = utt.data.clone();
+
         let mono_f32 = if utt.channels == 1 {
           pcm_f32.clone()
         } else {
@@ -75,11 +80,10 @@ pub fn conversation_thread(
         crate::log::log("debug", "Transcribing utterance...");
         let user_text = crate::stt::whisper_transcribe_with_ctx(&ctx, &mono_f32, utt.sample_rate, &args.language)?;
         crate::log::log("info", &format!("Transcribed: '{}'", user_text));
-        let prompt = format!("{}\n{}\n", conversation_history.lock().unwrap(), user_text);
-        let cleaned_prompt = crate::util::strip_ansi(&prompt);
         let user_text = user_text.trim().to_string();
         let speech_end_ms = crate::util::SPEECH_END_AT.load(std::sync::atomic::Ordering::SeqCst);
         let mut first_phrase_logged = false;
+
         if user_text.is_empty() {
           crate::log::log("debug", "Transcription returned empty string");
           continue;
@@ -96,7 +100,7 @@ pub fn conversation_thread(
         let _ = tx_ui.send(format!("line|{}", user_text));
         let _ = tx_ui.send("line|\n".to_string());
 
-        conversation_history.lock().unwrap().push_str(&format!("{}\n", user_text));
+        conversation_history.lock().unwrap().push(ChatMessage { role: "user".into(), content: user_text.clone() });
         ui.thinking.store(true, Ordering::Relaxed);
 
         // Snapshot interruption counter for this assistant turn.
@@ -113,7 +117,6 @@ pub fn conversation_thread(
         let stop_all_tx_cloned_for_closure = stop_all_tx.clone();
         let speaker_arc_cloned_for_closure = speaker_arc.clone();
         let tx_ui_cloned_for_closure = tx_ui.clone();
-        let tts_tx_cloned_for_closure = tts_tx.clone();
         let ui_thinking_cloned_for_closure = ui.thinking.clone();
         let conversation_history_cloned_for_closure = conversation_history.clone();
         // clones for closure
@@ -121,8 +124,14 @@ pub fn conversation_thread(
         let conversation_history_for_closure_cloned = conversation_history_cloned_for_closure.clone();
 
         // called on every chunk received from llm
+        let piece_acc = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let piece_acc_for_history = piece_acc.clone();
+        let tts_tx_local = tts_tx_cloned.clone();
+        let interrupt_local = interrupt_counter_cloned.clone();
         let on_piece = move |piece: &str| {
-          let hist = conversation_history_for_closure_cloned.clone();
+          // accumulate piece for final response
+          piece_acc.lock().unwrap().push(piece.to_string());
+
           if interrupted {
             let _ = stop_all_tx_cloned_for_closure.try_send(());
             return;
@@ -136,22 +145,25 @@ pub fn conversation_thread(
             got_any_token = true;
             ui_thinking_for_closure.store(false, Ordering::Relaxed);
           }
+
           if let Some(phrase) = speaker_arc_cloned_for_closure.lock().unwrap().push_text(piece) {
             if !first_phrase_logged {
               let elapsed_ms = crate::util::now_ms(&START_INSTANT) - speech_end_ms;
               crate::log::log("info", &format!("Time from speech end to first phrase playback: {:.2?}", elapsed_ms));
               first_phrase_logged = true;
             }
-            hist.lock().unwrap().push_str(&format!("{}\n", phrase));
-            // send the complete phrase to tts
-            let _ = tts_tx_cloned_for_closure.send((strip_special_chars(&phrase), my_interrupt));
+            // send phrase to TTS immediately
+            let current_interrupt = interrupt_local.load(Ordering::SeqCst);
+            let cleaned = strip_special_chars(&phrase);
+            let _ = tts_tx_local.send((cleaned, current_interrupt));
           }
 
           // send raw piece immediately
           let _ = tx_ui_cloned_for_closure.send(format!("stream|{}", piece));
         };
 
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let user_text2 = user_text.clone();
+        let rt_llm_call = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         let stop_all_rx_cloned = stop_all_rx.clone();
         let ollama_url = args.ollama_url.clone();
         let interrupt_counter_cloned = interrupt_counter.clone();
@@ -161,10 +173,14 @@ pub fn conversation_thread(
 
         if args.llm == "llama-server" {
           let on_piece_cloned = std::sync::Arc::new(std::sync::Mutex::new(on_piece));
+          let conv_hist_clone = conversation_history.clone();
           let handle = std::thread::spawn(move || {
-            rt.block_on(async {
+            rt_llm_call.block_on(async {
               match crate::llm::llama_server_stream_response_into (
-                &cleaned_prompt,
+                conv_hist_clone.lock().unwrap().as_slice(),
+                true, // include full history
+                false, // do not include tools
+                &user_text2,
                 llama_url.as_str(),
                 model.as_str(),
                 engine_type.as_str(),
@@ -173,23 +189,27 @@ pub fn conversation_thread(
                 my_interrupt,
                 &mut *on_piece_cloned.lock().unwrap()
               ).await {
-                Ok(_) => Ok(()),
+                Ok(_) => (),
                 Err(e) => {
                   crate::log::log("error", &format!("llama server error: {e}. Make sure llama-server / llamafile is running"));
-                  Err(e)
                 }
               }
             })
           });
-          handle.join().unwrap()?;
+          handle.join().unwrap();
 
         } else {
           let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
           let on_piece_cloned = std::sync::Arc::new(std::sync::Mutex::new(on_piece));
+          let conv_hist_clone = conversation_history.clone();
           let handle = std::thread::spawn(move || {
+            // llm stream request
             rt.block_on(async {
               match crate::llm::llama_server_stream_response_into (
-                &cleaned_prompt,
+                conv_hist_clone.lock().unwrap().as_slice(),
+                true, // include full history
+                false, // do not include tools
+                &user_text,
                 ollama_url.as_str(),
                 model.as_str(),
                 engine_type.as_str(),
@@ -204,18 +224,29 @@ pub fn conversation_thread(
                   Err(e)
                 }
               }
-            })
+            });
           });
-          handle.join().unwrap()?;
-        }
 
+          handle.join().unwrap();
+        }
         ui_thinking_cloned_for_closure.store(false, Ordering::Relaxed);
+
         if let Some(phrase) = speaker_arc.lock().unwrap().flush() {
-          let phrase_clone = phrase.clone();
-          let _ = tx_ui.send(phrase_clone);
-          conversation_history.lock().unwrap().push_str(&format!("{}\n", phrase));
+          // accumulate final phrase as a piece
+          piece_acc_for_history.lock().unwrap().push(phrase.clone());
+          let _ = tx_ui.send(phrase.clone());
+          // send final phrase to TTS
           let current_interrupt = interrupt_counter.load(Ordering::SeqCst);
-          let _ = tts_tx.send((phrase.clone(), current_interrupt));
+          let cleaned = strip_special_chars(&phrase);
+          let _ = tts_tx_cloned.send((cleaned, current_interrupt));
+        }
+        // after streaming, combine accumulated pieces into full_response
+        let full_response = piece_acc_for_history.lock().unwrap().join("");
+        if !full_response.is_empty() {
+          conversation_history.lock().unwrap().push(ChatMessage { role: "assistant".into(), content: full_response.clone() });
+          // send full_response to TTS as one phrase
+          let current_interrupt = interrupt_counter.load(Ordering::SeqCst);
+          let cleaned = strip_special_chars(&full_response);
         }
       }
     }
@@ -238,20 +269,12 @@ impl PhraseSpeaker {
     self.buf.push_str(s);
     // cap phrases by new lines or dots
     let trigger = self.buf.contains('\n') || self.buf.ends_with('.');
-    if trigger {
-      self.flush()
-    } else {
-      None
-    }
+    if trigger { self.flush() } else { None }
   }
   fn flush(&mut self) -> Option<String> {
     let out = self.buf.trim().to_string();
     self.buf.clear();
-    if out.is_empty() {
-      None
-    } else {
-      Some(out)
-    }
+    if out.is_empty() { None } else { Some(out) }
   }
 }
 
@@ -259,10 +282,7 @@ thread_local! {
   static IN_CODE_BLOCK: Cell<bool> = Cell::new(false);
 }
 
-fn handle_interruption(
-  interrupt_counter: &Arc<AtomicU64>,
-  current: u64,
-) -> bool {
+fn handle_interruption(interrupt_counter: &Arc<AtomicU64>, current: u64) -> bool {
   if interrupt_counter.load(Ordering::SeqCst) != current {
     true
   } else {
