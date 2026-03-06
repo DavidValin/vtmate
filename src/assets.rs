@@ -60,7 +60,7 @@ pub fn ensure_assets_env() {
     && whisper_small_path.exists()
     && whisper_tiny_path.exists();
   if !all_exist {
-    println!("Extracting models, one moment...");
+    // extract models to disk
     let _ = fs::remove_dir_all(&kokoro_assets_dir);
     let _ = fs::remove_dir_all(&whisper_dir);
     if fs::create_dir_all(&kokoro_assets_dir).is_ok() && fs::create_dir_all(&whisper_dir).is_ok() {

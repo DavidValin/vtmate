@@ -27,6 +27,60 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   env_logger::init();
   whisper_rs::install_logging_hooks();
 
+  let args = crate::config::Args::parse();
+
+  let voice_selected = if let Some(v) = &args.voice {
+    v.clone()
+  } else {
+    if args.tts == "opentts" {
+      tts::DEFAULT_OPENTTS_VOICES_PER_LANGUAGE
+        .iter()
+        .find(|(lang, _)| *lang == args.language.as_str())
+        .map(|(_, voice)| (*voice).to_string())
+        .unwrap()
+    } else {
+      tts::DEFAULTKOKORO_VOICES_PER_LANGUAGE
+        .iter()
+        .find(|(lang, _)| *lang == args.language.as_str())
+        .map(|(_, voice)| (*voice).to_string())
+        .unwrap()
+    }
+  };
+
+  let state = Arc::new(state::AppState::new_with_voice(voice_selected.clone()));
+  let ui = state.ui.clone();
+  let status_line = state.status_line.clone();
+
+  // broadcast stop signal to all threads
+  let (stop_all_tx, stop_all_rx) = unbounded::<()>();
+  // channel for utterance audio chunks
+  let (tx_utt, rx_utt) = unbounded::<audio::AudioChunk>();
+  // channel for tts phrases
+  let (tx_tts, rx_tts) = bounded::<(String, u64)>(1);
+  // channel for playback audio chunks
+  let (tx_play, rx_play) = unbounded::<audio::AudioChunk>();
+
+  // Clones for threads
+  let rx_play_for_playback = rx_play.clone();
+
+  let stop_all_rx_for_record = stop_all_rx.clone();
+  let stop_all_rx_for_keyboard = stop_all_rx.clone();
+  let stop_all_rx_for_playback = stop_all_rx.clone();
+  let (stop_play_tx, stop_play_rx) = unbounded::<()>(); // stop playback signal
+
+  
+  state::GLOBAL_STATE.set(state.clone()).unwrap();
+
+  // ---- Thread: UI Thread ----
+  let (tx_ui, rx_ui) = bounded::<String>(1);
+  // Set UI sender for logging
+  log::set_tx_ui_sender(tx_ui.clone());
+  let ui_handle = ui::spawn_ui_thread(
+    ui.clone(),
+    status_line.clone(),
+    rx_ui,
+  );
+
   if !util::terminal_supported() {
     log::log(
       "error",
@@ -37,28 +91,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   assets::ensure_piper_espeak_env();
   assets::ensure_assets_env();
 
-  crossterm::execute!(
-    std::io::stdout(),
-    crossterm::terminal::Clear(crossterm::terminal::ClearType::All)
-  )
-  .unwrap();
-  println!(
-    r#"
-   █████╗ ██╗      ███╗   ███╗ █████╗ ████████╗███████╗
-  ██╔══██╗██║      ████╗ ████║██╔══██╗╚══██╔══╝██╔════╝
-  ███████║██║█████╗██╔████╔██║███████║   ██║   █████╗  
-  ██╔══██║██║╚════╝██║╚██╔╝██║██╔══██║   ██║   ██╔══╝  
-  ██║  ██║██║      ██║ ╚═╝ ██║██║  ██║   ██║   ███████╗
-  ╚═╝  ╚═╝╚═╝      ╚═╝     ╚═╝╚═╝  ╚═╝   ╚═╝   ╚══════╝"#
-  );
-
-  println!(
-    "    \x1b[90mv{}\x1b[0m\n\n\n\n\n",
-    env!("CARGO_PKG_VERSION")
-  );
 
   let _ = START_INSTANT.get_or_init(Instant::now);
-  let args = crate::config::Args::parse();
 
   if args.list_voices {
     tts::print_voices();
@@ -135,22 +169,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     &format!("Playback stream SR (truth): {}", out_sample_rate),
   );
 
-  // broadcast stop signal to all threads
-  let (stop_all_tx, stop_all_rx) = unbounded::<()>();
-  // channel for utterance audio chunks
-  let (tx_utt, rx_utt) = unbounded::<audio::AudioChunk>();
-  // channel for tts phrases
-  let (tx_tts, rx_tts) = bounded::<(String, u64)>(1);
-  // channel for playback audio chunks
-  let (tx_play, rx_play) = unbounded::<audio::AudioChunk>();
 
-  // Clones for threads
-  let rx_play_for_playback = rx_play.clone();
-
-  let stop_all_rx_for_record = stop_all_rx.clone();
-  let stop_all_rx_for_keyboard = stop_all_rx.clone();
-  let stop_all_rx_for_playback = stop_all_rx.clone();
-  let (stop_play_tx, stop_play_rx) = unbounded::<()>(); // stop playback signal
 
   let available_langs = tts::get_all_available_languages();
   if !available_langs.contains(&args.language.as_str()) {
@@ -165,23 +184,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     process::exit(1);
   }
 
-  let voice_selected = if let Some(v) = &args.voice {
-    v.clone()
-  } else {
-    if args.tts == "opentts" {
-      tts::DEFAULT_OPENTTS_VOICES_PER_LANGUAGE
-        .iter()
-        .find(|(lang, _)| *lang == args.language.as_str())
-        .map(|(_, voice)| (*voice).to_string())
-        .unwrap()
-    } else {
-      tts::DEFAULTKOKORO_VOICES_PER_LANGUAGE
-        .iter()
-        .find(|(lang, _)| *lang == args.language.as_str())
-        .map(|(_, voice)| (*voice).to_string())
-        .unwrap()
-    }
-  };
+
 
   let valid_voices: Vec<&str> = tts::get_voices_for(&args.tts, &args.language);
   if valid_voices.is_empty() {
@@ -223,35 +226,27 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     );
   }
   // initialize state after voice_selected
-  let state = Arc::new(state::AppState::new_with_voice(voice_selected.clone()));
+  
   let recording_paused = state.recording_paused.clone();
   let recording_paused_for_record = recording_paused.clone();
   if args.ptt {
     recording_paused.store(true, Ordering::Relaxed);
   }
-  state::GLOBAL_STATE.set(state.clone()).unwrap();
+  
 
   let interrupt_counter = state.interrupt_counter.clone();
   let paused = state.playback.paused.clone();
   let playback_active = state.playback.playback_active.clone();
   let gate_until_ms = state.playback.gate_until_ms.clone();
 
-  let ui = state.ui.clone();
+  
   let volume = state.playback.volume.clone();
   let conversation_history = state.conversation_history.clone();
   let volume_play = volume.clone();
   let volume_rec = volume.clone();
-  let status_line = state.status_line.clone();
+  
 
-  // ---- Thread: UI Thread ----
-  let (tx_ui, rx_ui) = unbounded::<String>();
-  let ui_handle = ui::spawn_ui_thread(
-    ui.clone(),
-    stop_all_rx.clone(),
-    status_line.clone(),
-    ui.peak.clone(),
-    rx_ui,
-  );
+
 
   // ---- Thread: TTS -----
   let stop_play_tx_for_tts = stop_play_tx.clone();
