@@ -4,6 +4,8 @@ As easy as it sounds. Includes all you need to voice chat with ai models.
 Finally the cross platform voice ui you were waiting on now available
 for MacOS, Windows and Linux, no need for external installations.
 
+<iframe src="https://github.com/sponsors/DavidValin/card" title="Sponsor DavidValin" height="225" width="600" style="border: 0;"></iframe>
+
 ![ai mate screenshot](https://github.com/DavidValin/ai-mate/raw/main/preview.png)
 
 ### English demo
