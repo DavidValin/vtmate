@@ -128,6 +128,7 @@ pub fn keyboard_thread(
             *state.provider.lock().unwrap() = new_agent.provider.clone();
             *state.baseurl.lock().unwrap() = new_agent.baseurl.clone();
             *state.model.lock().unwrap() = new_agent.model.clone();
+            *state.system_prompt.lock().unwrap() = new_agent.system_prompt.clone();
             state.ptt.store(
               new_agent.ptt.trim().eq_ignore_ascii_case("true"),
               Ordering::Relaxed,
@@ -157,6 +158,7 @@ pub fn keyboard_thread(
             *state.provider.lock().unwrap() = new_agent.provider.clone();
             *state.baseurl.lock().unwrap() = new_agent.baseurl.clone();
             *state.model.lock().unwrap() = new_agent.model.clone();
+            *state.system_prompt.lock().unwrap() = new_agent.system_prompt.clone();
             state.ptt.store(
               new_agent.ptt.trim().eq_ignore_ascii_case("true"),
               Ordering::Relaxed,
