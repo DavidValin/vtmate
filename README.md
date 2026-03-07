@@ -5,7 +5,7 @@ Finally the cross platform voice ui you were waiting on now available
 for MacOS, Windows and Linux, no need for external installations.
 
 **Help ai-mate to prosper by sponsor this project**
-- ![GitHub Sponsor](https://img.shields.io/github/sponsors/DavidValin?label=Sponsor&logo=GitHub)
+* ![GitHub Sponsor](https://img.shields.io/github/sponsors/DavidValin?label=Sponsor&logo=GitHub)
 
 ![ai mate screenshot](https://github.com/DavidValin/ai-mate/raw/main/preview.png)
 
