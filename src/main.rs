@@ -172,7 +172,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   );
 
   log::log("info", &format!("TTS: {}", settings.tts));
-  if args.tts == "kokoro" { tts::start_kokoro_engine()?; }
+  if args.tts.as_deref() == Some("kokoro") || settings.tts == "kokoro" { tts::start_kokoro_engine()?; }
   log::log("info", &format!("Language: {}", settings.language));
   log::log("info", &format!("TTS voice: {}", settings.voice));
   log::log("info", &format!("LLM provider: {}", settings.provider));

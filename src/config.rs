@@ -12,10 +12,10 @@ use serde_ini::from_str;
 use std::fs::{create_dir_all, read_to_string, File};
 use std::io::Write;
 use std::panic;
+use std::process;
 use std::thread::{self};
 use std::time::Duration;
 use url::Url;
-use std::process;
 
 // API
 // ------------------------------------------------------------------
@@ -50,44 +50,41 @@ pub struct Args {
   #[arg(long, action = clap::ArgAction::SetTrue)]
   pub verbose: bool,
 
-  #[arg(long, default_value="main agent", value_parser=validate_agent_name)]
+  #[arg(long, default_value = "main agent", value_parser=validate_agent_name)]
   pub agent: String,
 
-  #[arg(long, default_value = "ollama")]
-  pub llm: String,
+  #[arg(long)]
+  pub llm: Option<String>,
 
-  #[arg(long, default_value = "kokoro")]
-  pub tts: String,
+  #[arg(long)]
+  pub tts: Option<String>,
 
-  #[arg(long, default_value = "~/.whisper-models/ggml-tiny.bin")]
-  pub whisper_model_path: String,
+  #[arg(long)]
+  pub whisper_model_path: Option<String>,
 
-  #[arg(long, default_value = "en")]
-  pub language: String,
+  #[arg(long)]
+  pub language: Option<String>,
 
   #[arg(long)]
   pub voice: Option<String>,
 
-  #[arg(long, default_value = "0.1")]
-  pub sound_threshold_peak: f32,
+  #[arg(long)]
+  pub sound_threshold_peak: Option<f32>,
 
-  #[arg(long, default_value = "2000")]
-  pub end_silence_ms: u64,
+  #[arg(long)]
+  pub end_silence_ms: Option<u64>,
 
-  #[arg(long, default_value = "http://localhost:8080")]
-  pub ollama_url: String,
+  #[arg(long)]
+  pub ollama_url: Option<String>,
 
-  #[arg(long, default_value = "llama3.2:3b")]
-  pub model: String,
+  #[arg(long)]
+  pub model: Option<String>,
 
-  #[arg(long, default_value = "http://localhost:8080")]
-  pub llama_server_url: String,
+  #[arg(long)]
+  pub llama_server_url: Option<String>,
 
-  #[arg(
-    long,
-    default_value = "http://127.0.0.1:5500/api/tts?&vocoder=high&denoiserStrength=0.005&&speakerId=&ssml=false&ssmlNumbers=true&ssmlDates=true&ssmlCurrency=true&cache=false"
-  )]
-  pub opentts_base_url: String,
+  #[arg(long)]
+  pub opentts_base_url: Option<String>,
 
   #[arg(long, action=clap::ArgAction::SetTrue)]
   pub list_voices: bool,
@@ -102,17 +99,21 @@ pub const MIN_UTTERANCE_MS_DEFAULT: u64 = 300;
 pub const OPENTTS_BASE_URL_DEFAULT: &str = "http://127.0.0.1:5500/api/tts?&vocoder=high&denoiserStrength=0.005&&speakerId=&ssml=false&ssmlNumbers=true&ssmlDates=true&ssmlCurrency=true&cache=false";
 
 pub fn resolved_whisper_model_path(args: &Args) -> String {
-  if args.whisper_model_path.starts_with("~") {
+  let path = args
+    .whisper_model_path
+    .clone()
+    .unwrap_or_else(|| "~/.whisper-models/ggml-tiny.bin".to_string());
+  if path.starts_with("~") {
     if let Some(home) = get_user_home_path() {
-      let rel = args.whisper_model_path.trim_start_matches("~");
+      let rel = path.trim_start_matches("~");
       let mut p = home;
       p.push(&rel[1..]);
       p.to_string_lossy().into_owned()
     } else {
-      args.whisper_model_path.clone()
+      path
     }
   } else {
-    args.whisper_model_path.clone()
+    path
   }
 }
 
@@ -152,16 +153,21 @@ pub fn load_settings(
       thread::sleep(Duration::from_millis(30));
       process::exit(0);
     }
-    if let Err(e) = validate_language(&agent.language, &args.tts) {
-      crate::log::log("error", &format!("Agent {}: {}", agent.name, e));
-      thread::sleep(Duration::from_millis(30));
-      process::exit(0);
+    if let Some(tts) = &args.tts {
+      if let Err(e) = validate_language(&agent.language, tts) {
+        crate::log::log("error", &format!("Agent {}: {}", agent.name, e));
+        thread::sleep(Duration::from_millis(30));
+        process::exit(0);
+      }
     }
-    if let Err(e) = validate_voice(&agent.voice, &agent.language, &args.tts) {
-      crate::log::log("error", &format!("Agent {}: {}", agent.name, e));
-      thread::sleep(Duration::from_millis(30));
-      process::exit(0);
+    if let Some(tts) = &args.tts {
+      if let Err(e) = validate_voice(&agent.voice, &agent.language, tts) {
+        crate::log::log("error", &format!("Agent {}: {}", agent.name, e));
+        thread::sleep(Duration::from_millis(30));
+        process::exit(0);
+      }
     }
+
     if let Err(e) = validate_provider(&agent.provider) {
       crate::log::log("error", &format!("Agent {}: {}", agent.name, e));
       thread::sleep(Duration::from_millis(30));
@@ -212,41 +218,134 @@ pub fn load_settings(
   }
 
   // Validate CLI args against the loaded agents
-  // if let Err(e) = validate_agent_name(&args.agent) {
-  //   crate::log::log("error", &format!("Agent {}: {}", agent.name, e));
-  // }
-  // if let Err(e) = validate_language(&args.language, &args.tts) {
-  //   crate::log::log("error", &format!("Agent {}: {}", agent.name, e));
-  // }
-  // if let Some(v) = &args.voice {
-  //   if let Err(e) = validate_voice(v, &args.language, &args.tts) {
-  //     crate::log::log("error", &format!("Agent {}: {}", agent.name, e));
-  //   }
-  // }
-  // if let Err(e) = validate_provider(&args.llm) {
-  //   crate::log::log("error", &format!("Agent {}: {}", agent.name, e));
-  // }
-  // if args.llm == "ollama" {
-  //   if let Err(e) = validate_baseurl(&args.ollama_url) {
-  //     crate::log::log("error", &format!("Agent {}: {}", agent.name, e));
-  //   }
-  // } else {
-  //   if let Err(e) = validate_baseurl(&args.llama_server_url) {
-  //     crate::log::log("error", &format!("Agent {}: {}", agent.name, e));
-  //   }
-  // }
-  // if let Err(e) = validate_model(&args.model) {
-  //   crate::log::log("error", &format!("Agent {}: {}", agent.name, e));
-  // }
-  // if let Err(e) = validate_sound_threshold_peak(args.sound_threshold_peak) {
-  //   crate::log::log("error", &format!("Agent {}: {}", agent.name, e));
-  // }
-  // if let Err(e) = validate_end_silence_ms(args.end_silence_ms) {
-  //   crate::log::log("error", &format!("Agent {}: {}", agent.name, e));
-  // }
-  // if let Err(e) = validate_tts(&args.tts) {
-  //   crate::log::log("error", &format!("Agent {}: {}", agent.name, e));
-  // }
+  if let Err(e) = validate_agent_name(&args.agent) {
+    return Err(e.into());
+  }
+  if let Some(lang) = &args.language {
+    if let Some(tts) = &args.tts {
+      if let Err(e) = validate_language(lang, tts) {
+        return Err(e.into());
+      }
+    }
+  }
+  if let Some(v) = &args.voice {
+    if let Some(lang) = &args.language {
+      if let Some(tts) = &args.tts {
+        if let Err(e) = validate_voice(v, lang, tts) {
+          return Err(e.into());
+        }
+      }
+    }
+  }
+  if let Some(v) = &args.llm {
+    if let Err(e) = validate_provider(v) {
+      return Err(e.into());
+    }
+  }
+  if let Some(v) = &args.llm {
+    if v == "ollama" {
+      if let Some(u) = &args.ollama_url {
+        if let Err(e) = validate_baseurl(u) {
+          return Err(e.into());
+        }
+      }
+    } else {
+      if let Some(u) = &args.llama_server_url {
+        if let Err(e) = validate_baseurl(u) {
+          return Err(e.into());
+        }
+      }
+    }
+  }
+  // validate optional model if provided
+  if let Some(v) = &args.model {
+    if let Err(e) = validate_model(v) {
+      return Err(e.into());
+    }
+  }
+  // Validate optional CLI arguments if provided
+  if let Some(v) = args.sound_threshold_peak {
+    if let Err(e) = validate_sound_threshold_peak(v) {
+      return Err(e.into());
+    }
+  }
+  if let Some(v) = args.end_silence_ms {
+    if let Err(e) = validate_end_silence_ms(v) {
+      return Err(e.into());
+    }
+  }
+  if let Some(v) = &args.tts {
+    if let Err(e) = validate_tts(v) {
+      return Err(e.into());
+    }
+  }
+  if let Some(v) = &args.llm {
+    if let Err(e) = validate_provider(v) {
+      return Err(e.into());
+    }
+  }
+  if let Some(v) = &args.llm {
+    if v == "ollama" {
+      if let Some(u) = &args.ollama_url {
+        if let Err(e) = validate_baseurl(u) {
+          return Err(e.into());
+        }
+      }
+    } else {
+      if let Some(u) = &args.llama_server_url {
+        if let Err(e) = validate_baseurl(u) {
+          return Err(e.into());
+        }
+      }
+    }
+  }
+  if let Some(v) = &args.language {
+    if let Some(tts) = &args.tts {
+      if let Err(e) = validate_language(v, tts) {
+        return Err(e.into());
+      }
+    }
+  }
+  // Merge args into each agent's settings
+  for agent in agents.iter_mut() {
+    if let Some(v) = args.language.clone() {
+      agent.language = v;
+    }
+    if let Some(v) = args.tts.clone() {
+      agent.tts = v;
+    }
+    if let Some(v) = args.llm.clone() {
+      agent.provider = v;
+    }
+    if let Some(v) = args.llm.clone() {
+      if v == "ollama" {
+        if let Some(u) = args.ollama_url.clone() {
+          agent.baseurl = u;
+        }
+      } else {
+        if let Some(u) = args.llama_server_url.clone() {
+          agent.baseurl = u;
+        }
+      }
+    }
+    if let Some(v) = args.model.clone() {
+      agent.model = v;
+    }
+    agent.ptt = args.ptt.to_string();
+    if let Some(v) = args.whisper_model_path.clone() {
+      agent.whisper_model_path = v;
+    }
+    if let Some(v) = args.sound_threshold_peak {
+      agent.sound_threshold_peak = v;
+    }
+    if let Some(v) = args.end_silence_ms {
+      agent.end_silence_ms = v;
+    }
+    if let Some(v) = &args.voice {
+      agent.voice = v.clone();
+    }
+  }
+
   Ok(agents)
 }
 
