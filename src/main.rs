@@ -27,7 +27,6 @@ mod util;
 static START_INSTANT: OnceLock<Instant> = OnceLock::new();
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-  let _ = terminal::enable_raw_mode();
 
   let args = crate::config::Args::parse();
   crate::log::set_verbose(args.verbose || false);
@@ -68,6 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tts::print_voices();
     process::exit(0);
   }
+  let _ = terminal::enable_raw_mode();
   env_logger::init();
   whisper_rs::install_logging_hooks();
 
