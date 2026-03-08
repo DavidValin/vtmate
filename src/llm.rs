@@ -3,15 +3,16 @@
 // ------------------------------------------------------------------
 
 use std::sync::{Arc, atomic::AtomicU64};
-use crate::state::GLOBAL_STATE;
 use crossbeam_channel::Receiver;
 use reqwest::StatusCode;
 use futures_util::StreamExt;
 use bytes::Bytes;
+use serde_json::json;
+use crate::state::GLOBAL_STATE;
 
 /// Stream response from Llama/Ollama endpoints, fallback if one fails, and mid-stream cancellation support
 pub async fn llama_server_stream_response_into(
-  prompt: &str,
+  messages: &Vec<crate::conversation::ChatMessage>,
   llama_host: &str,
   llama_model: &str,
   server_type: &str,
@@ -24,17 +25,6 @@ pub async fn llama_server_stream_response_into(
   #[derive(Clone, Copy, Debug)]
   enum ApiKind { OaiChat, OllamaGenerate, OllamaChat }
 
-  #[derive(serde::Serialize)]
-  struct ChatMessage<'a> { role: &'a str, content: &'a str }
-
-  #[derive(serde::Serialize)]
-  struct OaiChatReq<'a> { model: &'a str, messages: Vec<ChatMessage<'a>>, stream: bool }
-
-  #[derive(serde::Serialize)]
-  struct OllamaGenerateReq<'a> { model: &'a str, prompt: &'a str, stream: bool, #[serde(skip_serializing_if = "Option::is_none")] max_tokens: Option<u32> }
-
-  #[derive(serde::Serialize)]
-  struct OllamaChatReq<'a> { model: &'a str, messages: Vec<ChatMessage<'a>>, stream: bool }
 
   fn should_fallback_status(code: StatusCode) -> bool {
     matches!(
@@ -79,27 +69,32 @@ pub async fn llama_server_stream_response_into(
 
     crate::log::log("info", &format!("Trying endpoint: {}", url));
 
-    let system_prompt = {
-        let state = GLOBAL_STATE.get().expect("AppState not initialized");
-        state.system_prompt.lock().unwrap().clone()
-    };
     let req = match kind {
       ApiKind::OaiChat => {
-        let messages = vec![
-          ChatMessage { role: "system", content: &system_prompt },
-          ChatMessage { role: "user", content: prompt },
-        ];
-        client.post(&url).json(&OaiChatReq { model: llama_model, messages, stream: true })
+        let payload = json!({
+          "model": llama_model,
+          "messages": messages.iter().map(|m| json!({ "role": m.role, "content": m.content })).collect::<Vec<_>>(),
+          "stream": true
+        });
+        client.post(&url).json(&payload)
       }
       ApiKind::OllamaGenerate => {
-        client.post(&url).json(&OllamaGenerateReq { model: llama_model, prompt, stream: true, max_tokens: Some(1024) })
+        let prompt_str = messages.iter().map(|m| m.content.as_str()).collect::<Vec<_>>().join("\n");
+        let payload = json!({
+          "model": llama_model,
+          "prompt": prompt_str,
+          "stream": true,
+          "max_tokens": 1024
+        });
+        client.post(&url).json(&payload)
       }
       ApiKind::OllamaChat => {
-        let messages = vec![
-          ChatMessage { role: "system", content: &system_prompt },
-          ChatMessage { role: "user", content: prompt },
-        ];
-        client.post(&url).json(&OllamaChatReq { model: llama_model, messages, stream: true })
+        let payload = json!({
+          "model": llama_model,
+          "messages": messages.iter().map(|m| json!({ "role": m.role, "content": m.content })).collect::<Vec<_>>(),
+          "stream": true
+        });
+        client.post(&url).json(&payload)
       }
     };
 

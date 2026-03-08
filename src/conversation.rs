@@ -17,6 +17,14 @@ static WHISPER_CTX: OnceLock<whisper_rs::WhisperContext> = OnceLock::new();
 // API
 // ------------------------------------------------------------------
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChatMessage {
+  pub role: String,
+  pub content: String,
+}
+
+pub type ConversationHistory = std::sync::Arc<std::sync::Mutex<Vec<ChatMessage>>>;
+
 /// Initialise the Whisper context once, performing a warm‑up.
 pub fn init_whisper_context(model_path: &str) -> &'static whisper_rs::WhisperContext {
   WHISPER_CTX.get_or_init(|| {
@@ -36,7 +44,7 @@ pub fn conversation_thread(
   model_path: String,
   settings: crate::config::AgentSettings,
   ui: crate::state::UiState,
-  conversation_history: std::sync::Arc<std::sync::Mutex<String>>,
+  conversation_history: ConversationHistory,
   tx_ui: Sender<String>,
   tts_tx: Sender<(String, u64)>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -76,8 +84,19 @@ pub fn conversation_thread(
         let state = GLOBAL_STATE.get().expect("AppState not initialized");
         let user_text = crate::stt::whisper_transcribe_with_ctx(&ctx, &mono_f32, utt.sample_rate, &state.language.lock().unwrap())?;
         crate::log::log("info", &format!("Transcribed: '{}'", user_text));
-        let prompt = format!("{}\n{}\n", conversation_history.lock().unwrap(), user_text);
-        let cleaned_prompt = crate::util::strip_ansi(&prompt);
+        let system_prompt = {
+          let state = GLOBAL_STATE.get().expect("AppState not initialized");
+          state.system_prompt.lock().unwrap().clone()
+        };
+        let hist = conversation_history.lock().unwrap();
+        let mut messages = Vec::new();
+        messages.push(ChatMessage{role:"system".to_string(), content:system_prompt});
+        for m in hist.iter() {
+          messages.push(m.clone());
+        }
+        // Release the conversation history lock before re-acquiring it to push the user message
+        std::mem::drop(hist);
+        messages.push(ChatMessage{role:"user".to_string(), content:user_text.clone()});
         let user_text = user_text.trim().to_string();
         let speech_end_ms = crate::util::SPEECH_END_AT.load(std::sync::atomic::Ordering::SeqCst);
         let mut first_phrase_logged = false;
@@ -97,7 +116,7 @@ pub fn conversation_thread(
         let _ = tx_ui.send(format!("line|{}", user_text));
         let _ = tx_ui.send("line|\n".to_string());
 
-        conversation_history.lock().unwrap().push_str(&format!("{}\n", user_text));
+        conversation_history.lock().unwrap().push(ChatMessage{role:"user".to_string(), content:user_text.clone()});
         ui.thinking.store(true, Ordering::Relaxed);
 
         // Snapshot interruption counter for this assistant turn.
@@ -146,7 +165,7 @@ pub fn conversation_thread(
               crate::log::log("info", &format!("Time from speech end to first phrase playback: {:.2?}", elapsed_ms));
               first_phrase_logged = true;
             }
-            hist.lock().unwrap().push_str(&format!("{}\n", phrase));
+            hist.lock().unwrap().push(ChatMessage{role:"assistant".to_string(), content:phrase.clone()});
             // send the complete phrase to tts
             let _ = tts_tx_cloned_for_closure.send((strip_special_chars(&phrase), my_interrupt));
           }
@@ -166,8 +185,9 @@ pub fn conversation_thread(
           let on_piece_cloned = std::sync::Arc::new(std::sync::Mutex::new(on_piece));
           let handle = std::thread::spawn(move || {
             rt.block_on(async {
+              crate::log::log("info", "eoo");
               match crate::llm::llama_server_stream_response_into (
-                &cleaned_prompt,
+                &messages,
                 llama_url.as_str(),
                 model.as_str(),
                 engine_type.as_str(),
@@ -186,14 +206,13 @@ pub fn conversation_thread(
           });
           // ignore join result to prevent panic on llama server error
           let _join_result = handle.join();
-
         } else {
           let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
           let on_piece_cloned = std::sync::Arc::new(std::sync::Mutex::new(on_piece));
           let handle = std::thread::spawn(move || {
             rt.block_on(async {
               match crate::llm::llama_server_stream_response_into (
-                &cleaned_prompt,
+                &messages,
                 ollama_url.as_str(),
                 model.as_str(),
                 engine_type.as_str(),
@@ -217,7 +236,7 @@ pub fn conversation_thread(
         if let Some(phrase) = speaker_arc.lock().unwrap().flush() {
           let phrase_clone = phrase.clone();
           let _ = tx_ui.send(phrase_clone);
-          conversation_history.lock().unwrap().push_str(&format!("{}\n", phrase));
+          conversation_history.lock().unwrap().push(ChatMessage{role:"assistant".to_string(), content:phrase.clone()});
           let current_interrupt = interrupt_counter.load(Ordering::SeqCst);
           let _ = tts_tx.send((phrase.clone(), current_interrupt));
         }

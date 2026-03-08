@@ -33,7 +33,7 @@ pub struct AppState {
   pub voice: Arc<Mutex<String>>,
   pub ui: UiState,
   pub speed: AtomicU32,
-  pub conversation_history: std::sync::Arc<std::sync::Mutex<String>>,
+  pub conversation_history: crate::conversation::ConversationHistory,
   pub agent_name: Arc<Mutex<String>>,
   pub agents: Arc<Vec<crate::config::AgentSettings>>,
   pub tts: Arc<Mutex<String>>,
@@ -70,7 +70,7 @@ impl AppState {
         spinner_index: 0,
       },
       speed: AtomicU32::new(12),
-      conversation_history: std::sync::Arc::new(std::sync::Mutex::new(String::new())),
+      conversation_history: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
       agent_name: Arc::new(Mutex::new(String::new())),
       agents: Arc::new(Vec::new()),
       playback: PlaybackState {
