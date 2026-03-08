@@ -43,6 +43,7 @@ pub fn spawn_ui_thread(
     let mut bottom_bar = String::new();
     let mut buffer: Vec<String> = Vec::new();
     let mut last_term_size = terminal::size().unwrap_or((80, 24));
+    let mut pending_stream: Vec<String> = Vec::new();
 
     crossterm::execute!(
       std::io::stdout(),
@@ -69,8 +70,9 @@ pub fn spawn_ui_thread(
       &mut bottom_bar,
     );
 
+    let mut waiting_for_first_line = true;
+
     loop {
-      // Process UI messages
       while let Ok(msg) = rx_ui.try_recv() {
         let mut parts = msg.splitn(2, '|');
         let msg_type = parts.next().unwrap_or("");
@@ -78,6 +80,7 @@ pub fn spawn_ui_thread(
         match msg_type {
           "line" => {
             let msg_str = parts.next().unwrap_or(msg.as_str());
+
             handle_line_message(
               &mut out,
               msg_str,
@@ -87,9 +90,30 @@ pub fn spawn_ui_thread(
               &status_line,
               &mut bottom_bar,
             );
+
+            for chunk in pending_stream.drain(..) {
+              handle_stream_message(
+                &mut out,
+                &chunk,
+                &mut buffer,
+                &mut ui_state,
+                &spinner,
+                &status_line,
+                &mut bottom_bar,
+              );
+            }
+
+            waiting_for_first_line = false;
           }
+
           "stream" => {
             let msg_str = parts.next().unwrap();
+
+            if waiting_for_first_line {
+              pending_stream.push(msg_str.to_string());
+              continue;
+            }
+
             handle_stream_message(
               &mut out,
               msg_str,
@@ -100,13 +124,16 @@ pub fn spawn_ui_thread(
               &mut bottom_bar,
             );
           }
+
           "stop_ui" => {
-            // Mark streaming to stop immediately
             STOP_STREAM.store(true, Ordering::Relaxed);
+
+            // NEW: clear any buffered chunks
+            pending_stream.clear();
 
             handle_line_message(
               &mut out,
-              "\n🛑 USER interrupted",
+              "\n\n🛑 USER interrupted",
               &mut buffer,
               &mut ui_state,
               &spinner,
@@ -114,6 +141,7 @@ pub fn spawn_ui_thread(
               &mut bottom_bar,
             );
           }
+
           _ => {}
         }
       }
@@ -127,10 +155,8 @@ pub fn spawn_ui_thread(
         last_term_size = (new_cols, new_term_height);
       }
 
-      // Spinner update
       ui_state.spinner_index = (ui_state.spinner_index + 1) % spinner.len();
 
-      // Render bottom bar
       let (_cols, term_height) = terminal::size().unwrap_or((80, 24));
       bottom_bar = render_bottom_bar(&mut out, &ui_state, &spinner, &status_line, term_height - 1);
       out.flush().unwrap();
@@ -176,10 +202,9 @@ fn handle_line_message<W: Write>(
 
       let (_view_start, visible) = viewport(buffer.len(), term_height);
 
-      if buffer.len() > visible {
+      if buffer.len() >= visible {
         execute!(out, ScrollUp(1)).unwrap();
       }
-
       execute!(
         out,
         MoveTo(0, (std::cmp::min(buffer.len(), visible)) as u16 - 1),
@@ -266,18 +291,13 @@ fn stream_chunk<W: Write>(
   let max_width = cols as usize;
 
   for ch in chunk.chars() {
-    if STOP_STREAM.load(Ordering::Relaxed) {
-      STOP_STREAM.store(false, Ordering::Relaxed);
-      return;
-    }
-
     let is_newline_or_wrap =
       ch == '\n' || get_visible_len_for(buffer.last().unwrap()) + 1 > max_width;
 
     if is_newline_or_wrap {
       let (_view_start, visible) = viewport(buffer.len(), term_height);
 
-      if buffer.len() > visible {
+      if buffer.len() >= visible {
         execute!(out, ScrollUp(1)).unwrap();
       }
       buffer.push(String::new());
@@ -309,6 +329,12 @@ fn stream_chunk<W: Write>(
       .unwrap();
 
       out.flush().unwrap();
+    }
+
+    if STOP_STREAM.load(Ordering::Relaxed) {
+      STOP_STREAM.store(false, Ordering::Relaxed);
+      out.flush().unwrap();
+      return;
     }
 
     thread::sleep(Duration::from_millis(CHAR_DELAY_MS));
