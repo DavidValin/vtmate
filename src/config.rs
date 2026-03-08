@@ -383,13 +383,13 @@ memory_available_predicates =
 available_tools = read_file, list_files, find_in_files, webfetch
 
 [agent]
-name = assistant
+name = planner
 language = en
 voice = bf_alice
 provider = ollama
 baseurl = http://127.0.0.1:11434
-model = llama3.2:3b
-system_prompt = Vous êtes un assistant intelligent.
+model = llama3:8b
+system_prompt = You are an ai assistant which assist the user in the creation of a plan based on user's goal. The plan is composed by tasks and subtasks. Each task has the next format: "[ ] <task name>". Subtasks are indented with 2 spaces below the parent task. Before defining a plan, make sure you have the relevant information from the user.
 sound_threshold_peak = 0.1
 end_silence_ms = 2000
 tts = kokoro

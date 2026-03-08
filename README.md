@@ -121,8 +121,6 @@ ptt = false
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 ```
 
-
-
 Explanation on the fields:
 
 * **name**: a short name for the agent
@@ -148,6 +146,7 @@ ai-mate
 ```
 
 You can switch agents in realtime by pressing Left / Right keyword arrows (you need at least 2 agents defined in `~/ai-mate/settings`).
+If you want to avoid sound interruptions you can use `ptt` mode or increase the `sound_threshold_peak`.
 
 If you want to use OpenTTS, start the docker service first: `docker run --rm --platform=linux/amd64 -p 5500:5500 synesthesiam/opentts:all` (it will pull the image the first time). Adjust the platform as needed depending on your hardware. 
 
