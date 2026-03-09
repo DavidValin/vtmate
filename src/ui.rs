@@ -353,7 +353,6 @@ fn render_bottom_bar<W: Write>(
   let think = ui_state.thinking.load(Ordering::Relaxed);
   let play = ui_state.playing.load(Ordering::Relaxed);
   let recording_paused = state.recording_paused.load(Ordering::Relaxed);
-  let conversation_paused = state.conversation_paused.load(Ordering::Relaxed);
 
   let status = if recording_paused {
     "⏸️".to_string()
@@ -377,8 +376,13 @@ fn render_bottom_bar<W: Write>(
   };
 
   let internal_status = format!(
-    "{}{}{}",
+    "{}{}{}{}",
     if recording_paused {
+      "\x1b[90m█\x1b[0m"
+    } else {
+      "\x1b[97m█\x1b[0m"
+    },
+    if speak {
       "\x1b[97m█\x1b[0m"
     } else {
       "\x1b[90m█\x1b[0m"
