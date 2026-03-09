@@ -399,7 +399,13 @@ fn render_bottom_bar<W: Write>(
     },
   );
 
-  let combined_status = format!("{} {} ({}) ", voice_str, internal_status, agent_name);
+  let ptt = if state.ptt.load(Ordering::Relaxed) {
+    "\x1b[41m\x1b[37m PTT \x1b[0m"
+  } else {
+    ""
+  };
+
+  let combined_status = format!("{} {} {} ({}) ", voice_str, ptt, internal_status, agent_name);
 
   let cols = crossterm::terminal::size().unwrap_or((80, 24)).0 as usize;
 

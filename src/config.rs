@@ -4,7 +4,7 @@
 
 use crate::tts;
 use crate::util::get_user_home_path;
-use anyhow::{anyhow, Error};
+use anyhow::{Error};
 use clap::Parser;
 use cpal::traits::DeviceTrait;
 use cpal::Device;
@@ -159,7 +159,7 @@ pub fn resolved_whisper_model_path(whisper_model_path: &str) -> String {
 pub fn load_settings(
   settings_path: &std::path::Path,
   args: &Args,
-) -> Result<Vec<AgentSettings>, anyhow::Error> {
+) -> Result<Vec<AgentSettings>, Error> {
   // Read the whole INI file
   let ini_contents = read_to_string(settings_path)?;
   // Split on the section header "[agent]"
