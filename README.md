@@ -32,14 +32,14 @@ https://github.com/user-attachments/assets/e612feaa-8ab0-4761-9c67-53ec7d40cab7
 
 ## Features
 
+- 📌 Realtime agent swap: `change the agent by pressing <ARROW_LEFT> / <ARROW_RIGHT> (applicable to next response)`
 - 📌 Continuous Voice chat (live conversation): `records user continuously and stops on silence, submitting the request to the agent`
 - 📌 Voice interrupt: `the agent stops talking if you interrupt via voice`
 - 📌 Recording Pause / Resume: `toggle "<SPACE>" key to pause / resume voice recording only`
 - 📌 Stop PlayBack: `press "<ESCAPE>" ONCE to stop the playback for the current response`
 - 📌 Interrupt: `press "<ESCAPE>" TWICE to interrupt the current response alltogether`
-- 📌 Push to Talk mode (PTT): `run it with --ptt and keep <SPACE> while talking and release to stop recording`
+- 📌 Push to Talk mode (PTT): `keep <SPACE> pressed while talking and release to stop recording`
 - 📌 Voice speed change: `change the agent voice speed by pressing <ARROW_UP> / <ARROW_DOWN> (applicable to next response)`
-- 📌 Voice change (realtime): `change the agent voice by pressing <ARROW_LEFT> / <ARROW_RIGHT> (applicable to next response)`
 - 📌 Integrated `whisper`
 - 📌 Integrated `kokoro TTS` system
 - 📌 Interface with `OpenTTS` system
@@ -70,12 +70,14 @@ Do you have GPU? (nvidia? an apple computer?) Great! then ai-mate speed is at li
 ```
 Platform   Arch    CPU    OpenBLAS   CUDA   Metal   Vulkan
 --------   ----    ---    --------   ----   -----   ------
-macOS      ARM64   ✅    optional     n/a     ✅      ❌
-Linux      AMD64   ✅       ✅        ✅      n/a     ✅
-Linux      ARM64   ✅       ✅        ❌      n/a     ✅
-Windows    x86     ⚠️       ⚠️        ⚠️      n/a     ⚠️
-Windows    ARM64   ⚠️       ⚠️        ⚠️      n/a     ⚠️
+macOS      ARM64   ✅    optional     n/a     ✅      ⚠️
+Linux      AMD64   ✅       ✅        ✅      n/a     ⚠️
+Linux      ARM64   ✅       ✅        ⚠️      n/a     ⚠️
+Windows    x86     ✅       ✅        ✅      n/a     ⚠️
+Windows    ARM64   ✅       ⚠️        ⚠️      n/a     ⚠️
 ```
+
+⚠️ Currently working on full static builds for all OS. You can download a release or build it yourself
 
 ## Installation
 
@@ -146,9 +148,10 @@ ai-mate
 ```
 
 * You can switch agents in realtime by pressing Left / Right keyword arrows (you need at least 2 agents defined in `~/ai-mate/settings`).
-* If you have problems starting ai-mate you can remove `~/ai-mate/settings` so it recreates the default configuration
 * If you want to avoid sound interruptions you can use `ptt` mode or increase the `sound_threshold_peak` for your microphone levels.
 * If you want to use OpenTTS, start the docker service first: `docker run --rm --platform=linux/amd64 -p 5500:5500 synesthesiam/opentts:all` (it will pull the image the first time). Adjust the platform as needed depending on your hardware.
+* If you have problems starting ai-mate you can remove `~/ai-mate/settings` so it recreates the default configuration
+* By default whisper tiny is used (from ~/.whisper-models/ggml-small.bin). If you need better speech recognition, download a better whisper model and update the `whisper_model_path` setting.
 
 If you need help:
 
