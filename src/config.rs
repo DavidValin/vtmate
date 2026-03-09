@@ -230,6 +230,12 @@ pub fn load_settings(
     }
 
     if let Err(e) =
+      validate_model(&agent.model).map_err(|e: std::io::Error| -> Error { Error::new(e) })
+    {
+      errors.push(format!("Agent {}: {}", agent.name, e));
+    }
+
+    if let Err(e) =
       validate_baseurl(&agent.baseurl).map_err(|e: std::io::Error| -> Error { Error::new(e) })
     {
       errors.push(format!("Agent {}: {}", agent.name, e));
