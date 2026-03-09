@@ -8,7 +8,6 @@ use reqwest::StatusCode;
 use futures_util::StreamExt;
 use bytes::Bytes;
 use serde_json::json;
-use crate::state::GLOBAL_STATE;
 
 /// Stream response from Llama/Ollama endpoints, fallback if one fails, and mid-stream cancellation support
 pub async fn llama_server_stream_response_into(

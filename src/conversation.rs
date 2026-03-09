@@ -90,7 +90,7 @@ pub fn conversation_thread(
         };
         let hist = conversation_history.lock().unwrap();
         let mut messages = Vec::new();
-        messages.push(ChatMessage{role:"system".to_string(), content:system_prompt});
+        messages.push(ChatMessage{role:"system".to_string(), content:system_prompt.replace("\\n", "\n")});
         for m in hist.iter() {
           messages.push(m.clone());
         }

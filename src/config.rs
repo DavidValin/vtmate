@@ -134,7 +134,8 @@ pub fn load_settings(
   for block in blocks {
     // prepend a dummy header so serde_ini can parse it
     let section = block.trim();
-    let agent: AgentSettings = match panic::catch_unwind(|| from_str::<AgentSettings>(&section)) {
+    let mut agent: AgentSettings = match panic::catch_unwind(|| from_str::<AgentSettings>(&section))
+    {
       Ok(Ok(a)) => a,
       Ok(Err(e)) => {
         crate::log::log("error", &format!("Failed to parse agent section: {}\n", e));
@@ -147,6 +148,9 @@ pub fn load_settings(
         return Err("panic while parsing agent section".into());
       }
     };
+    // Sanitize quoted string values in AgentSettings before validation
+    sanitize_agent_settings(&mut agent);
+
     // Validate individual agent
     if let Err(e) = validate_agent_name(&agent.name) {
       crate::log::log("error", &format!("Agent {}: {}", agent.name, e));
@@ -198,11 +202,13 @@ pub fn load_settings(
       thread::sleep(Duration::from_millis(30));
       process::exit(0);
     }
+
     if let Err(e) = validate_tts(&agent.tts) {
       crate::log::log("error", &format!("Agent {}: {}", agent.name, e));
       thread::sleep(Duration::from_millis(30));
       process::exit(0);
     }
+
     agents.push(agent);
   }
 
@@ -504,7 +510,7 @@ fn validate_voice(
   }
 
   let voice_clean = voice.trim_matches('"');
-  if !voices.contains(&voice_clean) {
+  if !voices.iter().any(|v| *v == voice_clean) {
     return Err(format!("Unsupported voice '{}' for language {}", voice, language).into());
   }
   Ok(())
@@ -570,4 +576,27 @@ fn validate_end_silence_ms(value: u64) -> Result<(), Box<dyn std::error::Error +
     return Err("'end_silence_ms' must be between 1 and 20000".into());
   }
   Ok(())
+}
+
+// PRIVATE
+// ------------------------------------------------------------------
+
+// Sanitizes quoted string values in AgentSettings
+fn sanitize_agent_settings(agent: &mut AgentSettings) {
+  agent.name = agent.name.trim_matches('"').to_string();
+  agent.language = agent.language.trim_matches('"').to_string();
+  agent.tts = agent.tts.trim_matches('"').to_string();
+  agent.voice = agent.voice.trim_matches('"').to_string();
+  agent.provider = agent.provider.trim_matches('"').to_string();
+  agent.baseurl = agent.baseurl.trim_matches('"').to_string();
+  agent.model = agent.model.trim_matches('"').to_string();
+  agent.system_prompt = agent.system_prompt.trim_matches('"').to_string();
+  agent.memory_enabled = agent.memory_enabled.trim_matches('"').to_string();
+  agent.memory_available_predicates = agent
+    .memory_available_predicates
+    .trim_matches('"')
+    .to_string();
+  agent.available_tools = agent.available_tools.trim_matches('"').to_string();
+  agent.ptt = agent.ptt.trim_matches('"').to_string();
+  agent.whisper_model_path = agent.whisper_model_path.trim_matches('"').to_string();
 }
