@@ -223,7 +223,7 @@ pub fn conversation_thread(
               ).await {
                 Ok(_) => Ok(()),
                 Err(e) => {
-                  crate::log::log("error", &format!("ollama error. {e}. Make sure ollama is running"));
+                  crate::log::log("error", &format!("ollama error. {}. Make sure ollama is running and model '{}' is available", e, model.as_str()));
                   Err(e)
                 }
               }

@@ -153,6 +153,11 @@ ai-mate
 * If you have problems starting ai-mate you can remove `~/ai-mate/settings` so it recreates the default configuration
 * By default whisper tiny is used (from ~/.whisper-models/ggml-small.bin). If you need better speech recognition, download a better whisper model and update the `whisper_model_path` setting.
 
+You can also initialize ai-mate at specific agent:
+```
+ai-mate --agent planner
+```
+
 If you need help:
 
 ```
