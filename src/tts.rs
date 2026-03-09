@@ -3,6 +3,7 @@
 // ------------------------------------------------------------------
 
 use crossbeam_channel::{Receiver, Sender};
+use crate::state::GLOBAL_STATE;
 use kokoro_micro::TtsEngine;
 mod kokoro_tts;
 use reqwest;
@@ -82,7 +83,6 @@ pub fn tts_thread(
   tx_play: Sender<crate::audio::AudioChunk>,
   stop_all_rx: Receiver<()>,
   interrupt_counter: Arc<AtomicU64>,
-  args: crate::config::Args,
   rx_tts: Receiver<(String, u64)>,
   stop_play_tx: Sender<()>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -95,11 +95,17 @@ pub fn tts_thread(
           Err(_) => break,
         };
         let voice = voice_state.lock().unwrap().clone();
+        let state = GLOBAL_STATE.get().expect("AppState not initialized");
+        let tts_val = state.tts.lock().unwrap().clone();
+        crate::log::log("info", tts_val.as_str());
+        let language = state.language.lock().unwrap().clone();
+        crate::log::log("info", language.as_str());
+      
         let outcome = crate::tts::speak(
           &phrase,
-          args.tts.as_str(),
-          args.opentts_base_url.as_str(),
-          args.language.as_str(),
+          tts_val.as_str(),
+          crate::config::OPENTTS_BASE_URL_DEFAULT,
+          language.as_str(),
           voice.as_str(),
           out_sample_rate,
           tx_play.clone(),

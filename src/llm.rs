@@ -7,10 +7,11 @@ use crossbeam_channel::Receiver;
 use reqwest::StatusCode;
 use futures_util::StreamExt;
 use bytes::Bytes;
+use serde_json::json;
 
 /// Stream response from Llama/Ollama endpoints, fallback if one fails, and mid-stream cancellation support
 pub async fn llama_server_stream_response_into(
-  prompt: &str,
+  messages: &Vec<crate::conversation::ChatMessage>,
   llama_host: &str,
   llama_model: &str,
   server_type: &str,
@@ -21,47 +22,8 @@ pub async fn llama_server_stream_response_into(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
   #[derive(Clone, Copy, Debug)]
-  enum ApiKind { OaiChat, OllamaGenerate, OllamaChat, LegacyCompletion }
+  enum ApiKind { OaiChat, OllamaGenerate, OllamaChat }
 
-  #[derive(serde::Serialize)]
-  struct ChatMessage<'a> { role: &'a str, content: &'a str }
-
-  #[derive(serde::Serialize)]
-  struct OaiChatReq<'a> { model: &'a str, messages: Vec<ChatMessage<'a>>, stream: bool }
-
-  #[derive(serde::Serialize)]
-  struct OllamaGenerateReq<'a> { model: &'a str, prompt: &'a str, stream: bool, #[serde(skip_serializing_if = "Option::is_none")] max_tokens: Option<u32> }
-
-  #[derive(serde::Serialize)]
-  struct OllamaChatReq<'a> { model: &'a str, messages: Vec<ChatMessage<'a>>, stream: bool }
-
-  #[derive(serde::Serialize)]
-  struct LegacyCompletionReq<'a> {
-    prompt: &'a str,
-    stream: bool,
-    n_predict: u32,
-    temperature: f32,
-    stop: Vec<&'a str>,
-    repeat_last_n: u32,
-    repeat_penalty: f32,
-    top_k: u32,
-    top_p: f32,
-    min_p: f32,
-    tfs_z: f32,
-    typical_p: f32,
-    presence_penalty: f32,
-    frequency_penalty: f32,
-    mirostat: u8,
-    mirostat_tau: f32,
-    mirostat_eta: f32,
-    grammar: &'a str,
-    n_probs: u32,
-    min_keep: u32,
-    image_data: Vec<&'a str>,
-    cache_prompt: bool,
-    api_key: &'a str,
-    slot_id: i32,
-  }
 
   fn should_fallback_status(code: StatusCode) -> bool {
     matches!(
@@ -79,20 +41,16 @@ pub async fn llama_server_stream_response_into(
     let mut out = Vec::new();
     match server_type {
       "llama-server" => {
-        out.push((format!("http://{}/completion", base), ApiKind::LegacyCompletion));
-        out.push((format!("http://{}/api/chat", base), ApiKind::OllamaChat));
+        out.push((format!("http://{}/v1/chat/completions", base), ApiKind::OaiChat));
+        out.push((format!("http://{}/api/chat", base), ApiKind::OaiChat));
       }
       "ollama" => {
         out.push((format!("http://{}/v1/generate", base), ApiKind::OllamaGenerate));
         out.push((format!("http://{}/api/chat", base), ApiKind::OllamaChat));
-        out.push((format!("http://{}/v1/chat/completions", base), ApiKind::OaiChat));
-        out.push((format!("http://{}/completion", base), ApiKind::LegacyCompletion));
       }
       _ => {
-        out.push((format!("http://{}/v1/generate", base), ApiKind::OllamaGenerate));
-        out.push((format!("http://{}/api/chat", base), ApiKind::OllamaChat));
         out.push((format!("http://{}/v1/chat/completions", base), ApiKind::OaiChat));
-        out.push((format!("http://{}/completion", base), ApiKind::LegacyCompletion));
+        out.push((format!("http://{}/api/chat", base), ApiKind::OllamaChat));
       }
     }
     out
@@ -112,49 +70,30 @@ pub async fn llama_server_stream_response_into(
 
     let req = match kind {
       ApiKind::OaiChat => {
-        let messages = vec![
-          ChatMessage { role: "system", content: "You are a helpful assistant." },
-          ChatMessage { role: "user", content: prompt },
-        ];
-        client.post(&url).json(&OaiChatReq { model: llama_model, messages, stream: true })
+        let payload = json!({
+          "model": llama_model,
+          "messages": messages.iter().map(|m| json!({ "role": m.role, "content": m.content })).collect::<Vec<_>>(),
+          "stream": true
+        });
+        client.post(&url).json(&payload)
       }
       ApiKind::OllamaGenerate => {
-        client.post(&url).json(&OllamaGenerateReq { model: llama_model, prompt, stream: true, max_tokens: Some(1024) })
+        let prompt_str = messages.iter().map(|m| m.content.as_str()).collect::<Vec<&str>>().join("\n");
+        let payload = json!({
+          "model": llama_model,
+          "prompt": prompt_str,
+          "stream": true,
+          "max_tokens": 1024
+        });
+        client.post(&url).json(&payload)
       }
       ApiKind::OllamaChat => {
-        let messages = vec![
-          ChatMessage { role: "system", content: "You are a helpful assistant." },
-          ChatMessage { role: "user", content: prompt },
-        ];
-        client.post(&url).json(&OllamaChatReq { model: llama_model, messages, stream: true })
-      }
-      ApiKind::LegacyCompletion => {
-        client.post(&url).json(&LegacyCompletionReq {
-          prompt,
-          stream: true,
-          n_predict: 400,
-          temperature: 0.7,
-          stop: vec!["</s>", "Assistant:", "User:"],
-          repeat_last_n: 256,
-          repeat_penalty: 1.18,
-          top_k: 40,
-          top_p: 0.95,
-          min_p: 0.05,
-          tfs_z: 1.0,
-          typical_p: 1.0,
-          presence_penalty: 0.0,
-          frequency_penalty: 0.0,
-          mirostat: 0,
-          mirostat_tau: 5.0,
-          mirostat_eta: 0.1,
-          grammar: "",
-          n_probs: 0,
-          min_keep: 0,
-          image_data: vec![],
-          cache_prompt: true,
-          api_key: "",
-          slot_id: -1,
-        })
+        let payload = json!({
+          "model": llama_model,
+          "messages": messages.iter().map(|m| json!({ "role": m.role, "content": m.content })).collect::<Vec<_>>(),
+          "stream": true
+        });
+        client.post(&url).json(&payload)
       }
     };
 
@@ -232,10 +171,6 @@ pub async fn llama_server_stream_response_into(
                   {
                     return Ok(());
                   }
-                }
-                ApiKind::LegacyCompletion => {
-                  if let Some(content) = v.get("content").and_then(|c| c.as_str()) { on_piece(content); }
-                  if v.get("stop").and_then(|s| s.as_bool()) == Some(true) { return Ok(()); }
                 }
               }
             }
