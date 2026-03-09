@@ -2,16 +2,15 @@
 //  Keyboard handling
 // ------------------------------------------------------------------
 
-use crate::state::{GLOBAL_STATE, decrease_voice_speed, increase_voice_speed};
-use crate::tts;
+use crate::state::{decrease_voice_speed, increase_voice_speed, GLOBAL_STATE};
 use crossbeam_channel::{Receiver, Sender};
 use crossterm::{
   event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
   terminal,
 };
 use std::sync::{
-  Arc, Mutex,
   atomic::{AtomicBool, AtomicU64, Ordering},
+  Arc,
 };
 use std::time::{Duration, Instant};
 
@@ -19,25 +18,22 @@ use std::time::{Duration, Instant};
 // ------------------------------------------------------------------
 
 pub fn keyboard_thread(
+  tx_ui: Sender<String>,
   stop_all_tx: Sender<()>,
   stop_all_rx: Receiver<()>,
-  _paused: Arc<AtomicBool>,
   recording_paused: Arc<AtomicBool>,
-  voice_state: Arc<Mutex<String>>,
-  tts: String,
-  language: String,
   stop_play_tx: Sender<()>,
   interrupt_counter: Arc<AtomicU64>,
-  ptt: bool,
 ) {
   // Raw mode lets us capture single key presses (space to pause/resume).
-  let _ = terminal::enable_raw_mode();
   let mut last_esc: Option<Instant> = None;
 
   // Track if space was pressed and when last space event occurred
   let mut space_pressed = false;
   let mut last_space_time: Option<Instant> = None;
   loop {
+    let state = GLOBAL_STATE.get().unwrap();
+
     if stop_all_rx.try_recv().is_ok() {
       break;
     }
@@ -49,13 +45,14 @@ pub fn keyboard_thread(
         if k.modifiers.contains(KeyModifiers::CONTROL) {
           if let KeyCode::Char('c') | KeyCode::Char('C') = k.code {
             let _ = stop_all_tx.try_send(());
+            let _ = tx_ui.try_send("stop_ui|".to_string());
             break;
           }
         }
 
         match k.code {
           KeyCode::Char(' ') => {
-            if ptt {
+            if state.ptt.load(Ordering::Relaxed) {
               crate::log::log("debug", &format!("SPACE event kind={:?}", k.kind));
               last_space_time = Some(Instant::now());
               match k.kind {
@@ -115,26 +112,71 @@ pub fn keyboard_thread(
             decrease_voice_speed();
           }
 
-          // swap to previous voice
+          // switch to previous agent
           KeyCode::Left => {
-            let voices = tts::get_voices_for(&tts, &language);
-            let mut current = voice_state.lock().unwrap();
-            if !voices.is_empty() {
-              let pos = voices.iter().position(|v| *v == *current).unwrap_or(0);
-              let new_idx = if pos == 0 { voices.len() - 1 } else { pos - 1 };
-              *current = voices[new_idx].to_string();
+            let agents = state.agents.as_ref();
+            let current_name = state.agent_name.lock().unwrap().clone();
+            let pos = agents
+              .iter()
+              .position(|a| a.name == current_name)
+              .unwrap_or(0);
+            let new_idx = if pos == 0 { agents.len() - 1 } else { pos - 1 };
+            let new_agent = &agents[new_idx];
+            *state.voice.lock().unwrap() = new_agent.voice.clone();
+            *state.agent_name.lock().unwrap() = new_agent.name.clone();
+            *state.tts.lock().unwrap() = new_agent.tts.clone();
+            *state.language.lock().unwrap() = new_agent.language.clone();
+            *state.provider.lock().unwrap() = new_agent.provider.clone();
+            *state.baseurl.lock().unwrap() = new_agent.baseurl.clone();
+            *state.model.lock().unwrap() = new_agent.model.clone();
+            *state.system_prompt.lock().unwrap() = new_agent.system_prompt.clone();
+            state.ptt.store(new_agent.ptt, Ordering::Relaxed);
+            if state.ptt.load(Ordering::Relaxed) {
+              recording_paused.store(true, Ordering::Relaxed);
+            } else {
+              recording_paused.store(false, Ordering::Relaxed);
             }
+            // Reset conversation history when changing agents
+            state.conversation_history.lock().unwrap().clear();
+            let _ = tx_ui.send(format!(
+              "line|\n\x1b[32m🤖 Agent switched to '\x1b[37m{}\x1b[0m\x1b[32m' language: \x1b[37m{}\x1b[0m",
+              new_agent.name,
+              new_agent.language
+            ));
           }
 
-          // swap to next voice
+          // switch to next agent
           KeyCode::Right => {
-            let voices = tts::get_voices_for(&tts, &language);
-            let mut current = voice_state.lock().unwrap();
-            if !voices.is_empty() {
-              let pos = voices.iter().position(|v| *v == *current).unwrap_or(0);
-              let new_idx = (pos + 1) % voices.len();
-              *current = voices[new_idx].to_string();
+            let state = GLOBAL_STATE.get().unwrap();
+            let agents = state.agents.as_ref();
+            let current_name = state.agent_name.lock().unwrap().clone();
+            let pos = agents
+              .iter()
+              .position(|a| a.name == current_name)
+              .unwrap_or(0);
+            let new_idx = (pos + 1) % agents.len();
+            let new_agent = &agents[new_idx];
+            *state.voice.lock().unwrap() = new_agent.voice.clone();
+            *state.agent_name.lock().unwrap() = new_agent.name.clone();
+            *state.tts.lock().unwrap() = new_agent.tts.clone();
+            *state.language.lock().unwrap() = new_agent.language.clone();
+            *state.provider.lock().unwrap() = new_agent.provider.clone();
+            *state.baseurl.lock().unwrap() = new_agent.baseurl.clone();
+            *state.model.lock().unwrap() = new_agent.model.clone();
+            *state.system_prompt.lock().unwrap() = new_agent.system_prompt.clone();
+            state.ptt.store(new_agent.ptt, Ordering::Relaxed);
+            if state.ptt.load(Ordering::Relaxed) {
+              recording_paused.store(true, Ordering::Relaxed);
+            } else {
+              recording_paused.store(false, Ordering::Relaxed);
             }
+            // Reset conversation history when changing agents
+            state.conversation_history.lock().unwrap().clear();
+            let _ = tx_ui.send(format!(
+              "line|\n\x1b[32m🤖 Agent switched to '\x1b[37m{}\x1b[0m\x1b[32m' language: \x1b[37m{}\x1b[0m",
+              new_agent.name,
+              new_agent.language
+            ));
           }
           _ => {
             // Any other key while space was pressed indicates release
@@ -148,7 +190,7 @@ pub fn keyboard_thread(
     }
 
     // If space was pressed but no new space event for a short period, consider it released (only when PTT)
-    if ptt && space_pressed {
+    if state.ptt.load(Ordering::Relaxed) && space_pressed {
       if let Some(t) = last_space_time {
         if Instant::now().duration_since(t) > Duration::from_millis(500) {
           recording_paused.store(true, Ordering::Relaxed);
