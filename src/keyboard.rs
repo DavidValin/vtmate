@@ -129,10 +129,7 @@ pub fn keyboard_thread(
             *state.baseurl.lock().unwrap() = new_agent.baseurl.clone();
             *state.model.lock().unwrap() = new_agent.model.clone();
             *state.system_prompt.lock().unwrap() = new_agent.system_prompt.clone();
-            state.ptt.store(
-              new_agent.ptt.trim().eq_ignore_ascii_case("true"),
-              Ordering::Relaxed,
-            );
+            state.ptt.store(new_agent.ptt, Ordering::Relaxed);
             if state.ptt.load(Ordering::Relaxed) {
               recording_paused.store(true, Ordering::Relaxed);
             } else {
@@ -141,7 +138,7 @@ pub fn keyboard_thread(
             // Reset conversation history when changing agents
             state.conversation_history.lock().unwrap().clear();
             let _ = tx_ui.send(format!(
-              "line|\x1b[32m🤖 Agent switched to '\x1b[37m{}\x1b[0m\x1b[32m' language: \x1b[37m{}\x1b[0m",
+              "line|\n\x1b[32m🤖 Agent switched to '\x1b[37m{}\x1b[0m\x1b[32m' language: \x1b[37m{}\x1b[0m",
               new_agent.name,
               new_agent.language
             ));
@@ -166,10 +163,7 @@ pub fn keyboard_thread(
             *state.baseurl.lock().unwrap() = new_agent.baseurl.clone();
             *state.model.lock().unwrap() = new_agent.model.clone();
             *state.system_prompt.lock().unwrap() = new_agent.system_prompt.clone();
-            state.ptt.store(
-              new_agent.ptt.trim().eq_ignore_ascii_case("true"),
-              Ordering::Relaxed,
-            );
+            state.ptt.store(new_agent.ptt, Ordering::Relaxed);
             if state.ptt.load(Ordering::Relaxed) {
               recording_paused.store(true, Ordering::Relaxed);
             } else {
@@ -178,7 +172,7 @@ pub fn keyboard_thread(
             // Reset conversation history when changing agents
             state.conversation_history.lock().unwrap().clear();
             let _ = tx_ui.send(format!(
-              "line|\x1b[32m🤖 Agent switched to '\x1b[37m{}\x1b[0m\x1b[32m' language: \x1b[37m{}\x1b[0m",
+              "line|\n\x1b[32m🤖 Agent switched to '\x1b[37m{}\x1b[0m\x1b[32m' language: \x1b[37m{}\x1b[0m",
               new_agent.name,
               new_agent.language
             ));

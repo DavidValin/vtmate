@@ -118,7 +118,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let (stop_play_tx, stop_play_rx) = unbounded::<()>(); // stop playback signal
 
   // Resolve Whisper model path and log it
-  let whisper_path = config::resolved_whisper_model_path(&args);
+  let whisper_path = config::resolved_whisper_model_path(&settings.whisper_model_path);
   crate::log::log("info", &format!("Whisper model path: {}", whisper_path));
 
   let host = cpal::default_host();
@@ -177,10 +177,14 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   );
 
   log::log("info", &format!("TTS: {}", settings.tts));
-  if args.tts.as_deref() == Some("kokoro") || settings.tts == "kokoro" { tts::start_kokoro_engine()?; }
   log::log("info", &format!("Language: {}", settings.language));
   log::log("info", &format!("TTS voice: {}", settings.voice));
   log::log("info", &format!("LLM provider: {}", settings.provider));
+
+  if settings.tts == "kokoro" {
+    tts::start_kokoro_engine()?;
+  }
+
   if settings.provider == "ollama" {
     log::log("info", &format!("ollama base url: {}", settings.baseurl));
   } else {

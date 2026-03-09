@@ -104,7 +104,7 @@ impl AppState {
     *state.model.lock().unwrap() = settings.model.clone();
     *state.system_prompt.lock().unwrap() = settings.system_prompt.clone();
 
-    state.ptt.store(settings.ptt == "true", Ordering::Relaxed);
+    state.ptt.store(settings.ptt, Ordering::Relaxed);
     state.agents = Arc::new(agents);
     state
   }

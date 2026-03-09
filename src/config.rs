@@ -36,61 +36,69 @@ pub struct AgentSettings {
   pub baseurl: String,
   pub model: String,
   pub system_prompt: String,
-  pub memory_enabled: String,
-  pub memory_available_predicates: String,
-  pub available_tools: String,
-  pub ptt: String,
+  #[serde(deserialize_with = "bool_from_str_or_bool")]
+  pub ptt: bool,
   pub whisper_model_path: String,
   pub sound_threshold_peak: f32,
   pub end_silence_ms: u64,
 }
 
 #[derive(Parser, Debug, Clone)]
+#[clap(after_help = r#"
+Settings file is at ~/.ai-mate/settings
+
+Explanation on the fields:
+
+  * name:                 a short name for the agent
+  * language:             any of the languages available used
+                          for speech recognition and tts
+  * voice:                the voice name to use by the
+                          agent (see available voices for each
+                          language and tts system running
+                          `ai-mate --list-voices`)
+  * provider:             the system it will use to query
+                          the llm, it can be 'ollama' or
+                          'llama-server'
+  * baseurl:              the base url used to contact the
+                          provider (it needs to be without path)
+  * model:                the model name to use in ollama
+                          (some llama-server versions will
+                          ignore this option as llama-server
+                          runs for a single model)
+  * system_prompt:        the system prompt to be sent to
+                          the llm when querying it.
+                          Use \n for new lines
+  * sound_threshold_peak: a value between 0 and 1 which will
+                          be used as a peak base to detect
+                          user speech
+  * end_silence_ms:       the milliseconds of silence below
+                          sound_threshold_peak level that
+                          have to elapse for user speech
+                          to be submitted
+  * tts:                  the tts system to use, it can be
+                          'kokoro' or 'opentts'
+  * ptt:                  push to talk mode, when its set
+                          to true you have to keep the space
+                          pushed while speaking, then release.
+  * whisper_model_path:   the path to the whisper model.
+                          ai-mate unzips 2 models in
+                          ~/.whisper-models, tiny and small.
+                          You can download bigger models and
+                          point to them here
+
+"#)]
 pub struct Args {
   #[arg(long, action = clap::ArgAction::SetTrue)]
   pub verbose: bool,
+
+  #[arg(long, action=clap::ArgAction::SetTrue)]
+  pub list_voices: bool,
 
   #[arg(long, default_value = "main agent", value_parser=validate_agent_name)]
   pub agent: String,
 
   #[arg(long)]
-  pub llm: Option<String>,
-
-  #[arg(long)]
-  pub tts: Option<String>,
-
-  #[arg(long)]
-  pub whisper_model_path: Option<String>,
-
-  #[arg(long)]
-  pub language: Option<String>,
-
-  #[arg(long)]
-  pub voice: Option<String>,
-
-  #[arg(long)]
-  pub sound_threshold_peak: Option<f32>,
-
-  #[arg(long)]
-  pub end_silence_ms: Option<u64>,
-
-  #[arg(long)]
-  pub ollama_url: Option<String>,
-
-  #[arg(long)]
-  pub model: Option<String>,
-
-  #[arg(long)]
-  pub llama_server_url: Option<String>,
-
-  #[arg(long)]
-  pub opentts_base_url: Option<String>,
-
-  #[arg(long, action=clap::ArgAction::SetTrue)]
-  pub list_voices: bool,
-
-  #[arg(long, action=clap::ArgAction::SetTrue)]
-  pub ptt: bool,
+  pub ptt: Option<bool>,
 }
 
 // internal static values
@@ -98,16 +106,46 @@ pub const HANGOVER_MS_DEFAULT: u64 = 300;
 pub const MIN_UTTERANCE_MS_DEFAULT: u64 = 300;
 pub const OPENTTS_BASE_URL_DEFAULT: &str = "http://127.0.0.1:5500/api/tts?&vocoder=high&denoiserStrength=0.005&&speakerId=&ssml=false&ssmlNumbers=true&ssmlDates=true&ssmlCurrency=true&cache=false";
 
-pub fn resolved_whisper_model_path(args: &Args) -> String {
-  let path = args
-    .whisper_model_path
-    .clone()
-    .unwrap_or_else(|| "~/.whisper-models/ggml-tiny.bin".to_string());
+fn bool_from_str_or_bool<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+  D: serde::de::Deserializer<'de>,
+{
+  struct BoolVisitor;
+  impl<'de> serde::de::Visitor<'de> for BoolVisitor {
+    type Value = bool;
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+      formatter.write_str("a boolean or string representing a boolean")
+    }
+    fn visit_bool<E>(self, v: bool) -> Result<bool, E> {
+      Ok(v)
+    }
+    fn visit_str<E>(self, v: &str) -> Result<bool, E>
+    where
+      E: serde::de::Error,
+    {
+      v.parse::<bool>().map_err(serde::de::Error::custom)
+    }
+    fn visit_string<E>(self, v: String) -> Result<bool, E>
+    where
+      E: serde::de::Error,
+    {
+      v.parse::<bool>().map_err(serde::de::Error::custom)
+    }
+  }
+  deserializer.deserialize_any(BoolVisitor)
+}
+
+pub fn resolved_whisper_model_path(whisper_model_path: &str) -> String {
+  let path = if whisper_model_path.is_empty() {
+    "~/.whisper-models/ggml-tiny.bin".to_string()
+  } else {
+    whisper_model_path.to_string()
+  };
   if path.starts_with("~") {
     if let Some(home) = get_user_home_path() {
-      let rel = path.trim_start_matches("~");
+      let rel = path.trim_start_matches("~").trim_start_matches("/");
       let mut p = home;
-      p.push(&rel[1..]);
+      p.push(rel);
       p.to_string_lossy().into_owned()
     } else {
       path
@@ -132,20 +170,53 @@ pub fn load_settings(
   let mut agents = Vec::new();
   let mut errors: Vec<String> = Vec::new();
   for block in blocks {
-    // prepend a dummy header so serde_ini can parse it
-    let section = block.trim();
+    // Preprocess the block to remove surrounding quotes from values
+    let mut clean_section = String::new();
+    // Track ptt value string if present
+    let mut ptt_value_str: Option<String> = None;
+    for line in block.lines() {
+      if let Some(idx) = line.find('=') {
+        let (key, val_part) = line.split_at(idx);
+        // trim whitespace around key and value
+        let key = key.trim();
+        // val_part includes the '=' at start
+        let val = &val_part[1..].trim();
+        let val_trimmed = if val.starts_with('"') && val.ends_with('"') {
+          &val[1..val.len() - 1]
+        } else {
+          val
+        };
+        clean_section.push_str(key);
+        clean_section.push('=');
+        clean_section.push_str(val_trimmed);
+        clean_section.push('\n');
+      }
+      // skip lines without '=' (e.g., empty lines)
+    }
+
+    let section = clean_section.trim();
+
+    println!("DEBUG section: {}", section);
+    println!("DEBUG parsing section: {}", section);
     let mut agent: AgentSettings = match panic::catch_unwind(|| from_str::<AgentSettings>(&section))
     {
       Ok(Ok(a)) => a,
       Ok(Err(e)) => {
-        crate::log::log("error", &format!("Failed to parse agent section: {}\n", e));
+        crate::log::log(
+          "error",
+          &format!(
+            "Failed to parse agent's settings section: {}
+",
+            e
+          ),
+        );
         thread::sleep(Duration::from_millis(30));
         return Err(Box::new(e));
       }
       Err(_) => {
-        crate::log::log("error", "Panic while parsing agent section");
+        crate::log::log("error", "Panic while parsing agent's section");
         thread::sleep(Duration::from_millis(30));
-        return Err("panic while parsing agent section".into());
+        return Err("panic while parsing agent's section".into());
       }
     };
     // Sanitize quoted string values in AgentSettings before validation
@@ -156,20 +227,6 @@ pub fn load_settings(
       crate::log::log("error", &format!("Agent {}: {}", agent.name, e));
       thread::sleep(Duration::from_millis(30));
       process::exit(0);
-    }
-    if let Some(tts) = &args.tts {
-      if let Err(e) = validate_language(&agent.language, tts) {
-        crate::log::log("error", &format!("Agent {}: {}", agent.name, e));
-        thread::sleep(Duration::from_millis(30));
-        process::exit(0);
-      }
-    }
-    if let Some(tts) = &args.tts {
-      if let Err(e) = validate_voice(&agent.voice, &agent.language, tts) {
-        crate::log::log("error", &format!("Agent {}: {}", agent.name, e));
-        thread::sleep(Duration::from_millis(30));
-        process::exit(0);
-      }
     }
 
     if let Err(e) = validate_provider(&agent.provider) {
@@ -216,142 +273,29 @@ pub fn load_settings(
     for err in &errors {
       crate::log::log("error", &format!("Error: {}", err));
     }
-    return Err(errors.join("\n").into());
+    return Err(
+      errors
+        .join(
+          "
+",
+        )
+        .into(),
+    );
   }
 
   if agents.is_empty() {
     return Err("No [agent] sections found in settings file".into());
   }
 
-  // Validate CLI args against the loaded agents
+  // Validate CLI args
   if let Err(e) = validate_agent_name(&args.agent) {
     return Err(e.into());
   }
-  if let Some(lang) = &args.language {
-    if let Some(tts) = &args.tts {
-      if let Err(e) = validate_language(lang, tts) {
-        return Err(e.into());
-      }
-    }
-  }
-  if let Some(v) = &args.voice {
-    if let Some(lang) = &args.language {
-      if let Some(tts) = &args.tts {
-        if let Err(e) = validate_voice(v, lang, tts) {
-          return Err(e.into());
-        }
-      }
-    }
-  }
-  if let Some(v) = &args.llm {
-    if let Err(e) = validate_provider(v) {
-      return Err(e.into());
-    }
-  }
-  if let Some(v) = &args.llm {
-    if v == "ollama" {
-      if let Some(u) = &args.ollama_url {
-        if let Err(e) = validate_baseurl(u) {
-          return Err(e.into());
-        }
-      }
-    } else {
-      if let Some(u) = &args.llama_server_url {
-        if let Err(e) = validate_baseurl(u) {
-          return Err(e.into());
-        }
-      }
-    }
-  }
-  // validate optional model if provided
-  if let Some(v) = &args.model {
-    if let Err(e) = validate_model(v) {
-      return Err(e.into());
-    }
-  }
-  // Validate optional CLI arguments if provided
-  if let Some(v) = args.sound_threshold_peak {
-    if let Err(e) = validate_sound_threshold_peak(v) {
-      return Err(e.into());
-    }
-  }
-  if let Some(v) = args.end_silence_ms {
-    if let Err(e) = validate_end_silence_ms(v) {
-      return Err(e.into());
-    }
-  }
-  if let Some(v) = &args.tts {
-    if let Err(e) = validate_tts(v) {
-      return Err(e.into());
-    }
-  }
-  if let Some(v) = &args.llm {
-    if let Err(e) = validate_provider(v) {
-      return Err(e.into());
-    }
-  }
-  if let Some(v) = &args.llm {
-    if v == "ollama" {
-      if let Some(u) = &args.ollama_url {
-        if let Err(e) = validate_baseurl(u) {
-          return Err(e.into());
-        }
-      }
-    } else {
-      if let Some(u) = &args.llama_server_url {
-        if let Err(e) = validate_baseurl(u) {
-          return Err(e.into());
-        }
-      }
-    }
-  }
-  if let Some(v) = &args.language {
-    if let Some(tts) = &args.tts {
-      if let Err(e) = validate_language(v, tts) {
-        return Err(e.into());
-      }
-    }
-  }
+
   // Merge args into each agent's settings
   for agent in agents.iter_mut() {
-    if let Some(v) = args.language.clone() {
-      agent.language = v;
-    }
-    if let Some(v) = args.tts.clone() {
-      agent.tts = v;
-    }
-    if let Some(v) = args.llm.clone() {
-      agent.provider = v;
-    }
-    if let Some(v) = args.llm.clone() {
-      if v == "ollama" {
-        if let Some(u) = args.ollama_url.clone() {
-          agent.baseurl = u;
-        }
-      } else {
-        if let Some(u) = args.llama_server_url.clone() {
-          agent.baseurl = u;
-        }
-      }
-    }
-    if let Some(v) = args.model.clone() {
-      agent.model = v;
-    }
-    let ptt = args.ptt.clone();
-    if ptt {
-      agent.ptt = ptt.to_string();
-    }
-    if let Some(v) = args.whisper_model_path.clone() {
-      agent.whisper_model_path = v;
-    }
-    if let Some(v) = args.sound_threshold_peak {
-      agent.sound_threshold_peak = v;
-    }
-    if let Some(v) = args.end_silence_ms {
-      agent.end_silence_ms = v;
-    }
-    if let Some(v) = &args.voice {
-      agent.voice = v.clone();
+    if let Some(ptt_val) = args.ptt {
+      agent.ptt = ptt_val;
     }
   }
 
@@ -374,6 +318,7 @@ pub fn ensure_settings_file() -> Result<(), Box<dyn std::error::Error>> {
   let content = r#"[agent]
 name = main agent
 language = en
+tts = kokoro
 voice = bf_alice
 provider = ollama
 baseurl = http://127.0.0.1:11434
@@ -381,16 +326,13 @@ model = llama3.2:3b
 system_prompt = You are a smart ai assistant. You reply to the user with the necessary information following the next rules: Avoid suggestions unless they contribute to the specific user request. If the user hasn't requested anything specific ask the exact questions to find out exactly what he needs assistance with. Replies are no longer than 20 words unless a longer explanation is required.
 sound_threshold_peak = 0.1
 end_silence_ms = 2000
-tts = kokoro
 ptt = false
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
-memory_enabled = true
-memory_available_predicates = 
-available_tools = read_file, list_files, find_in_files, webfetch
 
 [agent]
 name = planner
 language = en
+tts = kokoro
 voice = bf_alice
 provider = ollama
 baseurl = http://127.0.0.1:11434
@@ -398,12 +340,8 @@ model = llama3:8b
 system_prompt = You are an ai assistant which assist the user in the creation of a plan based on user's goal. The plan is composed by tasks and subtasks. Each task has the next format: "[ ] <task name>". Subtasks are indented with 2 spaces below the parent task. Before defining a plan, make sure you have the relevant information from the user.
 sound_threshold_peak = 0.1
 end_silence_ms = 2000
-tts = kokoro
 ptt = false
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
-memory_enabled = true
-memory_available_predicates = 
-available_tools = read_file, list_files, find_in_files, webfetch
 "#;
   let mut file = File::create(&settings_path)?;
   file.write_all(content.as_bytes())?;
@@ -478,7 +416,6 @@ fn validate_language(
     crate::log::log("error", &err);
     return Err(err.into());
   }
-
   // Ensure the selected TTS engine supports this language
   let voices = tts::get_voices_for(tts, lang_clean);
   if voices.is_empty() {
@@ -591,12 +528,6 @@ fn sanitize_agent_settings(agent: &mut AgentSettings) {
   agent.baseurl = agent.baseurl.trim_matches('"').to_string();
   agent.model = agent.model.trim_matches('"').to_string();
   agent.system_prompt = agent.system_prompt.trim_matches('"').to_string();
-  agent.memory_enabled = agent.memory_enabled.trim_matches('"').to_string();
-  agent.memory_available_predicates = agent
-    .memory_available_predicates
-    .trim_matches('"')
-    .to_string();
-  agent.available_tools = agent.available_tools.trim_matches('"').to_string();
-  agent.ptt = agent.ptt.trim_matches('"').to_string();
+  // agent.ptt is a bool; no trimming needed
   agent.whisper_model_path = agent.whisper_model_path.trim_matches('"').to_string();
 }
