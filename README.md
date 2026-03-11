@@ -173,6 +173,13 @@ ai-mate --help
 
 ## Build ai-mate from source code
 
+Simplest way:
+```
+cargo install ai-mate
+```
+
+For custom builds:
+
 - There are 3 script `build_macos.sh`, `build_linux.sh` and `build_windows.bat`
 - The scripts accept --arch flag to build for specific architecture
 - If you are building for specific acceleration, make sure the SDKs are installed
@@ -209,20 +216,6 @@ build_windows.bat cpu
 build_windows.bat cuda
 build_windows.bat openblas
 build_windows.bat vulkan
-```
-
-## Tricks
-
-For conveniance create bash aliases with the options you want to use, example:
-
-```
-# English
-alias ai-mate_qwen='ai-mate --model "qwen3:30b"'
-alias ai-mate_llama='ai-mate --model "llama3:8b"'
-
-# Spanish
-alias ai-mate_es_qwen='ai-mate --model "qwen3:30b" --language es'
-alias ai-mate_es_llama='ai-mate --model "llama3:8b" --language es'
 ```
 
 ## Useful to know
