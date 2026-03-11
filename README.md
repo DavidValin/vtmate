@@ -9,6 +9,9 @@ for MacOS, Windows and Linux, no need for external installations.
 
 ![ai mate screenshot](https://github.com/DavidValin/ai-mate/raw/main/preview.png)
 
+![agent switch](https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/docs/keyboard/agent-switch.jpg) ![change voice speed](https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/docs/keyboard/change-voice-speed.jpg)
+![push to talk](https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/docs/keyboard/push-to-talk.jpg) ![stop / resume record](https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/docs/keyboard/stop-record.jpg)
+
 ### English demo
 https://github.com/user-attachments/assets/d9c27108-41f7-4148-8c32-28c8ca6d8516
 
