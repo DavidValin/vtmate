@@ -165,6 +165,8 @@ You can also initialize ai-mate at specific agent:
 ai-mate --agent planner
 ```
 
+If you want to use OpenTTS, start the docker service first: `docker run --rm --platform=linux/amd64 -p 5500:5500 synesthesiam/opentts:all` (it will pull the image the first time). Adjust the platform as needed depending on your hardware. 
+
 If you need help:
 
 ```

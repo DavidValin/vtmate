@@ -19,7 +19,6 @@ use std::thread;
 use std::time::Duration;
 
 // API
-// ------------------------------------------------------------------
 
 pub static STOP_STREAM: AtomicBool = AtomicBool::new(false);
 
@@ -34,6 +33,7 @@ pub fn spawn_ui_thread(
   status_line: Arc<Mutex<String>>,
   rx_ui: Receiver<String>,
 ) -> thread::JoinHandle<()> {
+  // separate thread for bottom bar update + render
   thread::spawn(move || {
     let mut ui_state = ui_state;
     let mut out = io::stdout();
@@ -432,7 +432,6 @@ fn render_bottom_bar<W: Write>(
     "\x1b[37m"
   };
   let bar = format!("{}{}\x1b[0m", bar_color, "█".repeat(bar_len));
-
   let spaces = cols.saturating_sub(
     get_visible_len_for(&status)
       + 2

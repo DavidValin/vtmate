@@ -4,6 +4,7 @@
 
 use crate::state::GLOBAL_STATE;
 use crate::START_INSTANT;
+use crate::llm::ChatMessage;
 use crossbeam_channel::{select, Receiver, Sender};
 use std::cell::Cell;
 use std::sync::OnceLock;
@@ -16,12 +17,6 @@ static WHISPER_CTX: OnceLock<whisper_rs::WhisperContext> = OnceLock::new();
 
 // API
 // ------------------------------------------------------------------
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ChatMessage {
-  pub role: String,
-  pub content: String,
-}
 
 pub type ConversationHistory = std::sync::Arc<std::sync::Mutex<Vec<ChatMessage>>>;
 
@@ -44,13 +39,15 @@ pub fn conversation_thread(
   model_path: String,
   settings: crate::config::AgentSettings,
   ui: crate::state::UiState,
-  conversation_history: ConversationHistory,
+  conversation_history: std::sync::Arc<std::sync::Mutex<Vec<crate::llm::ChatMessage>>>,
   tx_ui: Sender<String>,
   tts_tx: Sender<(String, u64)>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let ctx = init_whisper_context(&model_path);
   crate::log::log("info", &format!("LLM model: {}", settings.model));
 
+  let tts_tx_cloned = tts_tx.clone();
+  let interrupt_counter_cloned = interrupt_counter.clone();
   loop {
     select! {
       recv(stop_all_rx) -> _ => break,
@@ -116,7 +113,7 @@ pub fn conversation_thread(
         let _ = tx_ui.send(format!("line|{}", user_text));
         let _ = tx_ui.send("line|\n".to_string());
 
-        conversation_history.lock().unwrap().push(ChatMessage{role:"user".to_string(), content:user_text.clone()});
+        conversation_history.lock().unwrap().push(ChatMessage { role: "user".into(), content: user_text.clone() });
         ui.thinking.store(true, Ordering::Relaxed);
 
         // Snapshot interruption counter for this assistant turn.
@@ -173,46 +170,109 @@ pub fn conversation_thread(
           let _ = tx_ui_cloned_for_closure.send(format!("stream|{}", piece));
         };
 
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let user_text2 = user_text.clone();
+        let rt_llm_call = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         let stop_all_rx_cloned = stop_all_rx.clone();
-        let ollama_url = state.baseurl.lock().unwrap().clone();
+        let ollama_url = settings.baseurl.clone();
         let interrupt_counter_cloned = interrupt_counter.clone();
-        let llama_url = state.baseurl.lock().unwrap().clone();
-        let model = state.model.lock().unwrap().clone();
-        let engine_type = state.provider.lock().unwrap().clone();
+        // llama_url not needed in this context, use settings.baseurl when required
+        let model = settings.model.clone();
+        let engine_type = settings.provider.clone();
 
         if *state.provider.lock().unwrap() == "llama-server" {
           let on_piece_cloned = std::sync::Arc::new(std::sync::Mutex::new(on_piece));
+          let on_piece_cloned1 = on_piece_cloned.clone();
+          let conv_hist_clone = conversation_history.clone();
+          let value = user_text.clone();
+
+          let rt_llm_tools_call1 = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+          let conv_hist_clone2a = conversation_history.clone();
+          let llama_url2a = settings.baseurl.clone();
+          let model2a = settings.model.clone();
+          let engine_type2a = settings.provider.clone();
+          let my_interrupt2a = my_interrupt.clone();
+          let stop_all_rx_cloned2a = stop_all_rx.clone();
+          let interrupt_counter_cloned2a = interrupt_counter.clone();
+          let on_piece_cloned12a = on_piece_cloned1.clone();
+          let value2a = user_text.clone();
+
           let handle = std::thread::spawn(move || {
-            rt.block_on(async {
-              crate::log::log("info", "eoo");
-              match crate::llm::llama_server_stream_response_into (
-                &messages,
-                llama_url.as_str(),
-                model.as_str(),
-                engine_type.as_str(),
-                &stop_all_rx_cloned,
-                interrupt_counter_cloned.clone(),
-                my_interrupt,
-                &mut *on_piece_cloned.lock().unwrap()
-              ).await {
-                Ok(_) => Ok(()),
-                Err(e) => {
-                  crate::log::log("error", &format!("llama server error: {e}. Make sure llama-server / llamafile is running"));
-                  Err(e)
+            if crate::llm::TOOLS_SUPPORTED.get().copied().unwrap_or(false) {
+              rt_llm_tools_call1.block_on(async {
+                match crate::llm::llama_server_stream_response_into (
+                  &conv_hist_clone2a.lock().unwrap(),
+                  false, // send only this user message
+                  true, // include tools
+                  &value2a,
+                  llama_url2a.as_str(),
+                  model2a.as_str(),
+                  engine_type2a.as_str(),
+                  &stop_all_rx_cloned2a,
+                  interrupt_counter_cloned2a.clone(),
+                  my_interrupt2a,
+                  &mut *on_piece_cloned12a.lock().unwrap()
+                ).await {
+                  Ok(_) => (),
+                  Err(e) => {
+                    crate::log::log("error", &format!("llama server error: {e}. Make sure llama-server / llamafile is running"));
+                  }
                 }
-              }
-            })
+              })
+            }
           });
-          // ignore join result to prevent panic on llama server error
-          let _join_result = handle.join();
+
+          let rt_llm_tools_call2 = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+          let conv_hist_clone2b = conversation_history.clone();
+          let llama_url2b = settings.baseurl.clone();
+          let model2b = settings.model.clone();
+          let engine_type2b = settings.provider.clone();
+          let my_interrupt2b = my_interrupt.clone();
+          let stop_all_rx_cloned2b = stop_all_rx.clone();
+          let interrupt_counter_cloned2b = interrupt_counter.clone();
+          let on_piece_cloned12b = on_piece_cloned1.clone();
+          let value2b = user_text.clone();
+
+          let handle2 = std::thread::spawn(move || {
+            if crate::llm::TOOLS_SUPPORTED.get().copied().unwrap_or(false) {
+              rt_llm_tools_call2.block_on(async {
+                match crate::llm::llama_server_stream_response_into (
+                  &conv_hist_clone2b.lock().unwrap(),
+                  true, // send only this user message
+                  true, // include tools
+                  &value2b,
+                  llama_url2b.as_str(),
+                  model2b.as_str(),
+                  engine_type2b.as_str(),
+                  &stop_all_rx_cloned2b,
+                  interrupt_counter_cloned2b.clone(),
+                  my_interrupt2b,
+                  &mut *on_piece_cloned12b.lock().unwrap()
+                ).await {
+                  Ok(_) => (),
+                  Err(e) => {
+                    crate::log::log("error", &format!("llama server error: {e}. Make sure llama-server / llamafile is running"));
+                  }
+                }
+              })
+            }
+          });
+
+          handle.join().unwrap();
+          handle2.join().unwrap();
+
         } else {
           let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
           let on_piece_cloned = std::sync::Arc::new(std::sync::Mutex::new(on_piece));
+          let conv_hist_clone = conversation_history.clone();
+
           let handle = std::thread::spawn(move || {
+            // llm stream request
             rt.block_on(async {
               match crate::llm::llama_server_stream_response_into (
-                &messages,
+                &conv_hist_clone.lock().unwrap(),
+                true, // include full history
+                false, // do not include tools
+                &user_text,
                 ollama_url.as_str(),
                 model.as_str(),
                 engine_type.as_str(),
@@ -223,14 +283,41 @@ pub fn conversation_thread(
               ).await {
                 Ok(_) => Ok(()),
                 Err(e) => {
-                  crate::log::log("error", &format!("ollama error. {}. Make sure ollama is running and model '{}' is available", e, model.as_str()));
+                  crate::log::log("error", &format!("ollama error. {e}. Make sure ollama is running"));
                   Err(e)
                 }
               }
-            })
+            });
+
+            // ask for store memory tool calls using this last message
+            if crate::llm::TOOLS_SUPPORTED.get().copied().unwrap_or(false) {
+              rt.block_on(async {
+                match crate::llm::llama_server_stream_response_into (
+                  &conv_hist_clone.lock().unwrap(),
+                  false, // send only this user message
+                  true, // include tools
+                  &user_text,
+                  ollama_url.as_str(),
+                  model.as_str(),
+                  engine_type.as_str(),
+                  &stop_all_rx_cloned,
+                  interrupt_counter_cloned.clone(),
+                  my_interrupt,
+                  &mut *on_piece_cloned.lock().unwrap()
+                ).await {
+                  Ok(_) => Ok(()),
+                  Err(e) => {
+                    crate::log::log("error", &format!("ollama error. {e}. Make sure ollama is running"));
+                    Err(e)
+                  }
+                }
+              })
+            } else {
+              Ok(())
+            }
           });
-          // ignore join result to prevent panic on llama server error
-          let _join_result = handle.join();
+
+          handle.join().unwrap();
         }
         ui_thinking_cloned_for_closure.store(false, Ordering::Relaxed);
         if let Some(phrase) = speaker_arc.lock().unwrap().flush() {
@@ -298,7 +385,8 @@ fn strip_special_chars(s: &str) -> String {
     if !inside {
       result.extend(part.chars().filter(|c| {
         ![
-          '+', '.', '~', '*', '&', '-', ',', ';', ':', '(', ')', '[', ']', '{', '}', '"', '\'', '#', '`', '|'
+          '+', '.', '~', '*', '&', '-', ',', ';', ':', '(', ')', '[', ']', '{', '}', '"', '\'',
+          '#', '`', '|',
         ]
         .contains(c)
       }));

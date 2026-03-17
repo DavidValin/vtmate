@@ -100,6 +100,29 @@ pub struct Args {
 
   #[arg(long)]
   pub ptt: Option<bool>,
+
+  #[arg(long, action=clap::ArgAction::SetTrue)]
+  pub get_memories: bool,
+
+  /// Get memories by subject
+  #[arg(long, value_name="SUBJECT", action=clap::ArgAction::Set)]
+  pub get_memories_by_subject: Option<String>,
+
+  /// Get memories by predicate
+  #[arg(long, value_name="PREDICATE", action=clap::ArgAction::Set)]
+  pub get_memories_by_predicate: Option<String>,
+
+  /// Get memories by object
+  #[arg(long, value_name="OBJECT", action=clap::ArgAction::Set)]
+  pub get_memories_by_object: Option<String>,
+
+  /// Get memories by location
+  #[arg(long, value_name="LOCATION", action=clap::ArgAction::Set)]
+  pub get_memories_by_location: Option<String>,
+
+  /// Query memory using embeddings and print results
+  #[arg(long, value_name="QUERY", action=clap::ArgAction::Set)]
+  pub query_memory: Option<String>,
 }
 
 // internal static values
