@@ -115,15 +115,30 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let ui_handle = ui::spawn_ui_thread(ui.clone(), status_line.clone(), rx_ui);
 
   // If debate mode requested, spawn debate thread
-  if let Some(subject) = args.debate {
+  if let Some(debate_args) = args.debate {
+    if debate_args.len() < 3 {
+      eprintln!("❌ --debate requires at least two agent names and a subject");
+      process::exit(1);
+    }
+    let agent1_name = &debate_args[0];
+    let agent2_name = &debate_args[1];
+    let subject = debate_args[2..].join(" ");
+    let agent1 = agents.iter().find(|a| a.name == *agent1_name).cloned();
+    let agent2 = agents.iter().find(|a| a.name == *agent2_name).cloned();
+    let (agent1, agent2) = match (agent1, agent2) {
+      (Some(a1), Some(a2)) => (a1, a2),
+      _ => {
+        eprintln!("❌ Agents '{}' or '{}' not found. Available agents: {}", agent1_name, agent2_name, agents.iter().map(|a| a.name.as_str()).collect::<Vec<&str>>().join(", "));
+        process::exit(1);
+      }
+    };
     let tx_tts_clone = tx_tts.clone();
     let interrupt_clone = interrupt_counter.clone();
-    let debate_agents = agents.clone();
+    let debate_agents = vec![agent1, agent2];
     let tx_ui_clone = tx_ui.clone();
     let _debate_handle = thread::spawn(move || {
       debate::run_debate(subject, debate_agents, tx_tts_clone, tx_ui_clone, interrupt_clone, tts_done_rx.clone());
     });
-    // keep reference to join later
     // keep debate thread running in background; no join here to avoid blocking main
   }
   

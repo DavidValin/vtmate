@@ -101,8 +101,8 @@ pub struct Args {
   #[arg(long)]
   pub ptt: Option<bool>,
 
-  #[arg(long, value_name = "SUBJECT")]
-  pub debate: Option<String>,
+  #[arg(long, num_args=3.., value_name = "AGENT1 AGENT2 SUBJECT")]
+  pub debate: Option<Vec<String>>,
 }
 
 // internal static values
