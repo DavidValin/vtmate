@@ -27,6 +27,9 @@ pub struct PlaybackState {
 
 pub static GLOBAL_STATE: OnceLock<Arc<AppState>> = OnceLock::new();
 
+/// Flag indicating if the application is running in debate mode.
+pub static DEBATE_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 #[derive(Debug)]
 pub struct AppState {
   pub conversation_paused: Arc<AtomicBool>,

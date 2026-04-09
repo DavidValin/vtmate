@@ -120,6 +120,10 @@ pub fn conversation_thread(
         conversation_history.lock().unwrap().push(ChatMessage{role:"user".to_string(), content:user_text.clone()});
         // Notify debate thread of user input
         let _ = tx_debate.send(ChatMessage{role:"user".to_string(), content:user_text.clone()});
+        // If running in debate mode, skip assistant response logic
+        if crate::state::DEBATE_MODE.load(Ordering::SeqCst) {
+          continue;
+        }
         ui.thinking.store(true, Ordering::Relaxed);
 
         // Snapshot interruption counter for this assistant turn.

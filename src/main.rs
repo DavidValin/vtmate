@@ -119,7 +119,8 @@ let interrupt_counter = state.interrupt_counter.clone();
 // Start UI thread
 let ui_handle = ui::spawn_ui_thread(ui.clone(), status_line.clone(), rx_ui);
 
-// If debate mode requested, spawn debate thread
+  // If debate mode requested, spawn debate thread
+  let mut debate_started = false;
   if let Some(debate_args) = args.debate {
     if debate_args.len() < 3 {
       eprintln!("❌ --debate requires at least two agent names and a subject");
@@ -145,7 +146,9 @@ let ui_handle = ui::spawn_ui_thread(ui.clone(), status_line.clone(), rx_ui);
     let pending_user_for_debate = pending_user.clone();
     let _debate_handle = thread::spawn(move || {
         debate::run_debate(subject, debate_agents, tx_tts_clone, tx_ui_clone, interrupt_clone, pending_user_for_debate, tts_done_rx.clone());
-    });
+      });
+    debate_started = true;
+    crate::state::DEBATE_MODE.store(true, Ordering::SeqCst);
   }
   
   let settings = match agents.iter().find(|a| a.name == args.agent).cloned() {
@@ -156,6 +159,9 @@ let ui_handle = ui::spawn_ui_thread(ui.clone(), status_line.clone(), rx_ui);
       process::exit(1);
     }
   };
+
+
+
 
   // Clones for threads
   let tx_ui_for_keyboard = tx_ui.clone();
@@ -378,23 +384,43 @@ let ui_handle = ui::spawn_ui_thread(ui.clone(), status_line.clone(), rx_ui);
             *lock = Some(msg);
         }
     });
-  let conv_handle = thread::spawn({
-    move || {
+  let conv_handle = if !debate_started {
+    thread::spawn(move || {
        conversation::conversation_thread(
-         rx_utt_for_conv,
-         stop_all_rx_for_conv.clone(),
-         stop_all_tx_for_conv.clone(),
-         interrupt_counter_for_conv.clone(),
-         whisper_path_for_conv.clone(),
-         settings_for_conv.clone(),
-         ui_for_conv.clone(),
-         conversation_history_for_conv.clone(),
-         tx_ui.clone(),
-         tx_tts_for_conv.clone(),
-         debate_user_tx.clone(),
-       )
-    }
-  });
+          rx_utt_for_conv,
+          stop_all_rx_for_conv.clone(),
+          stop_all_tx_for_conv.clone(),
+          interrupt_counter_for_conv.clone(),
+          whisper_path_for_conv.clone(),
+          settings_for_conv.clone(),
+          ui_for_conv.clone(),
+          conversation_history_for_conv.clone(),
+          tx_ui.clone(),
+          tx_tts_for_conv.clone(),
+          debate_user_tx.clone(),
+        )
+     })
+    } else {
+      // In debate mode, start a lightweight STT handling thread
+      std::thread::spawn(move || {
+        debate::debate_conversation_thread(
+          rx_utt_for_conv,
+          stop_all_rx_for_conv.clone(),
+          stop_all_tx_for_conv.clone(),
+          interrupt_counter_for_conv.clone(),
+          whisper_path_for_conv.clone(),
+          settings_for_conv.clone(),
+          ui_for_conv.clone(),
+          conversation_history_for_conv.clone(),
+          tx_ui.clone(),
+          tx_tts_for_conv.clone(),
+          debate_user_tx.clone(),
+        );
+        Ok(())
+      })
+    };
+
+
 
   // ---------------------------------------------------
   // Thread: keyboard
