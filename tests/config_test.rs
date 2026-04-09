@@ -27,7 +27,7 @@ mod log {
 #[path = "../src/config.rs"]
 mod config;
 
-use config::{load_settings, AgentSettings, Args};
+use config::{AgentSettings, Args, load_settings};
 
 #[test]
 fn test_load_settings_with_double_quotes() {

@@ -7,8 +7,8 @@ use cpal::traits::{DeviceTrait, StreamTrait};
 use crossbeam_channel::{Receiver, Sender};
 use std::sync::OnceLock;
 use std::sync::{
-  atomic::{AtomicBool, AtomicU64, Ordering},
   Arc, Mutex,
+  atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::thread;
 use std::time::{Duration, Instant};

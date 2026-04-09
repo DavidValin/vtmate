@@ -1,18 +1,19 @@
-use clap::Parser;
 use crate::util::get_user_home_path;
+use clap::Parser;
 use cpal::traits::DeviceTrait;
 use crossbeam_channel::{bounded, unbounded};
+use crossterm::terminal::{self};
 use std::process;
-use std::sync::{Arc, OnceLock, atomic::Ordering, Mutex};
+use std::sync::{Arc, Mutex, OnceLock, atomic::Ordering};
 use std::thread::{self, Builder as ThreadBuilder};
-use std::time::Instant;
 use std::time::Duration;
-use crossterm::{terminal::{self}};
+use std::time::Instant;
 
 mod assets;
 mod audio;
 mod config;
 mod conversation;
+mod debate;
 mod keyboard;
 mod llm;
 mod log;
@@ -22,13 +23,11 @@ mod state;
 mod stt;
 mod tts;
 mod ui;
-mod debate;
 mod util;
 
 static START_INSTANT: OnceLock<Instant> = OnceLock::new();
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-
   let args = crate::config::Args::parse();
   crate::log::set_verbose(args.verbose || false);
   let _ = START_INSTANT.get_or_init(Instant::now);
@@ -58,7 +57,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let (debate_user_tx, debate_user_rx) = unbounded::<crate::conversation::ChatMessage>();
   let pending_user = Arc::new(Mutex::new(None::<crate::conversation::ChatMessage>));
 
-
   if !util::terminal_supported() {
     log::log(
       "error",
@@ -83,8 +81,10 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   // ---------------------------------------------------
   // force creation of default config file if unexisting
   let _ = config::ensure_settings_file();
-  let settings_path = get_user_home_path().ok_or("Unable to determine home directory")?
-    .join(".ai-mate").join("settings");
+  let settings_path = get_user_home_path()
+    .ok_or("Unable to determine home directory")?
+    .join(".ai-mate")
+    .join("settings");
 
   // load and file settings, merge cli args and validate
   let agents = match config::load_settings(&settings_path, &args) {
@@ -98,26 +98,35 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let settings = match agents.iter().find(|a| a.name == args.agent).cloned() {
     Some(a) => a,
     None => {
-      print!("❌ Agent '{}' not found. Available agents: {}", args.agent, agents.iter().map(|a| a.name.as_str()).collect::<Vec<&str>>().join(", "));
+      print!(
+        "❌ Agent '{}' not found. Available agents: {}",
+        args.agent,
+        agents
+          .iter()
+          .map(|a| a.name.as_str())
+          .collect::<Vec<&str>>()
+          .join(", ")
+      );
       thread::sleep(Duration::from_millis(300));
       process::exit(1);
     }
   };
 
   // Initialize AppState with the selected voice
-  let state: Arc<state::AppState> = Arc::new(state::AppState::with_agent(settings.clone(), agents.clone()));
+  let state: Arc<state::AppState> = Arc::new(state::AppState::with_agent(
+    settings.clone(),
+    agents.clone(),
+  ));
 
   state::GLOBAL_STATE.set(state.clone()).unwrap();
   let ui = state.ui.clone();
   let status_line = state.status_line.clone();
 
   // interrupt counter
-let interrupt_counter = state.interrupt_counter.clone();
+  let interrupt_counter = state.interrupt_counter.clone();
 
-
-
-// Start UI thread
-let ui_handle = ui::spawn_ui_thread(ui.clone(), status_line.clone(), rx_ui);
+  // Start UI thread
+  let ui_handle = ui::spawn_ui_thread(ui.clone(), status_line.clone(), rx_ui);
 
   // If debate mode requested, spawn debate thread
   let mut debate_started = false;
@@ -134,7 +143,16 @@ let ui_handle = ui::spawn_ui_thread(ui.clone(), status_line.clone(), rx_ui);
     let (agent1, agent2) = match (agent1, agent2) {
       (Some(a1), Some(a2)) => (a1, a2),
       _ => {
-        eprintln!("❌ Agents '{}' or '{}' not found. Available agents: {}", agent1_name, agent2_name, agents.iter().map(|a| a.name.as_str()).collect::<Vec<&str>>().join(", "));
+        eprintln!(
+          "❌ Agents '{}' or '{}' not found. Available agents: {}",
+          agent1_name,
+          agent2_name,
+          agents
+            .iter()
+            .map(|a| a.name.as_str())
+            .collect::<Vec<&str>>()
+            .join(", ")
+        );
         process::exit(1);
       }
     };
@@ -145,23 +163,36 @@ let ui_handle = ui::spawn_ui_thread(ui.clone(), status_line.clone(), rx_ui);
     let tx_ui_clone = tx_ui.clone();
     let pending_user_for_debate = pending_user.clone();
     let _debate_handle = thread::spawn(move || {
-        debate::run_debate(subject, debate_agents, tx_tts_clone, tx_ui_clone, interrupt_clone, pending_user_for_debate, tts_done_rx.clone());
-      });
+      debate::run_debate(
+        subject,
+        debate_agents,
+        tx_tts_clone,
+        tx_ui_clone,
+        interrupt_clone,
+        pending_user_for_debate,
+        tts_done_rx.clone(),
+      );
+    });
     debate_started = true;
     crate::state::DEBATE_MODE.store(true, Ordering::SeqCst);
   }
-  
+
   let settings = match agents.iter().find(|a| a.name == args.agent).cloned() {
     Some(a) => a,
     None => {
-      print!("❌ Agent '{}' not found. Available agents: {}", args.agent, agents.iter().map(|a| a.name.as_str()).collect::<Vec<&str>>().join(", "));
+      print!(
+        "❌ Agent '{}' not found. Available agents: {}",
+        args.agent,
+        agents
+          .iter()
+          .map(|a| a.name.as_str())
+          .collect::<Vec<&str>>()
+          .join(", ")
+      );
       thread::sleep(Duration::from_millis(300));
       process::exit(1);
     }
   };
-
-
-
 
   // Clones for threads
   let tx_ui_for_keyboard = tx_ui.clone();
@@ -240,19 +271,18 @@ let ui_handle = ui::spawn_ui_thread(ui.clone(), status_line.clone(), rx_ui);
   if settings.provider == "ollama" {
     log::log("info", &format!("ollama base url: {}", settings.baseurl));
   } else {
-    log::log(
-      "info",
-      &format!("llama-server url: {}", settings.baseurl),
-    );
+    log::log("info", &format!("llama-server url: {}", settings.baseurl));
   }
   log::log(
     "info",
     &format!(
       "sound_threshold_peak={:.3}  end_silence_ms={}  hangover_ms={}",
-      settings.sound_threshold_peak, settings.end_silence_ms, config::HANGOVER_MS_DEFAULT
+      settings.sound_threshold_peak,
+      settings.end_silence_ms,
+      config::HANGOVER_MS_DEFAULT
     ),
   );
-  
+
   let recording_paused = state.recording_paused.clone();
   let recording_paused_for_record = recording_paused.clone();
   if state.ptt.load(Ordering::Relaxed) {
@@ -374,53 +404,51 @@ let ui_handle = ui::spawn_ui_thread(ui.clone(), status_line.clone(), rx_ui);
   let ui_for_conv = ui.clone();
   let conversation_history_for_conv = conversation_history.clone();
   let tx_tts_for_conv = tx_tts.clone();
-    // Forward user messages and trigger interrupt
-    let pending_user_clone = pending_user.clone();
-    let interrupt_counter_clone = interrupt_counter.clone();
-    thread::spawn(move || {
-        while let Ok(msg) = debate_user_rx.recv() {
-            interrupt_counter_clone.fetch_add(1, Ordering::SeqCst);
-            let mut lock = pending_user_clone.lock().unwrap();
-            *lock = Some(msg);
-        }
-    });
+  // Forward user messages and trigger interrupt
+  let pending_user_clone = pending_user.clone();
+  let interrupt_counter_clone = interrupt_counter.clone();
+  thread::spawn(move || {
+    while let Ok(msg) = debate_user_rx.recv() {
+      interrupt_counter_clone.fetch_add(1, Ordering::SeqCst);
+      let mut lock = pending_user_clone.lock().unwrap();
+      *lock = Some(msg);
+    }
+  });
   let conv_handle = if !debate_started {
     thread::spawn(move || {
-       conversation::conversation_thread(
-          rx_utt_for_conv,
-          stop_all_rx_for_conv.clone(),
-          stop_all_tx_for_conv.clone(),
-          interrupt_counter_for_conv.clone(),
-          whisper_path_for_conv.clone(),
-          settings_for_conv.clone(),
-          ui_for_conv.clone(),
-          conversation_history_for_conv.clone(),
-          tx_ui.clone(),
-          tx_tts_for_conv.clone(),
-          debate_user_tx.clone(),
-        )
-     })
-    } else {
-      // In debate mode, start a lightweight STT handling thread
-      std::thread::spawn(move || {
-        debate::debate_conversation_thread(
-          rx_utt_for_conv,
-          stop_all_rx_for_conv.clone(),
-          stop_all_tx_for_conv.clone(),
-          interrupt_counter_for_conv.clone(),
-          whisper_path_for_conv.clone(),
-          settings_for_conv.clone(),
-          ui_for_conv.clone(),
-          conversation_history_for_conv.clone(),
-          tx_ui.clone(),
-          tx_tts_for_conv.clone(),
-          debate_user_tx.clone(),
-        );
-        Ok(())
-      })
-    };
-
-
+      conversation::conversation_thread(
+        rx_utt_for_conv,
+        stop_all_rx_for_conv.clone(),
+        stop_all_tx_for_conv.clone(),
+        interrupt_counter_for_conv.clone(),
+        whisper_path_for_conv.clone(),
+        settings_for_conv.clone(),
+        ui_for_conv.clone(),
+        conversation_history_for_conv.clone(),
+        tx_ui.clone(),
+        tx_tts_for_conv.clone(),
+        debate_user_tx.clone(),
+      )
+    })
+  } else {
+    // In debate mode, start a lightweight STT handling thread
+    std::thread::spawn(move || {
+      debate::debate_conversation_thread(
+        rx_utt_for_conv,
+        stop_all_rx_for_conv.clone(),
+        stop_all_tx_for_conv.clone(),
+        interrupt_counter_for_conv.clone(),
+        whisper_path_for_conv.clone(),
+        settings_for_conv.clone(),
+        ui_for_conv.clone(),
+        conversation_history_for_conv.clone(),
+        tx_ui.clone(),
+        tx_tts_for_conv.clone(),
+        debate_user_tx.clone(),
+      );
+      Ok(())
+    })
+  };
 
   // ---------------------------------------------------
   // Thread: keyboard
@@ -436,7 +464,7 @@ let ui_handle = ui::spawn_ui_thread(ui.clone(), status_line.clone(), rx_ui);
         stop_all_rx_for_keyboard.clone(),
         recording_paused_for_key.clone(),
         stop_play_tx_for_key.clone(),
-        interrupt_counter.clone()
+        interrupt_counter.clone(),
       )
     }
   });

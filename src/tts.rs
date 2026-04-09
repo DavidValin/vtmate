@@ -2,8 +2,8 @@
 //  TTS - Text to Speech
 // ------------------------------------------------------------------
 
-use crossbeam_channel::{Receiver, Sender};
 use crate::state::GLOBAL_STATE;
+use crossbeam_channel::{Receiver, Sender};
 use kokoro_micro::TtsEngine;
 mod kokoro_tts;
 use reqwest;
@@ -141,19 +141,19 @@ pub fn tts_thread(
 
         // Stop if interrupt counter changed while speaking
         if interrupt_counter.load(Ordering::SeqCst) != expected_interrupt {
-            // Drain any queued phrases before exiting
-            while let Ok(_) = rx_tts.try_recv() {}
-            let _ = stop_play_tx.try_send(());
-            // No need to reset counter; keep current value
-            continue;
+          // Drain any queued phrases before exiting
+          while let Ok(_) = rx_tts.try_recv() {}
+          let _ = stop_play_tx.try_send(());
+          // No need to reset counter; keep current value
+          continue;
         }
       },
       recv(stop_all_rx) -> _ => {
         // Gracefully exit on stop signal
         break;
       }
+    }
   }
-}
 
   Ok(())
 }
