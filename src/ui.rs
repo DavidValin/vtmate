@@ -44,6 +44,7 @@ pub fn spawn_ui_thread(
     let mut buffer: Vec<String> = Vec::new();
     let mut last_term_size = terminal::size().unwrap_or((80, 24));
     let mut pending_stream: Vec<String> = Vec::new();
+    let mut modal_visible = false;
 
     crossterm::execute!(
       std::io::stdout(),
@@ -140,6 +141,27 @@ pub fn spawn_ui_thread(
               &status_line,
               &mut bottom_bar,
             );
+          }
+
+          "modal_show" => {
+            modal_visible = true;
+            render_debate_modal(&mut out, &mut buffer);
+          }
+
+          "modal_hide" => {
+            modal_visible = false;
+            // Redraw the screen
+            execute!(out, Clear(ClearType::All), MoveTo(0, 0)).unwrap();
+            redraw_buffer(&mut out, &buffer);
+            let (_cols, term_height) = terminal::size().unwrap_or((80, 24));
+            bottom_bar =
+              render_bottom_bar(&mut out, &ui_state, &spinner, &status_line, term_height - 1);
+          }
+
+          "modal_update" => {
+            if modal_visible {
+              render_debate_modal(&mut out, &mut buffer);
+            }
           }
 
           _ => {}
@@ -375,7 +397,10 @@ fn render_bottom_bar<W: Write>(
     if debate_agents.len() >= 2 {
       let agent1_name = debate_agents[0].name.chars().take(8).collect::<String>();
       let agent2_name = debate_agents[1].name.chars().take(8).collect::<String>();
-      format!("\x1b[41m\x1b[37m DEBATE \x1b[0m: {} -- {}", agent1_name, agent2_name)
+      format!(
+        "\x1b[41m\x1b[37m DEBATE \x1b[0m: {} -- {}",
+        agent1_name, agent2_name
+      )
     } else {
       format!("({})", get_voice())
     }
@@ -502,4 +527,241 @@ fn get_visible_len_for(s: &str) -> usize {
     }
   }
   len
+}
+
+fn redraw_buffer<W: Write>(out: &mut W, buffer: &[String]) {
+  let (_, term_height) = terminal::size().unwrap_or((80, 24));
+  let (view_start, visible) = viewport(buffer.len(), term_height);
+
+  for (i, line) in buffer.iter().enumerate().skip(view_start).take(visible) {
+    let y = i - view_start;
+    execute!(
+      out,
+      MoveTo(0, y as u16),
+      Clear(ClearType::CurrentLine),
+      Print(line)
+    )
+    .unwrap();
+  }
+  out.flush().unwrap();
+}
+
+fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
+  let state = GLOBAL_STATE.get().expect("AppState not initialized");
+  let agents = state.agents.as_ref();
+  let agent1_idx = *state.debate_modal_selected_agent1.lock().unwrap();
+  let agent2_idx = *state.debate_modal_selected_agent2.lock().unwrap();
+  let focus = *state.debate_modal_focus.lock().unwrap();
+
+  let (cols, rows) = terminal::size().unwrap_or((80, 24));
+
+  // Calculate modal dimensions
+  let modal_width = std::cmp::min(60, cols - 4);
+  let modal_height = std::cmp::min(agents.len() as u16 + 10, rows - 4);
+  let modal_x = (cols - modal_width) / 2;
+  let modal_y = (rows - modal_height) / 2;
+
+  // Clear the screen first
+  execute!(out, Clear(ClearType::All), MoveTo(0, 0)).unwrap();
+
+  // Redraw buffer in the background (dimmed)
+  let (_, term_height) = terminal::size().unwrap_or((80, 24));
+  let (view_start, visible) = viewport(buffer.len(), term_height);
+  for (i, line) in buffer.iter().enumerate().skip(view_start).take(visible) {
+    let y = i - view_start;
+    execute!(
+      out,
+      MoveTo(0, y as u16),
+      Clear(ClearType::CurrentLine),
+      Print(format!("\x1b[90m{}\x1b[0m", line))
+    )
+    .unwrap();
+  }
+
+  // Draw modal background
+  for y in modal_y..modal_y + modal_height {
+    execute!(
+      out,
+      MoveTo(modal_x, y),
+      Print(format!(
+        "\x1b[48;5;234m{}\x1b[0m",
+        " ".repeat(modal_width as usize)
+      ))
+    )
+    .unwrap();
+  }
+
+  // Draw modal border and title
+  execute!(
+    out,
+    MoveTo(modal_x, modal_y),
+    Print(format!(
+      "\x1b[48;5;234m\x1b[97m┌{}┐\x1b[0m",
+      "─".repeat(modal_width as usize - 2)
+    ))
+  )
+  .unwrap();
+
+  let title = " Select Debate Agents ";
+  let title_x = modal_x + (modal_width - title.len() as u16) / 2;
+  execute!(
+    out,
+    MoveTo(title_x, modal_y),
+    Print(format!("\x1b[48;5;234m\x1b[97;1m{}\x1b[0m", title))
+  )
+  .unwrap();
+
+  // Draw agent 1 selection
+  let agent1_label = " Agent 1: ";
+  execute!(
+    out,
+    MoveTo(modal_x + 2, modal_y + 2),
+    Print(format!(
+      "\x1b[48;5;234m{}{}\x1b[0m",
+      if focus == 0 { "\x1b[97;1m" } else { "\x1b[90m" },
+      agent1_label
+    ))
+  )
+  .unwrap();
+
+  // Agent 1 dropdown
+  let dropdown1_width = modal_width as usize - 4 - agent1_label.len();
+  let agent1_display = if agents[agent1_idx].name.len() > dropdown1_width - 4 {
+    format!("{}...", &agents[agent1_idx].name[..dropdown1_width - 7])
+  } else {
+    agents[agent1_idx].name.clone()
+  };
+
+  execute!(
+    out,
+    MoveTo(modal_x + 2 + agent1_label.len() as u16, modal_y + 2),
+    Print(format!(
+      "\x1b[48;5;234m{}{:<width$}\x1b[0m",
+      if focus == 0 {
+        "\x1b[30;47m"
+      } else {
+        "\x1b[97;48;5;237m"
+      },
+      format!(" {} ▼", agent1_display),
+      width = dropdown1_width
+    ))
+  )
+  .unwrap();
+
+  // Draw agent 2 selection
+  let agent2_label = " Agent 2: ";
+  execute!(
+    out,
+    MoveTo(modal_x + 2, modal_y + 4),
+    Print(format!(
+      "\x1b[48;5;234m{}{}\x1b[0m",
+      if focus == 1 { "\x1b[97;1m" } else { "\x1b[90m" },
+      agent2_label
+    ))
+  )
+  .unwrap();
+
+  // Agent 2 dropdown
+  let dropdown2_width = modal_width as usize - 4 - agent2_label.len();
+  let agent2_display = if agents[agent2_idx].name.len() > dropdown2_width - 4 {
+    format!("{}...", &agents[agent2_idx].name[..dropdown2_width - 7])
+  } else {
+    agents[agent2_idx].name.clone()
+  };
+
+  execute!(
+    out,
+    MoveTo(modal_x + 2 + agent2_label.len() as u16, modal_y + 4),
+    Print(format!(
+      "\x1b[48;5;234m{}{:<width$}\x1b[0m",
+      if focus == 1 {
+        "\x1b[30;47m"
+      } else {
+        "\x1b[97;48;5;237m"
+      },
+      format!(" {} ▼", agent2_display),
+      width = dropdown2_width
+    ))
+  )
+  .unwrap();
+
+  // Show warning if same agent selected
+  if agent1_idx == agent2_idx {
+    execute!(
+      out,
+      MoveTo(modal_x + 2, modal_y + 6),
+      Print(format!(
+        "\x1b[48;5;234m\x1b[91m⚠ Please select two different agents\x1b[0m"
+      ))
+    )
+    .unwrap();
+  }
+
+  // Draw instructions
+  let instructions_y = modal_y + modal_height - 5;
+  execute!(
+    out,
+    MoveTo(modal_x + 2, instructions_y),
+    Print(format!(
+      "\x1b[48;5;234m\x1b[90m{}\x1b[0m",
+      "─".repeat(modal_width as usize - 4)
+    ))
+  )
+  .unwrap();
+
+  execute!(
+    out,
+    MoveTo(modal_x + 2, instructions_y + 1),
+    Print(format!(
+      "\x1b[48;5;234m\x1b[97m Tab/←/→ \x1b[90m Switch focus\x1b[0m"
+    ))
+  )
+  .unwrap();
+
+  execute!(
+    out,
+    MoveTo(modal_x + 2, instructions_y + 2),
+    Print(format!(
+      "\x1b[48;5;234m\x1b[97m ↑/↓     \x1b[90m Change selection\x1b[0m"
+    ))
+  )
+  .unwrap();
+
+  execute!(
+    out,
+    MoveTo(modal_x + 2, instructions_y + 3),
+    Print(format!(
+      "\x1b[48;5;234m\x1b[97m Enter   \x1b[90m Confirm | \x1b[97mEsc \x1b[90m Cancel\x1b[0m"
+    ))
+  )
+  .unwrap();
+
+  // Draw bottom border
+  execute!(
+    out,
+    MoveTo(modal_x, modal_y + modal_height - 1),
+    Print(format!(
+      "\x1b[48;5;234m\x1b[97m└{}┘\x1b[0m",
+      "─".repeat(modal_width as usize - 2)
+    ))
+  )
+  .unwrap();
+
+  // Draw vertical borders
+  for y in (modal_y + 1)..(modal_y + modal_height - 1) {
+    execute!(
+      out,
+      MoveTo(modal_x, y),
+      Print("\x1b[48;5;234m\x1b[97m│\x1b[0m")
+    )
+    .unwrap();
+    execute!(
+      out,
+      MoveTo(modal_x + modal_width - 1, y),
+      Print("\x1b[48;5;234m\x1b[97m│\x1b[0m")
+    )
+    .unwrap();
+  }
+
+  out.flush().unwrap();
 }

@@ -48,49 +48,136 @@ pub fn keyboard_thread(
             let _ = tx_ui.try_send("stop_ui|".to_string());
             break;
           }
-          // Ctrl+D toggles debate mode
+          // Ctrl+D toggles debate mode or shows modal
           if let KeyCode::Char('d') | KeyCode::Char('D') = k.code {
             let debate_enabled = state.debate_enabled.load(Ordering::SeqCst);
-            state
-              .debate_enabled
-              .store(!debate_enabled, Ordering::SeqCst);
+            let modal_visible = state.debate_modal_visible.load(Ordering::SeqCst);
 
-            if !debate_enabled {
-              // Entering debate mode
+            if !modal_visible {
+              if !debate_enabled {
+                // Entering debate mode - show agent selection modal
+                let agents = state.agents.as_ref();
+                if agents.len() >= 2 {
+                  // Show modal for agent selection
+                  state.debate_modal_visible.store(true, Ordering::SeqCst);
+                  *state.debate_modal_selected_agent1.lock().unwrap() = 0;
+                  *state.debate_modal_selected_agent2.lock().unwrap() =
+                    if agents.len() > 1 { 1 } else { 0 };
+                  *state.debate_modal_focus.lock().unwrap() = 0;
+                  let _ = tx_ui.send("modal_show|".to_string());
+                } else {
+                  // Not enough agents
+                  let _ = tx_ui.send(
+                    "line|\n\x1b[31m❌ Need at least 2 agents for debate mode\x1b[0m\n".to_string(),
+                  );
+                }
+              } else {
+                // Exiting debate mode
+                state.debate_enabled.store(false, Ordering::SeqCst);
+                state.debate_agents.lock().unwrap().clear();
+                state.debate_turn.store(0, Ordering::SeqCst);
+                *state.debate_subject.lock().unwrap() = String::new();
+                // Interrupt any ongoing TTS playback
+                interrupt_counter.fetch_add(1, Ordering::SeqCst);
+                state
+                  .playback
+                  .playback_active
+                  .store(false, Ordering::Relaxed);
+                let _ = tx_ui.send("line|\n\x1b[33m🎭 Debate mode DISABLED\x1b[0m\n".to_string());
+              }
+            }
+          }
+        }
+
+        // Handle modal keyboard navigation
+        let modal_visible = state.debate_modal_visible.load(Ordering::SeqCst);
+        if modal_visible {
+          match k.code {
+            KeyCode::Esc => {
+              // Close modal without starting debate
+              state.debate_modal_visible.store(false, Ordering::SeqCst);
+              let _ = tx_ui.send("modal_hide|".to_string());
+            }
+            KeyCode::Enter => {
+              // Confirm selection and start debate
               let agents = state.agents.as_ref();
-              if agents.len() >= 2 {
-                // Set up debate with first two agents
-                let debate_agents = vec![agents[0].clone(), agents[1].clone()];
+              let agent1_idx = *state.debate_modal_selected_agent1.lock().unwrap();
+              let agent2_idx = *state.debate_modal_selected_agent2.lock().unwrap();
+
+              if agent1_idx == agent2_idx {
+                let _ = tx_ui.send(
+                  "line|\n\x1b[31m❌ Please select two different agents\x1b[0m\n".to_string(),
+                );
+              } else {
+                let debate_agents = vec![agents[agent1_idx].clone(), agents[agent2_idx].clone()];
                 *state.debate_agents.lock().unwrap() = debate_agents;
                 state.debate_turn.store(0, Ordering::SeqCst);
                 *state.debate_subject.lock().unwrap() =
                   "Let's debate. What should we discuss?".to_string();
+                state.debate_enabled.store(true, Ordering::SeqCst);
+                state.debate_modal_visible.store(false, Ordering::SeqCst);
+
+                let _ = tx_ui.send("modal_hide|".to_string());
                 let _ = tx_ui.send(format!(
                   "line|\n\x1b[33m🎭 Debate mode ENABLED between '{}' and '{}'\x1b[0m",
-                  agents[0].name, agents[1].name
+                  agents[agent1_idx].name, agents[agent2_idx].name
                 ));
                 let _ = tx_ui.send("line|\n\x1b[33m💬 Speak to set the debate topic or change the subject at any time\x1b[0m\n".to_string());
-              } else {
-                // Not enough agents, revert
-                state.debate_enabled.store(false, Ordering::SeqCst);
-                let _ = tx_ui.send(
-                  "line|\n\x1b[31m❌ Need at least 2 agents for debate mode\x1b[0m\n".to_string(),
-                );
               }
-            } else {
-              // Exiting debate mode
-              state.debate_agents.lock().unwrap().clear();
-              state.debate_turn.store(0, Ordering::SeqCst);
-              *state.debate_subject.lock().unwrap() = String::new();
-              // Interrupt any ongoing TTS playback
-              interrupt_counter.fetch_add(1, Ordering::SeqCst);
-              state
-                .playback
-                .playback_active
-                .store(false, Ordering::Relaxed);
-              let _ = tx_ui.send("line|\n\x1b[33m🎭 Debate mode DISABLED\x1b[0m\n".to_string());
             }
+            KeyCode::Up => {
+              let focus = *state.debate_modal_focus.lock().unwrap();
+              let agents = state.agents.as_ref();
+
+              if focus == 0 {
+                // Agent 1 selection - move up
+                let mut agent1_idx = state.debate_modal_selected_agent1.lock().unwrap();
+                *agent1_idx = if *agent1_idx == 0 {
+                  agents.len() - 1
+                } else {
+                  *agent1_idx - 1
+                };
+                let _ = tx_ui.send("modal_update|".to_string());
+              } else if focus == 1 {
+                // Agent 2 selection - move up
+                let mut agent2_idx = state.debate_modal_selected_agent2.lock().unwrap();
+                *agent2_idx = if *agent2_idx == 0 {
+                  agents.len() - 1
+                } else {
+                  *agent2_idx - 1
+                };
+                let _ = tx_ui.send("modal_update|".to_string());
+              }
+            }
+            KeyCode::Down => {
+              let focus = *state.debate_modal_focus.lock().unwrap();
+              let agents = state.agents.as_ref();
+
+              if focus == 0 {
+                // Agent 1 selection - move down
+                let mut agent1_idx = state.debate_modal_selected_agent1.lock().unwrap();
+                *agent1_idx = (*agent1_idx + 1) % agents.len();
+                let _ = tx_ui.send("modal_update|".to_string());
+              } else if focus == 1 {
+                // Agent 2 selection - move down
+                let mut agent2_idx = state.debate_modal_selected_agent2.lock().unwrap();
+                *agent2_idx = (*agent2_idx + 1) % agents.len();
+                let _ = tx_ui.send("modal_update|".to_string());
+              }
+            }
+            KeyCode::Left | KeyCode::Right | KeyCode::Tab => {
+              // Switch focus between agent1, agent2, and confirm button
+              let mut focus = state.debate_modal_focus.lock().unwrap();
+              if k.code == KeyCode::Left {
+                *focus = if *focus == 0 { 2 } else { *focus - 1 };
+              } else {
+                *focus = (*focus + 1) % 3;
+              }
+              let _ = tx_ui.send("modal_update|".to_string());
+            }
+            _ => {}
           }
+          continue; // Don't process other keys when modal is visible
         }
 
         match k.code {

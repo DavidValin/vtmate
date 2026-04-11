@@ -52,6 +52,10 @@ pub struct AppState {
   pub debate_subject: Arc<Mutex<String>>,
   pub debate_agents: Arc<Mutex<Vec<crate::config::AgentSettings>>>,
   pub debate_turn: Arc<AtomicU64>,
+  pub debate_modal_visible: Arc<AtomicBool>,
+  pub debate_modal_selected_agent1: Arc<Mutex<usize>>,
+  pub debate_modal_selected_agent2: Arc<Mutex<usize>>,
+  pub debate_modal_focus: Arc<Mutex<u8>>, // 0 = agent1, 1 = agent2, 2 = confirm
 }
 
 impl AppState {
@@ -93,6 +97,10 @@ impl AppState {
       debate_subject: Arc::new(Mutex::new(String::new())),
       debate_agents: Arc::new(Mutex::new(Vec::new())),
       debate_turn: Arc::new(AtomicU64::new(0)),
+      debate_modal_visible: Arc::new(AtomicBool::new(false)),
+      debate_modal_selected_agent1: Arc::new(Mutex::new(0)),
+      debate_modal_selected_agent2: Arc::new(Mutex::new(1)),
+      debate_modal_focus: Arc::new(Mutex::new(0)),
     }
   }
 
