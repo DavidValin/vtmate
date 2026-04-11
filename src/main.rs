@@ -1,13 +1,13 @@
-use clap::Parser;
 use crate::util::get_user_home_path;
+use clap::Parser;
 use cpal::traits::DeviceTrait;
 use crossbeam_channel::{bounded, unbounded};
+use crossterm::terminal::{self};
 use std::process;
 use std::sync::{Arc, OnceLock, atomic::Ordering};
-use std::thread::{self, Builder};
-use std::time::Instant;
+use std::thread::{self, Builder as ThreadBuilder};
 use std::time::Duration;
-use crossterm::{terminal::{self}};
+use std::time::Instant;
 
 mod assets;
 mod audio;
@@ -27,7 +27,6 @@ mod util;
 static START_INSTANT: OnceLock<Instant> = OnceLock::new();
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-
   let args = crate::config::Args::parse();
   crate::log::set_verbose(args.verbose || false);
   let _ = START_INSTANT.get_or_init(Instant::now);
@@ -45,7 +44,9 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   // channel for utterance audio chunks
   let (tx_utt, rx_utt) = bounded::<audio::AudioChunk>(1);
   // channel for tts phrases
-  let (tx_tts, rx_tts) = bounded::<(String, u64)>(1);
+  let (tx_tts, rx_tts) = unbounded::<(String, u64, String)>();
+  let (tts_done_tx, tts_done_rx) = crossbeam_channel::bounded(0);
+
   // channel for playback audio chunks
   let (tx_play, rx_play) = bounded::<audio::AudioChunk>(1);
   // channel for ui messages
@@ -76,8 +77,10 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   // ---------------------------------------------------
   // force creation of default config file if unexisting
   let _ = config::ensure_settings_file();
-  let settings_path = get_user_home_path().ok_or("Unable to determine home directory")?
-    .join(".ai-mate").join("settings");
+  let settings_path = get_user_home_path()
+    .ok_or("Unable to determine home directory")?
+    .join(".ai-mate")
+    .join("settings");
 
   // load and file settings, merge cli args and validate
   let agents = match config::load_settings(&settings_path, &args) {
@@ -88,32 +91,79 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       process::exit(1);
     }
   };
-
-  let settings = match agents.iter().find(|a| a.name == args.agent).cloned() {
-    Some(a) => a,
+  let settings = match &args.agent {
+    Some(agent_name) => match agents.iter().find(|a| a.name == *agent_name).cloned() {
+      Some(a) => a,
+      None => {
+        print!(
+          "❌ Agent '{}' not found. Available agents: {}",
+          agent_name,
+          agents
+            .iter()
+            .map(|a| a.name.as_str())
+            .collect::<Vec<&str>>()
+            .join(", ")
+        );
+        thread::sleep(Duration::from_millis(300));
+        process::exit(1);
+      }
+    },
     None => {
-      print!("❌ Agent '{}' not found. Available agents: {}", args.agent, agents.iter().map(|a| a.name.as_str()).collect::<Vec<&str>>().join(", "));
-      thread::sleep(Duration::from_millis(300));
-      process::exit(1);
+      // Pick the first agent if none specified
+      agents.first().unwrap().clone()
     }
   };
 
   // Initialize AppState with the selected voice
-   let state: Arc<state::AppState> = Arc::new(state::AppState::with_agent(settings.clone(), agents.clone()));
+  let state: Arc<state::AppState> = Arc::new(state::AppState::with_agent(
+    settings.clone(),
+    agents.clone(),
+  ));
 
   state::GLOBAL_STATE.set(state.clone()).unwrap();
   let ui = state.ui.clone();
   let status_line = state.status_line.clone();
 
-  // ---------------------------------------------------
-  // Thread: UI
-  // ---------------------------------------------------
+  // Start UI thread
+  let ui_handle = ui::spawn_ui_thread(ui.clone(), status_line.clone(), rx_ui);
 
-  let ui_handle = ui::spawn_ui_thread(
-    ui.clone(),
-    status_line.clone(),
-    rx_ui,
-  );
+  // interrupt counter
+  let interrupt_counter = state.interrupt_counter.clone();
+
+  // If debate mode requested via CLI, enable it
+  if let Some(debate_args) = args.debate {
+    if debate_args.len() < 3 {
+      eprintln!("❌ --debate requires at least two agent names and a subject");
+      process::exit(1);
+    }
+    let agent1_name = &debate_args[0];
+    let agent2_name = &debate_args[1];
+    let subject = debate_args[2..].join(" ");
+    let agent1 = agents.iter().find(|a| a.name == *agent1_name).cloned();
+    let agent2 = agents.iter().find(|a| a.name == *agent2_name).cloned();
+    let (agent1, agent2) = match (agent1, agent2) {
+      (Some(a1), Some(a2)) => (a1, a2),
+      _ => {
+        eprintln!(
+          "❌ Agents '{}' or '{}' not found. Available agents: {}",
+          agent1_name,
+          agent2_name,
+          agents
+            .iter()
+            .map(|a| a.name.as_str())
+            .collect::<Vec<&str>>()
+            .join(", ")
+        );
+        process::exit(1);
+      }
+    };
+
+    // Initialize debate mode in state
+    state.debate_enabled.store(true, Ordering::SeqCst);
+    *state.debate_subject.lock().unwrap() = subject;
+    *state.debate_agents.lock().unwrap() = vec![agent1, agent2];
+    state.debate_turn.store(0, Ordering::SeqCst);
+  }
 
   // Clones for threads
   let tx_ui_for_keyboard = tx_ui.clone();
@@ -180,6 +230,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     &format!("Playback stream SR (truth): {}", out_sample_rate),
   );
 
+  log::log("info", &format!("Agent: {}", settings.name));
   log::log("info", &format!("TTS: {}", settings.tts));
   log::log("info", &format!("Language: {}", settings.language));
   log::log("info", &format!("TTS voice: {}", settings.voice));
@@ -192,19 +243,18 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   if settings.provider == "ollama" {
     log::log("info", &format!("ollama base url: {}", settings.baseurl));
   } else {
-    log::log(
-      "info",
-      &format!("llama-server url: {}", settings.baseurl),
-    );
+    log::log("info", &format!("llama-server url: {}", settings.baseurl));
   }
   log::log(
     "info",
     &format!(
       "sound_threshold_peak={:.3}  end_silence_ms={}  hangover_ms={}",
-      settings.sound_threshold_peak, settings.end_silence_ms, config::HANGOVER_MS_DEFAULT
+      settings.sound_threshold_peak,
+      settings.end_silence_ms,
+      config::HANGOVER_MS_DEFAULT
     ),
   );
-  
+
   let recording_paused = state.recording_paused.clone();
   let recording_paused_for_record = recording_paused.clone();
   if state.ptt.load(Ordering::Relaxed) {
@@ -225,21 +275,21 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
   let stop_play_tx_for_tts = stop_play_tx.clone();
   let tts_handle = thread::spawn({
-  let voice_state = state.voice.clone();
-  let out_sample_rate = out_sample_rate.clone();
-  let tx_play = tx_play.clone();
-  let stop_all_rx = stop_all_rx.clone();
-  let interrupt_counter = interrupt_counter.clone();
+    // voice_state not needed; voice passed per message
+    let out_sample_rate = out_sample_rate.clone();
+    let tx_play = tx_play.clone();
+    let stop_all_rx = stop_all_rx.clone();
+    let interrupt_counter = interrupt_counter.clone();
 
     move || {
       tts::tts_thread(
-        voice_state,
         out_sample_rate,
         tx_play,
         stop_all_rx,
         interrupt_counter,
         rx_tts,
         stop_play_tx_for_tts,
+        tts_done_tx,
       )
       .unwrap();
     }
@@ -288,7 +338,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let volume_rec_for_rec = volume_rec.clone();
   let recording_paused_for_record_for_rec = recording_paused_for_record.clone();
   let tx_ui_for_record = tx_ui.clone();
-  let rec_handle = Builder::new()
+  let rec_handle = ThreadBuilder::new()
     .name("record_thread".to_string())
     .stack_size(4 * 1024 * 1024)
     .spawn({
@@ -326,21 +376,23 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let ui_for_conv = ui.clone();
   let conversation_history_for_conv = conversation_history.clone();
   let tx_tts_for_conv = tx_tts.clone();
-  let conv_handle = thread::spawn({
-    move || {
-      conversation::conversation_thread(
-        rx_utt_for_conv,
-        stop_all_rx_for_conv.clone(),
-        stop_all_tx_for_conv.clone(),
-        interrupt_counter_for_conv.clone(),
-        whisper_path_for_conv.clone(),
-        settings_for_conv.clone(),
-        ui_for_conv.clone(),
-        conversation_history_for_conv.clone(),
-        tx_ui.clone(),
-        tx_tts_for_conv.clone(),
-      )
-    }
+  let tx_ui_for_conv = tx_ui.clone();
+  let tts_done_rx_for_conv = tts_done_rx.clone();
+
+  let conv_handle = thread::spawn(move || {
+    conversation::conversation_thread(
+      rx_utt_for_conv,
+      stop_all_rx_for_conv.clone(),
+      stop_all_tx_for_conv.clone(),
+      interrupt_counter_for_conv.clone(),
+      whisper_path_for_conv.clone(),
+      settings_for_conv.clone(),
+      ui_for_conv.clone(),
+      conversation_history_for_conv.clone(),
+      tx_ui_for_conv.clone(),
+      tx_tts_for_conv.clone(),
+      tts_done_rx_for_conv.clone(),
+    )
   });
 
   // ---------------------------------------------------
@@ -357,7 +409,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         stop_all_rx_for_keyboard.clone(),
         recording_paused_for_key.clone(),
         stop_play_tx_for_key.clone(),
-        interrupt_counter.clone()
+        interrupt_counter.clone(),
       )
     }
   });

@@ -2,8 +2,8 @@
 //  TTS - Text to Speech
 // ------------------------------------------------------------------
 
-use crossbeam_channel::{Receiver, Sender};
 use crate::state::GLOBAL_STATE;
+use crossbeam_channel::{Receiver, Sender};
 use kokoro_micro::TtsEngine;
 mod kokoro_tts;
 use reqwest;
@@ -44,7 +44,7 @@ pub fn speak(
   voice: &str,
   out_sample_rate: u32, // MUST match CPAL playback SR
   tx: Sender<crate::audio::AudioChunk>,
-  stop_all_rx: Receiver<()>,
+  stop_all_rx: &Receiver<()>,
   interrupt_counter: Arc<AtomicU64>,
   expected_interrupt: u64,
 ) -> Result<SpeakOutcome, Box<dyn std::error::Error + Send + Sync>> {
@@ -56,19 +56,18 @@ pub fn speak(
       voice,
       out_sample_rate,
       tx,
-      stop_all_rx,
+      stop_all_rx.clone(),
       interrupt_counter,
       expected_interrupt,
     )
   } else {
-    // NOTE: make espeak find phonemes for chinese mandarin
     let lang = if language == "zh" { "cmn" } else { language };
     crate::tts::speak_via_kokoro_stream(
       text,
       lang,
       voice,
       tx,
-      stop_all_rx,
+      stop_all_rx.clone(),
       interrupt_counter,
       expected_interrupt,
     )
@@ -78,75 +77,78 @@ pub fn speak(
 
 // tts_thread - dedicated thread for speaking phrases
 pub fn tts_thread(
-  voice_state: Arc<Mutex<String>>,
   out_sample_rate: u32,
   tx_play: Sender<crate::audio::AudioChunk>,
   stop_all_rx: Receiver<()>,
   interrupt_counter: Arc<AtomicU64>,
-  rx_tts: Receiver<(String, u64)>,
+  rx_tts: Receiver<(String, u64, String)>,
   stop_play_tx: Sender<()>,
+  tx_tts_done: Sender<()>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   loop {
+    crate::log::log("info", "🔄 TTS thread waiting for next phrase...");
     // Wait for either a new phrase or a stop signal
     crossbeam_channel::select! {
       recv(rx_tts) -> msg => {
-        let (phrase, expected_interrupt) = match msg {
+        let (phrase, expected_interrupt, voice) = match msg {
           Ok(v) => v,
           Err(_) => break,
         };
-        let voice = voice_state.lock().unwrap().clone();
         let state = GLOBAL_STATE.get().expect("AppState not initialized");
+        // crate::log::log("info", &format!("TTS received phrase (len={}), expected_interrupt={}", phrase.len(), expected_interrupt));
+
         let tts_val = state.tts.lock().unwrap().clone();
-        crate::log::log("info", tts_val.as_str());
         let language = state.language.lock().unwrap().clone();
-        crate::log::log("info", language.as_str());
-      
         let outcome = crate::tts::speak(
           &phrase,
-          tts_val.as_str(),
-          crate::config::OPENTTS_BASE_URL_DEFAULT,
-          language.as_str(),
-          voice.as_str(),
+          &tts_val,
+          &state.baseurl.lock().unwrap().clone(),
+          &language,
+          &voice,
           out_sample_rate,
           tx_play.clone(),
-          stop_all_rx.clone(),
+          &stop_all_rx,
           interrupt_counter.clone(),
           expected_interrupt,
         );
+
         match outcome {
           Ok(o) => {
             if o == crate::tts::SpeakOutcome::Interrupted {
               // Drain any remaining phrases that might be queued
+              let mut drained = 0;
               loop {
                 match rx_tts.try_recv() {
-                  Ok(_) => continue,
+                  Ok(_) => {
+                    drained += 1;
+                    continue;
+                  },
                   Err(_) => break,
                 }
               }
               let _ = stop_play_tx.try_send(());
+              // Signal completion before continuing
+              let _ = tx_tts_done.try_send(());
               continue;
             }
+            let _ = tx_tts_done.try_send(());
           }
           Err(_e) => {
             crate::log::log("error", &format!("TTS error. Can't play audio speech. Make sure OpenTTS is running: docker run --rm -p 5500:5500 synesthesiam/opentts:all"));
+            // Signal completion before breaking
+            let _ = tx_tts_done.try_send(());
             break;
           }
         }
-        // Stop if interrupt counter changed while speaking
-        if interrupt_counter.load(Ordering::SeqCst) != expected_interrupt {
-            // Drain any queued phrases before exiting
-            while let Ok(_) = rx_tts.try_recv() {}
-            let _ = stop_play_tx.try_send(());
-            // No need to reset counter; keep current value
-            continue;
-        }
       },
-        recv(stop_all_rx) -> _ => {
-            // Gracefully exit on stop signal
-            break;
-        }
+      recv(stop_all_rx) -> _ => {
+        crate::log::log("info", "🛑 TTS thread received stop_all signal, exiting");
+        // Gracefully exit on stop signal
+        break;
+      }
     }
   }
+
   Ok(())
 }
 
@@ -407,18 +409,22 @@ pub fn speak_via_kokoro_stream(
     }
   });
 
-  // early cancellation check after initializing monitoring
-  if stop_rx.try_recv().is_ok() || int_counter.load(Ordering::SeqCst) != expected {
-    return Ok(SpeakOutcome::Interrupted);
-  }
+  // Start synthesis - the monitoring thread will handle interruptions during synthesis
+  // crate::log::log("info", &format!("Starting TTS synthesis for phrase: '{}'", text));
   let rt = tokio::runtime::Builder::new_current_thread()
     .enable_all()
     .build()?;
   let res = rt.block_on(streaming.speak_stream(text, tx.clone(), language));
 
   match res {
-    Ok(_) => Ok(SpeakOutcome::Completed),
-    Err(_) => Ok(SpeakOutcome::Interrupted),
+    Ok(_) => {
+      // crate::log::log("info", "TTS synthesis completed, audio chunks sent to playback");
+      Ok(SpeakOutcome::Completed)
+    }
+    Err(e) => {
+      // crate::log::log("info", &format!("TTS synthesis interrupted or failed: {:?}", e));
+      Ok(SpeakOutcome::Interrupted)
+    }
   }
 }
 
@@ -493,7 +499,7 @@ pub fn speak_via_opentts_stream(
   stream_wav16le_over_http(
     &url,
     tx,
-    stop_all_rx,
+    stop_all_rx.clone(),
     out_sample_rate,
     interrupt_counter,
     expected_interrupt,

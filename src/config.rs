@@ -4,13 +4,13 @@
 
 use crate::tts;
 use crate::util::get_user_home_path;
-use anyhow::{Error};
+use anyhow::Error;
 use clap::Parser;
-use cpal::traits::DeviceTrait;
 use cpal::Device;
+use cpal::traits::DeviceTrait;
 use serde::Deserialize;
 use serde_ini::from_str;
-use std::fs::{create_dir_all, read_to_string, File};
+use std::fs::{File, create_dir_all, read_to_string};
 use std::io::Write;
 use std::panic;
 use std::process;
@@ -95,11 +95,14 @@ pub struct Args {
   #[arg(long, action=clap::ArgAction::SetTrue)]
   pub list_voices: bool,
 
-  #[arg(long, default_value = "main agent", value_parser=validate_agent_name)]
-  pub agent: String,
+  #[arg(long, value_parser=validate_agent_name)]
+  pub agent: Option<String>,
 
   #[arg(long)]
   pub ptt: Option<bool>,
+
+  #[arg(long, num_args=3.., value_name = "AGENT1 AGENT2 SUBJECT")]
+  pub debate: Option<Vec<String>>,
 }
 
 // internal static values
@@ -174,7 +177,7 @@ pub fn load_settings(
     // Preprocess the block to remove surrounding quotes from values
     let mut clean_section = String::new();
     // Track ptt value string if present
-    let mut ptt_value_str: Option<String> = None;
+    let _ptt_value_str: Option<String> = None;
     for line in block.lines() {
       if let Some(idx) = line.find('=') {
         let (key, val_part) = line.split_at(idx);
@@ -270,12 +273,14 @@ pub fn load_settings(
       errors.push(format!("Agent {}: {}", agent.name, e));
     }
 
-    if let Err(e) = validate_language(&agent.language, &agent.tts).map_err(|e: std::io::Error| -> Error { Error::new(e) })
+    if let Err(e) = validate_language(&agent.language, &agent.tts)
+      .map_err(|e: std::io::Error| -> Error { Error::new(e) })
     {
       errors.push(format!("Agent {}: {}", agent.name, e));
     }
 
-    if let Err(e) = validate_voice(&agent.voice, &agent.language, &agent.tts).map_err(|e: std::io::Error| -> Error { Error::new(e) })
+    if let Err(e) = validate_voice(&agent.voice, &agent.language, &agent.tts)
+      .map_err(|e: std::io::Error| -> Error { Error::new(e) })
     {
       errors.push(format!("Agent {}: {}", agent.name, e));
     }
@@ -294,10 +299,12 @@ pub fn load_settings(
   }
 
   // Validate CLI args
-  if let Err(e) =
-    validate_agent_name(&args.agent).map_err(|e: std::io::Error| -> Error { Error::new(e) })
-  {
-    return Err(e);
+  if let Some(ref agent_name) = args.agent {
+    if let Err(e) =
+      validate_agent_name(agent_name).map_err(|e: std::io::Error| -> Error { Error::new(e) })
+    {
+      return Err(e);
+    }
   }
 
   // Merge args into each agent's settings
@@ -455,8 +462,9 @@ fn validate_voice(voice: &str, language: &str, tts: &str) -> Result<(), std::io:
       std::io::ErrorKind::Other,
       format!("Unsupported voice '{}' for language {}", voice, language),
     ));
+  } else {
+    Ok(())
   }
-  Ok(())
 }
 
 fn validate_tts(tts: &str) -> Result<(), std::io::Error> {

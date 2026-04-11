@@ -4,6 +4,8 @@ As easy as it sounds. Includes all you need to voice chat with ai models.
 Finally the cross platform voice ui you were waiting on now available
 for MacOS, Windows and Linux, no need for external installations.
 
+🚀🚀🚀 NOW automated ai agents debate possible. Initialize an infinite debate between two agents and interrupt at any time to change the subject
+
 #### **Sponsor this project**
 [![Sponsor ai-mate](https://img.shields.io/static/v1?label=Sponsor&message=%E2%9D%A4&logo=GitHub&color=%23fe8e86)](https://github.com/sponsors/DavidValin)
 
@@ -39,8 +41,9 @@ https://github.com/user-attachments/assets/e612feaa-8ab0-4761-9c67-53ec7d40cab7
 
 ## Features
 
-- 📌 Realtime agent swap: `change the agent by pressing <ARROW_LEFT> / <ARROW_RIGHT> (applicable to next response)`
 - 📌 Continuous Voice chat (live conversation): `records user continuously and stops on silence, submitting the request to the agent`
+- 🚀 AI agents debate (2 agents talking to each other): `give an initial input and let the agents talk to each other. You can interrupt in the middle of the debate changing the subject`
+- 📌 Realtime agent swap: `change the agent by pressing <ARROW_LEFT> / <ARROW_RIGHT> (applicable to next response)`
 - 📌 Voice interrupt: `the agent stops talking if you interrupt via voice`
 - 📌 Recording Pause / Resume: `toggle "<SPACE>" key to pause / resume voice recording only`
 - 📌 Stop PlayBack: `press "<ESCAPE>" ONCE to stop the playback for the current response`
@@ -149,11 +152,19 @@ Explanation on the fields:
 
 The first agent defined in `~/ai-mate/settings` will always be selected agent when running ai-mate.
 
+Conversation mode:
 ```
 ollama serve
 ai-mate
 ```
 
+Debate mode:
+```
+ollama serve
+ai-mate --debate "main agent" "planner" "Lets discuss something random"
+```
+
+* You can switch between conversation mode / debate model by pressing Control+D.
 * You can switch agents in realtime by pressing Left / Right keyword arrows (you need at least 2 agents defined in `~/ai-mate/settings`).
 * If you want to avoid sound interruptions you can use `ptt` mode or increase the `sound_threshold_peak` for your microphone levels.
 * If you want to use OpenTTS, start the docker service first: `docker run --rm --platform=linux/amd64 -p 5500:5500 synesthesiam/opentts:all` (it will pull the image the first time). Adjust the platform as needed depending on your hardware.
