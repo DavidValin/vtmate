@@ -259,7 +259,7 @@ pub fn conversation_thread(
                 crate::log::log("debug", "TTS interrupted");
                 break;
               }
-              let cleaned = strip_special_chars(&phrase);
+              let cleaned = crate::util::strip_special_chars(&phrase);
               let _ = tts_tx.send((cleaned, my_interrupt, current_agent.voice.clone()));
               // Wait for this phrase to be synthesized before sending next one
               let _ = tts_done_rx.recv();
@@ -444,7 +444,7 @@ pub fn conversation_thread(
             }
             hist.lock().unwrap().push(ChatMessage{role:"assistant".to_string(), content:phrase.clone()});
             // send the complete phrase to tts
-            let cleaned = strip_special_chars(&phrase);
+            let cleaned = crate::util::strip_special_chars(&phrase);
             crate::log::log("info", &format!("Sending phrase to TTS: '{}' (original: '{}'), interrupt={}", cleaned, phrase, my_interrupt));
             let _ = tts_tx_cloned_for_closure.send((cleaned, my_interrupt, voice_for_tts.clone()));
           }
@@ -516,7 +516,7 @@ pub fn conversation_thread(
           let phrase_clone = phrase.clone();
           let _ = tx_ui.send(phrase_clone);
           conversation_history.lock().unwrap().push(ChatMessage{role:"assistant".to_string(), content:phrase.clone()});
-          let cleaned = strip_special_chars(&phrase);
+          let cleaned = crate::util::strip_special_chars(&phrase);
           crate::log::log("info", &format!("Sending final phrase to TTS: '{}' (original: '{}'), interrupt={}", cleaned, phrase, my_interrupt));
           let _ = tts_tx.send((cleaned, my_interrupt, settings.voice.clone()));
         }
@@ -575,39 +575,12 @@ impl PhraseSpeaker {
   }
 }
 
-thread_local! {
-  static IN_CODE_BLOCK: Cell<bool> = Cell::new(false);
-}
-
 fn handle_interruption(interrupt_counter: &Arc<AtomicU64>, current: u64) -> bool {
   if interrupt_counter.load(Ordering::SeqCst) != current {
     true
   } else {
     false
   }
-}
-
-fn strip_special_chars(s: &str) -> String {
-  let mut result = String::new();
-  let parts: Vec<&str> = s.split("```").collect();
-  let mut inside = IN_CODE_BLOCK.with(|c| c.get());
-  for (i, part) in parts.iter().enumerate() {
-    if !inside {
-      result.extend(part.chars().filter(|c| {
-        ![
-          '+', '.', '~', '*', '&', '-', ',', ';', ':', '(', ')', '[', ']', '{', '}', '"', '\'',
-          '#', '`', '|',
-        ]
-        .contains(c)
-      }));
-    }
-    // toggle after each fence except after last part
-    if i < parts.len() - 1 {
-      inside = !inside;
-    }
-  }
-  IN_CODE_BLOCK.with(|c| c.set(inside));
-  result
 }
 
 /// Split text into phrases for TTS (used in debate mode)

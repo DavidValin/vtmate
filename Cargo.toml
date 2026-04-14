@@ -36,6 +36,8 @@ hex = "0.4"
 directories = "5"
 log = "0.4"
 env_logger = "0.11"
+encoding_rs = "0.8"
+encoding_rs_io = "0.1"
 
 [build-dependencies]
 sha2 = "0.10"
