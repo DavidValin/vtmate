@@ -217,13 +217,21 @@ pub fn conversation_thread(
             let _ = tx_ui.send(format!("stream|{}", reply.trim()));
             let _ = tx_ui.send("line|".to_string());
 
-            // Temporarily switch to current agent's voice/tts settings
+            // Temporarily switch to current agent's voice/tts/language/baseurl settings
             let original_voice = {
               let v = state.voice.lock().unwrap();
               v.clone()
             };
             let original_tts = {
               let v = state.tts.lock().unwrap();
+              v.clone()
+            };
+            let original_language = {
+              let v = state.language.lock().unwrap();
+              v.clone()
+            };
+            let original_baseurl = {
+              let v = state.baseurl.lock().unwrap();
               v.clone()
             };
             {
@@ -233,6 +241,14 @@ pub fn conversation_thread(
             {
               let mut v = state.tts.lock().unwrap();
               *v = current_agent.tts.clone();
+            }
+            {
+              let mut v = state.language.lock().unwrap();
+              *v = current_agent.language.clone();
+            }
+            {
+              let mut v = state.baseurl.lock().unwrap();
+              *v = current_agent.baseurl.clone();
             }
 
             // Send to TTS with current agent's voice and wait for each phrase
@@ -249,7 +265,7 @@ pub fn conversation_thread(
               let _ = tts_done_rx.recv();
             }
 
-            // Restore original voice/tts settings
+            // Restore original voice/tts/language/baseurl settings
             {
               let mut v = state.voice.lock().unwrap();
               *v = original_voice;
@@ -257,6 +273,14 @@ pub fn conversation_thread(
             {
               let mut v = state.tts.lock().unwrap();
               *v = original_tts;
+            }
+            {
+              let mut v = state.language.lock().unwrap();
+              *v = original_language;
+            }
+            {
+              let mut v = state.baseurl.lock().unwrap();
+              *v = original_baseurl;
             }
 
             // Check again for interruption before waiting for playback
