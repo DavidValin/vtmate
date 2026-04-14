@@ -2,13 +2,18 @@
 //  Util
 // ------------------------------------------------------------------
 
+use std::cell::Cell;
 use std::io::IsTerminal;
-use std::sync::OnceLock;
 use std::sync::atomic::AtomicU64;
+use std::sync::OnceLock;
 use std::time::Instant;
 
 /// Global timestamp of last speech end (in ms since program start).
 pub static SPEECH_END_AT: AtomicU64 = AtomicU64::new(0);
+
+thread_local! {
+  static IN_CODE_BLOCK: Cell<bool> = Cell::new(false);
+}
 
 // API
 // ------------------------------------------------------------------
@@ -102,4 +107,40 @@ pub fn get_user_home_path() -> Option<PathBuf> {
   } else {
     UserDirs::new().map(|u| u.home_dir().to_path_buf())
   }
+}
+
+/// Strip special characters from text for TTS
+/// Handles code blocks (text between ```) by not stripping chars inside them
+/// Preserves unicode characters (accents, tildes, etc.)
+pub fn strip_special_chars(s: &str) -> String {
+  let mut result = String::new();
+  let parts: Vec<&str> = s.split("```").collect();
+  let mut inside = IN_CODE_BLOCK.with(|c| c.get());
+  for (i, part) in parts.iter().enumerate() {
+    if !inside {
+      result.extend(part.chars().filter(|c| {
+        // Keep letters (including unicode letters with accents), digits, spaces, and whitespace
+        // Remove only specific punctuation marks
+        if c.is_alphanumeric() || c.is_whitespace() {
+          true
+        } else {
+          // Remove specific special characters
+          ![
+            '+', '.', '~', '*', '&', '-', ',', ';', ':', '(', ')', '[', ']', '{', '}', '"', '\'',
+            '#', '`', '|', '!', '?', '/', '\\', '<', '>', '=', '@', '$', '%', '^',
+          ]
+          .contains(c)
+        }
+      }));
+    } else {
+      // Inside code blocks, keep everything
+      result.push_str(part);
+    }
+    // toggle after each fence except after last part
+    if i < parts.len() - 1 {
+      inside = !inside;
+    }
+  }
+  IN_CODE_BLOCK.with(|c| c.set(inside));
+  result
 }
