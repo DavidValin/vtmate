@@ -54,6 +54,7 @@ https://github.com/user-attachments/assets/e612feaa-8ab0-4761-9c67-53ec7d40cab7
 - 📌 Integrated `kokoro TTS` system
 - 📌 Interface with `OpenTTS` system
 - 📌 Supports `ollama` or `llama-server`
+- 📌 Read a txt file using tts: `ai-mate -rf myfile.txt --agent "main agent"`
 - 📌 28 languages supported (`ai-mate --list-voices`)
 - 📌 Use any gguf model from huggingface.com or ollama models (small models reply faster)
 
@@ -162,6 +163,11 @@ Debate mode:
 ```
 ollama serve
 ai-mate --debate "main agent" "planner" "Lets discuss something random"
+```
+
+Read a txt file:
+```
+ai-mate -rf myfile.txt --agent "my nice agent"
 ```
 
 * You can switch between conversation mode / debate model by pressing Control+D.
