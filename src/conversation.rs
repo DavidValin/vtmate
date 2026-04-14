@@ -122,6 +122,8 @@ pub fn conversation_thread(
           let user_text = user_text.trim().to_string();
 
           if !user_text.is_empty() {
+            // Clear STOP_STREAM flag to ensure user text displays fully
+            crate::ui::STOP_STREAM.store(false, Ordering::Relaxed);
             let _ = tx_ui.send("line|\n".to_string());
             let _ = tx_ui.send(format!("line|{}", crate::ui::USER_LABEL));
             let _ = tx_ui.send(format!("stream|{}", user_text));
@@ -342,6 +344,8 @@ pub fn conversation_thread(
           interrupt_counter.store(my_interrupt, Ordering::SeqCst);
           continue;
         }
+        // Clear STOP_STREAM flag to ensure user text displays fully
+        crate::ui::STOP_STREAM.store(false, Ordering::Relaxed);
         let _ = tx_ui.send("line|\n".to_string());
         let _ = tx_ui.send(format!("line|{}", crate::ui::USER_LABEL));
         let _ = tx_ui.send(format!("stream|{}", user_text));
