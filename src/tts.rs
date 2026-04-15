@@ -99,14 +99,14 @@ pub fn tts_thread(
 
         let tts_val = state.tts.lock().unwrap().clone();
         let language = state.language.lock().unwrap().clone();
-        
+
         // Use OPENTTS_BASE_URL_DEFAULT when TTS is set to opentts
         let opentts_url = if tts_val == "opentts" {
           crate::config::OPENTTS_BASE_URL_DEFAULT.to_string()
         } else {
           state.baseurl.lock().unwrap().clone()
         };
-        
+
         let outcome = crate::tts::speak(
           &phrase,
           &tts_val,
