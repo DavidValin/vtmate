@@ -56,7 +56,6 @@ https://github.com/user-attachments/assets/e612feaa-8ab0-4761-9c67-53ec7d40cab7
 - 📌 Integrated `kokoro TTS` system
 - 📌 Interface with `OpenTTS` system
 - 📌 Supports `ollama` or `llama-server`
-
 - 📌 28 languages supported (`ai-mate --list-voices`)
 - 📌 Use any gguf model from huggingface.com or ollama models (small models reply faster)
 
@@ -163,8 +162,7 @@ ollama serve
 ai-mate --agent "main agent"
 ```
 
-* You can switch agents in realtime by pressing `ARROW_LEFT` / `ARROW_RIGHT` keyword arrows (you need at least 2 agents defined in `~/ai-mate/settings`)
-* If you want to avoid sound interruptions you can use `ptt` mode or increase the `sound_threshold_peak` for your microphone levels.
+* You can switch agents in realtime by pressing `ARROW_LEFT` / `ARROW_RIGHT` keyword arrows (you need at least 2 agents defined in `~/ai-mate/settings`).
 
 **Debate mode**
 Initialize a debate between two agents and be able to participate in the debate by speaking at any time. To create a good debate adjust the system prompts of each agent and give a detailed initial input.
@@ -198,6 +196,7 @@ In this mode you can:
 
 **Other info**
 
+* If you want to avoid sound interruptions you can use `ptt` mode or increase the `sound_threshold_peak` for your microphone levels.
 * If you want to use OpenTTS, start the docker service first: `docker run --rm --platform=linux/amd64 -p 5500:5500 synesthesiam/opentts:all` (it will pull the image the first time). Adjust the platform as needed depending on your hardware.
 * If you have problems starting ai-mate you can remove `~/ai-mate/settings` so it recreates the default configuration
 * By default whisper tiny is used (from ~/.whisper-models/ggml-small.bin). If you need better speech recognition, download a better whisper model and update the `whisper_model_path` setting.
