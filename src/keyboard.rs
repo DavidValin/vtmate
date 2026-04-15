@@ -106,8 +106,20 @@ pub fn keyboard_thread(
               interrupt_counter.fetch_add(1, Ordering::SeqCst);
             }
             KeyCode::Char('p') | KeyCode::Char('P') => {
-              // Continue TTS playback
-              rfm.tts_paused.store(false, Ordering::SeqCst);
+              if (rfm.tts_paused.load(Ordering::SeqCst)) {
+                // Move index back one element
+                let curr = rfm.current_phrase.load(Ordering::SeqCst);
+                if curr > 0 {
+                  let _ = stop_play_tx.try_send(());
+                  interrupt_counter.fetch_add(1, Ordering::SeqCst);
+                  rfm.current_phrase.store(curr - 1, Ordering::SeqCst);
+                  rfm.tts_paused.store(false, Ordering::SeqCst);
+                  let _ = rfm.display_update_tx.send(());
+                }
+
+                // Continue TTS playback
+                rfm.tts_paused.store(false, Ordering::SeqCst);
+              }
             }
             _ => {}
           }
