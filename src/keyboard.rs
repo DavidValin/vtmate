@@ -2,20 +2,28 @@
 //  Keyboard handling
 // ------------------------------------------------------------------
 
-use crate::state::{GLOBAL_STATE, decrease_voice_speed, increase_voice_speed};
+use crate::state::{decrease_voice_speed, increase_voice_speed, GLOBAL_STATE};
 use crossbeam_channel::{Receiver, Sender};
 use crossterm::{
   event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
   terminal,
 };
 use std::sync::{
-  Arc,
   atomic::{AtomicBool, AtomicU64, Ordering},
+  Arc,
 };
 use std::time::{Duration, Instant};
 
 // API
 // ------------------------------------------------------------------
+
+pub struct ReadFileMode {
+  pub current_phrase: Arc<std::sync::atomic::AtomicUsize>,
+  pub tts_paused: Arc<AtomicBool>,
+  pub should_exit: Arc<AtomicBool>,
+  pub display_update_tx: Sender<()>,
+  pub phrases_len: usize,
+}
 
 pub fn keyboard_thread(
   tx_ui: Sender<String>,
@@ -24,6 +32,8 @@ pub fn keyboard_thread(
   recording_paused: Arc<AtomicBool>,
   stop_play_tx: Sender<()>,
   interrupt_counter: Arc<AtomicU64>,
+  // Optional parameters for read-file mode
+  read_file_mode: Option<ReadFileMode>,
 ) {
   // Raw mode lets us capture single key presses (space to pause/resume).
   let mut last_esc: Option<Instant> = None;
@@ -32,7 +42,12 @@ pub fn keyboard_thread(
   let mut space_pressed = false;
   let mut last_space_time: Option<Instant> = None;
   loop {
-    let state = GLOBAL_STATE.get().unwrap();
+    // Check read-file mode exit flag
+    if let Some(ref rfm) = read_file_mode {
+      if rfm.should_exit.load(Ordering::SeqCst) {
+        break;
+      }
+    }
 
     if stop_all_rx.try_recv().is_ok() {
       break;
@@ -41,6 +56,67 @@ pub fn keyboard_thread(
     // Poll so we can also respond to stop_all.
     if event::poll(Duration::from_millis(50)).unwrap_or(false) {
       if let Ok(Event::Key(k)) = event::read() {
+        // Handle read-file mode separately
+        if let Some(ref rfm) = read_file_mode {
+          if k.kind != KeyEventKind::Press {
+            continue;
+          }
+
+          // Ctrl+C exits
+          if k.modifiers.contains(KeyModifiers::CONTROL) {
+            if let KeyCode::Char('c') | KeyCode::Char('C') = k.code {
+              rfm.should_exit.store(true, Ordering::SeqCst);
+              break;
+            }
+          }
+
+          match k.code {
+            KeyCode::Char('u') | KeyCode::Char('U') => {
+              // 'u': previous phrase
+              let curr = rfm.current_phrase.load(Ordering::SeqCst);
+              if curr > 0 {
+                // Stop current playback
+                let _ = stop_play_tx.try_send(());
+                interrupt_counter.fetch_add(1, Ordering::SeqCst);
+                // Move to previous phrase
+                rfm.current_phrase.store(curr - 1, Ordering::SeqCst);
+                rfm.tts_paused.store(false, Ordering::SeqCst);
+                // Trigger display update
+                let _ = rfm.display_update_tx.send(());
+              }
+            }
+            KeyCode::Char('d') | KeyCode::Char('D') => {
+              // 'd': next phrase
+              let curr = rfm.current_phrase.load(Ordering::SeqCst);
+              if curr < rfm.phrases_len - 1 {
+                // Stop current playback
+                let _ = stop_play_tx.try_send(());
+                interrupt_counter.fetch_add(1, Ordering::SeqCst);
+                // Move to next phrase
+                rfm.current_phrase.store(curr + 1, Ordering::SeqCst);
+                rfm.tts_paused.store(false, Ordering::SeqCst);
+                // Trigger display update
+                let _ = rfm.display_update_tx.send(());
+              }
+            }
+            KeyCode::Char('s') | KeyCode::Char('S') => {
+              // Stop TTS playback
+              rfm.tts_paused.store(true, Ordering::SeqCst);
+              let _ = stop_play_tx.try_send(());
+              interrupt_counter.fetch_add(1, Ordering::SeqCst);
+            }
+            KeyCode::Char('p') | KeyCode::Char('P') => {
+              // Continue TTS playback
+              rfm.tts_paused.store(false, Ordering::SeqCst);
+            }
+            _ => {}
+          }
+          continue; // Skip the rest of the normal keyboard handling
+        }
+
+        // Normal mode handling below
+        let state = GLOBAL_STATE.get().unwrap();
+
         // Ctrl+C should exit immediately
         if k.modifiers.contains(KeyModifiers::CONTROL) {
           if let KeyCode::Char('c') | KeyCode::Char('C') = k.code {
@@ -320,12 +396,16 @@ pub fn keyboard_thread(
     }
 
     // If space was pressed but no new space event for a short period, consider it released (only when PTT)
-    if state.ptt.load(Ordering::Relaxed) && space_pressed {
-      if let Some(t) = last_space_time {
-        if Instant::now().duration_since(t) > Duration::from_millis(500) {
-          recording_paused.store(true, Ordering::Relaxed);
-          space_pressed = false;
-          last_space_time = None;
+    // Only check this in normal mode (not read-file mode)
+    if read_file_mode.is_none() {
+      let state = GLOBAL_STATE.get().unwrap();
+      if state.ptt.load(Ordering::Relaxed) && space_pressed {
+        if let Some(t) = last_space_time {
+          if Instant::now().duration_since(t) > Duration::from_millis(500) {
+            recording_paused.store(true, Ordering::Relaxed);
+            space_pressed = false;
+            last_space_time = None;
+          }
         }
       }
     }

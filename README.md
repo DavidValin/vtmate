@@ -50,11 +50,13 @@ https://github.com/user-attachments/assets/e612feaa-8ab0-4761-9c67-53ec7d40cab7
 - 📌 Interrupt: `press "<ESCAPE>" TWICE to interrupt the current response alltogether`
 - 📌 Push to Talk mode (PTT): `keep <SPACE> pressed while talking and release to stop recording`
 - 📌 Voice speed change: `change the agent voice speed by pressing <ARROW_UP> / <ARROW_DOWN> (applicable to next response)`
+- 📌 Voice read a txt file: `ai-mate -r myfile.txt`
+- 📌 Voice read text from stdin phrase by phrase: `echo "Hello. How are you?" | ai-mate -r -`
 - 📌 Integrated `whisper`
 - 📌 Integrated `kokoro TTS` system
 - 📌 Interface with `OpenTTS` system
 - 📌 Supports `ollama` or `llama-server`
-- 📌 Read a txt file using tts: `ai-mate -r myfile.txt --agent "main agent"`
+
 - 📌 28 languages supported (`ai-mate --list-voices`)
 - 📌 Use any gguf model from huggingface.com or ollama models (small models reply faster)
 
@@ -151,36 +153,54 @@ Explanation on the fields:
 
 ## How to use it
 
-The first agent defined in `~/ai-mate/settings` will always be selected agent when running ai-mate.
+The first agent defined in `~/ai-mate/settings` will always be selected agent when running ai-mate, unless `--agent <agent_name>` is used.
 
-Conversation mode:
+**Conversation mode**
+Voice chat with an agent
+
 ```
 ollama serve
-ai-mate
+ai-mate --agent "main agent"
 ```
 
-Debate mode:
-```
-ollama serve
-ai-mate --debate "main agent" "planner" "Lets discuss something random"
-```
-
-Read a txt file:
-```
-ai-mate -r myfile.txt --agent "my nice agent"
-```
-
-* You can switch between conversation mode / debate model by pressing Control+D.
-* You can switch agents in realtime by pressing Left / Right keyword arrows (you need at least 2 agents defined in `~/ai-mate/settings`).
+* You can switch agents in realtime by pressing `ARROW_LEFT` / `ARROW_RIGHT` keyword arrows (you need at least 2 agents defined in `~/ai-mate/settings`)
 * If you want to avoid sound interruptions you can use `ptt` mode or increase the `sound_threshold_peak` for your microphone levels.
+
+**Debate mode**
+Initialize a debate between two agents and be able to participate in the debate by speaking at any time. To create a good debate adjust the system prompts of each agent and give a detailed initial input.
+
+```
+ollama serve
+ai-mate --debate "socrates" "seneca" "How to be happy in a busy world?"
+```
+
+* You can also start a debate from conversation mode by pressing Control+D and picking the debate agents.
+
+**File to speech**
+Read a text file or stdin text phrase by phrase. Ensure the agent you choose has correct language and voice for your text.
+
+from a txt file:
+```
+ai-mate -r myfile.txt --agent "main agent"
+```
+
+from stdin text:
+```
+ai-mate -r - --agent "main agent"
+```
+
+In this mode you can:
+
+* Move to previous phrase by pressing `U`
+* Move to next phrase by pressing `D`
+* Stop playback by pressing `S`
+* Resume playback by pressing `P`
+
+**Other info**
+
 * If you want to use OpenTTS, start the docker service first: `docker run --rm --platform=linux/amd64 -p 5500:5500 synesthesiam/opentts:all` (it will pull the image the first time). Adjust the platform as needed depending on your hardware.
 * If you have problems starting ai-mate you can remove `~/ai-mate/settings` so it recreates the default configuration
 * By default whisper tiny is used (from ~/.whisper-models/ggml-small.bin). If you need better speech recognition, download a better whisper model and update the `whisper_model_path` setting.
-
-You can also initialize ai-mate at specific agent:
-```
-ai-mate --agent planner
-```
 
 If you need help:
 
