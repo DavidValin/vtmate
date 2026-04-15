@@ -3,6 +3,7 @@ use clap::Parser;
 use cpal::traits::DeviceTrait;
 use crossbeam_channel::{bounded, unbounded};
 use crossterm::terminal::{self};
+use std::io::{self, Read};
 use std::process;
 use std::sync::{Arc, OnceLock, atomic::Ordering};
 use std::thread::{self, Builder as ThreadBuilder};
@@ -73,13 +74,16 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   // handle --read-file
   // ---------------------------------------------------
   if let Some(ref filename) = args.read_file {
+    // Enable raw mode for keyboard input
+    let _ = terminal::enable_raw_mode();
+
     // Load settings first to get agent configuration
     let _ = config::ensure_settings_file();
     let settings_path = get_user_home_path()
       .ok_or("Unable to determine home directory")?
       .join(".ai-mate")
       .join("settings");
-    
+
     let agents = match config::load_settings(&settings_path, &args) {
       Ok(v) => v,
       Err(e) => {
@@ -87,7 +91,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         process::exit(1);
       }
     };
-    
+
     // Select agent: use --agent if specified, otherwise pick first
     let settings = match &args.agent {
       Some(agent_name) => match agents.iter().find(|a| a.name == *agent_name).cloned() {
@@ -112,34 +116,62 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     };
 
     // Read the file - try UTF-8 first, then try Latin-1 encoding
-    let content = match std::fs::read_to_string(filename) {
-      Ok(c) => c,
-      Err(_) => {
-        // If UTF-8 reading fails, try reading as bytes and detect encoding
-        match std::fs::read(filename) {
-          Ok(bytes) => {
-            // Try to detect encoding - common encodings for Spanish text
-            use encoding_rs::*;
-            
-            // Try UTF-8 first
-            if let Ok(s) = std::str::from_utf8(&bytes) {
-              s.to_string()
-            } else {
-              // Try Latin-1 (ISO-8859-1) - common for Spanish
-              let (decoded, encoding, had_errors) = WINDOWS_1252.decode(&bytes);
-              if !had_errors {
-                eprintln!("⚠️  File encoded as Windows-1252/Latin-1, converting to UTF-8");
-                decoded.to_string()
+    let content = if filename == "-" {
+      // Read from stdin
+      let mut stdin_bytes = Vec::new();
+      io::stdin()
+        .read_to_end(&mut stdin_bytes)
+        .unwrap_or_else(|e| {
+          eprintln!("❌ Failed to read stdin: {}", e);
+          process::exit(1);
+        });
+      // Try UTF-8 first
+      match std::str::from_utf8(&stdin_bytes) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+          // Fallback encoding detection similar to file handling
+          use encoding_rs::*;
+          let (decoded, _encoding, had_errors) = WINDOWS_1252.decode(&stdin_bytes);
+          if !had_errors {
+            eprintln!("⚠️  Stdin encoded as Windows-1252/Latin-1, converting to UTF-8");
+            decoded.to_string()
+          } else {
+            eprintln!("⚠️  Stdin encoding unknown, using lossy UTF-8 conversion");
+            String::from_utf8_lossy(&stdin_bytes).to_string()
+          }
+        }
+      }
+    } else {
+      // Existing file reading logic
+      match std::fs::read_to_string(filename) {
+        Ok(c) => c,
+        Err(_) => {
+          // If UTF-8 reading fails, try reading as bytes and detect encoding
+          match std::fs::read(filename) {
+            Ok(bytes) => {
+              // Try to detect encoding - common encodings for Spanish text
+              use encoding_rs::*;
+
+              // Try UTF-8 first
+              if let Ok(s) = std::str::from_utf8(&bytes) {
+                s.to_string()
               } else {
-                // Fall back to lossy UTF-8 conversion
-                eprintln!("⚠️  File encoding unknown, using lossy UTF-8 conversion");
-                String::from_utf8_lossy(&bytes).to_string()
+                // Try Latin-1 (ISO-8859-1) - common for Spanish
+                let (decoded, _encoding, had_errors) = WINDOWS_1252.decode(&bytes);
+                if !had_errors {
+                  eprintln!("⚠️  File encoded as Windows-1252/Latin-1, converting to UTF-8");
+                  decoded.to_string()
+                } else {
+                  // Fall back to lossy UTF-8 conversion
+                  eprintln!("⚠️  File encoding unknown, using lossy UTF-8 conversion");
+                  String::from_utf8_lossy(&bytes).to_string()
+                }
               }
             }
-          }
-          Err(e) => {
-            eprintln!("❌ Failed to read file '{}': {}", filename, e);
-            process::exit(1);
+            Err(e) => {
+              eprintln!("❌ Failed to read file '{}': {}", filename, e);
+              process::exit(1);
+            }
           }
         }
       }
@@ -163,7 +195,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       eprintln!("❌ {}", msg);
       process::exit(1)
     });
-    
+
     let out_cfg_supported = out_dev.default_output_config()?;
     let out_cfg: cpal::StreamConfig = out_cfg_supported.clone().into();
     let out_sample_rate = out_cfg.sample_rate.0;
@@ -172,14 +204,14 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Setup channels for TTS and playback
     let (tx_play, rx_play) = bounded::<audio::AudioChunk>(1);
     let (tx_tts, rx_tts) = unbounded::<(String, u64, String)>();
-    let (tts_done_tx, tts_done_rx) = crossbeam_channel::bounded(0);
+    let (tts_done_tx, tts_done_rx) = crossbeam_channel::unbounded();
     let (stop_all_tx, stop_all_rx) = unbounded::<()>();
     let (stop_play_tx, stop_play_rx) = unbounded::<()>();
 
     let interrupt_counter = app_state.interrupt_counter.clone();
 
     // Start TTS thread
-    let tts_handle = thread::spawn({
+    let _tts_handle = thread::spawn({
       let out_sample_rate = out_sample_rate.clone();
       let tx_play = tx_play.clone();
       let stop_all_rx = stop_all_rx.clone();
@@ -214,7 +246,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       spinner_index: 0,
     };
 
-    let play_handle = thread::spawn({
+    let _play_handle = thread::spawn({
       let playback_active = playback_active.clone();
       let gate_until_ms = gate_until_ms.clone();
       let paused = paused.clone();
@@ -241,43 +273,250 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     });
 
     // Split content into phrases (by newlines or periods)
-    let phrases: Vec<&str> = content
-      .lines()
-      .flat_map(|line| {
-        line.split('.')
-          .map(|s| s.trim())
-          .filter(|s| !s.is_empty())
-      })
-      .collect();
+    let phrases: Vec<String> = {
+      let mut phrases = Vec::new();
+      let mut current = String::new();
+      for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+          if !current.is_empty() {
+            phrases.push(current.trim().to_string());
+            current.clear();
+          }
+          continue;
+        }
+        // Split line on periods to handle sentence ends
+        let mut parts = trimmed.split('.');
+        // Handle first part
+        let first = parts.next().unwrap();
+        if !current.is_empty() {
+          current.push(' ');
+        }
+        current.push_str(first);
+        // Any subsequent parts mean we hit a period
+        for part in parts {
+          // End current phrase at period
+          phrases.push(current.trim().to_string());
+          current.clear();
+          // Start new phrase with remaining part
+          if !part.is_empty() {
+            current.push_str(part);
+          }
+        }
+      }
+      if !current.is_empty() {
+        phrases.push(current.trim().to_string());
+      }
+      phrases
+    };
 
     println!("📖 Reading {} phrases from '{}'", phrases.len(), filename);
 
-    // Send phrases to TTS
-    for phrase in phrases.iter() {
+    // State for phrase navigation
+    let current_phrase = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let tts_paused = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let should_exit = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+    // Channel for triggering display updates
+    let (display_update_tx, display_update_rx) = unbounded::<()>();
+
+    // Spawn keyboard handler thread for read-file mode
+    let _key_handle = thread::spawn({
+      let current_phrase = current_phrase.clone();
+      let tts_paused = tts_paused.clone();
+      let should_exit = should_exit.clone();
+      let interrupt_counter = interrupt_counter.clone();
+      let stop_play_tx = stop_play_tx.clone();
+      let stop_all_tx = stop_all_tx.clone();
+      let stop_all_rx = stop_all_rx.clone();
+      let display_update_tx = display_update_tx.clone();
+      let phrases_len = phrases.len();
+      let (tx_ui_dummy, _rx_ui_dummy) = bounded::<String>(1); // Dummy channel for read-file mode
+
+      move || {
+        let read_file_mode = keyboard::ReadFileMode {
+          current_phrase,
+          tts_paused,
+          should_exit,
+          display_update_tx,
+          phrases_len,
+        };
+
+        keyboard::keyboard_thread(
+          tx_ui_dummy,
+          stop_all_tx,
+          stop_all_rx,
+          Arc::new(std::sync::atomic::AtomicBool::new(false)), // dummy recording_paused
+          stop_play_tx,
+          interrupt_counter,
+          Some(read_file_mode),
+        )
+      }
+    });
+
+    // Clear screen and prepare for phrase display
+    use crossterm::{cursor, execute, style::Print, terminal as term};
+    use std::io::{Write, stdout};
+    let mut out = stdout();
+    execute!(
+      out,
+      term::Clear(term::ClearType::All),
+      cursor::MoveTo(0, 0),
+      cursor::Hide
+    )
+    .unwrap();
+
+    // Track which phrases have been completed
+    let displayed_phrases = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+
+    // Helper function to update display
+    let update_display =
+      |out: &mut std::io::Stdout, completed: &[String], current: Option<&str>| {
+        execute!(out, term::Clear(term::ClearType::All), cursor::MoveTo(0, 0)).unwrap();
+
+        // Show all completed phrases (unhighlighted)
+        for phrase in completed {
+          execute!(out, cursor::MoveToColumn(0)).unwrap();
+          println!("{}", phrase);
+        }
+
+        // Show current phrase with highlight (yellow background, black text)
+        if let Some(curr) = current {
+          execute!(out, cursor::MoveToColumn(0)).unwrap();
+          println!("\x1b[33m{}\x1b[0m", curr);
+        }
+
+        out.flush().unwrap();
+      };
+
+    let mut last_idx = 0;
+
+    // Main TTS loop
+    loop {
+      if should_exit.load(Ordering::SeqCst) {
+        break;
+      }
+
+      let idx = current_phrase.load(Ordering::SeqCst);
+
+      if idx >= phrases.len() {
+        break;
+      }
+
+      // Handle keyboard navigation - user jumped to a different phrase
+      if idx != last_idx {
+        // Clear the display and rebuild from scratch
+        let mut displayed = displayed_phrases.lock().unwrap();
+        displayed.clear();
+        // Add all phrases before the current index
+        for i in 0..idx {
+          displayed.push(phrases[i].clone());
+        }
+        drop(displayed);
+      }
+
+      // Always update last_idx to current
+      last_idx = idx;
+
+      // Check for display update requests from keyboard navigation
+      while display_update_rx.try_recv().is_ok() {
+        // Consume all pending updates
+      }
+
+      if tts_paused.load(Ordering::SeqCst) {
+        thread::sleep(Duration::from_millis(100));
+        continue;
+      }
+
+      let phrase = &phrases[idx];
+
       if !phrase.is_empty() {
         // Strip special characters before TTS
         let cleaned = util::strip_special_chars(phrase);
         if !cleaned.is_empty() {
-          println!("{}", phrase);
+          // Show this phrase as current (highlighted) - THIS IS WHEN IT STARTS PLAYING
+          let displayed = displayed_phrases.lock().unwrap();
+          update_display(&mut out, &displayed, Some(phrase));
+          drop(displayed);
+
           let expected_interrupt = interrupt_counter.load(Ordering::SeqCst);
-          tx_tts.send((cleaned, expected_interrupt, settings.voice.clone())).unwrap();
-          // Wait for TTS to complete this phrase
-          let _ = tts_done_rx.recv();
+          tx_tts
+            .send((cleaned, expected_interrupt, settings.voice.clone()))
+            .unwrap();
+
+          // Wait for TTS synthesis to complete or navigation
+          let mut navigated_away = false;
+          loop {
+            match tts_done_rx.try_recv() {
+              Ok(_) => break,
+              Err(_) => {
+                // Check if user navigated away
+                if current_phrase.load(Ordering::SeqCst) != idx {
+                  // User navigated, break out
+                  navigated_away = true;
+                  break;
+                }
+                if should_exit.load(Ordering::SeqCst) {
+                  break;
+                }
+                thread::sleep(Duration::from_millis(50));
+              }
+            }
+          }
+
+          // Check if we navigated away before continuing
+          if navigated_away {
+            continue; // Skip to next iteration
+          }
+
+          // Wait a bit to ensure playback has started
+          thread::sleep(Duration::from_millis(100));
+
+          // NOW wait for playback to finish - PHRASE STAYS HIGHLIGHTED DURING PLAYBACK
+          while playback_active.load(Ordering::Relaxed) {
+            // Check if user navigated away
+            if current_phrase.load(Ordering::SeqCst) != idx {
+              navigated_away = true;
+              break;
+            }
+            if should_exit.load(Ordering::SeqCst) {
+              break;
+            }
+            thread::sleep(Duration::from_millis(50));
+          }
+
+          // Check if we navigated away before marking as completed
+          if navigated_away {
+            continue; // Skip to next iteration
+          }
+
+          // Add extra delay to ensure audio has fully played
+          thread::sleep(Duration::from_millis(100));
+
+          // NOW that playback is done, move phrase from current to completed (unhighlighted)
+          let mut displayed = displayed_phrases.lock().unwrap();
+          if !displayed.contains(phrase) {
+            displayed.push(phrase.clone());
+          }
+          // Update display immediately to show it as completed (no highlight)
+          update_display(&mut out, &displayed, None);
+          drop(displayed);
+
+          // Only auto-advance if we didn't navigate
+          // Auto-advance only if we weren't interrupted or navigated away
+          let start_idx = idx;
+          // ... existing code remains ...
+          // After playback finished
+          if current_phrase.load(Ordering::SeqCst) == start_idx {
+            current_phrase.fetch_add(1, Ordering::SeqCst);
+          }
         }
       }
     }
 
-    println!("✅ All phrases completed");
-
-    // Stop all threads
-    drop(tx_tts);
-    drop(stop_play_tx);
-    let _ = stop_all_tx.send(());
-    
-    // Wait for threads to finish
-    let _ = tts_handle.join();
-    let _ = play_handle.join();
-
+    print!("\r✅ All phrases completed\n\r");
+    execute!(out, cursor::Show).unwrap();
+    let _ = terminal::disable_raw_mode();
     process::exit(0);
   }
 
@@ -623,6 +862,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         recording_paused_for_key.clone(),
         stop_play_tx_for_key.clone(),
         interrupt_counter.clone(),
+        None, // No read-file mode
       )
     }
   });
