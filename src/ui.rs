@@ -2,7 +2,7 @@
 //  UI
 // ------------------------------------------------------------------
 
-use crate::state::{GLOBAL_STATE, get_speed, get_voice};
+use crate::state::{get_speed, get_voice, GLOBAL_STATE};
 use crossbeam_channel::Receiver;
 use crossterm::{
   cursor::{Hide, MoveTo},
@@ -12,8 +12,8 @@ use crossterm::{
 };
 use std::io::{self, Write};
 use std::sync::{
-  Arc, Mutex,
   atomic::{AtomicBool, Ordering},
+  Arc, Mutex,
 };
 use std::thread;
 use std::time::Duration;
@@ -54,13 +54,10 @@ pub fn spawn_ui_thread(
     .unwrap();
 
     let banner = r#"
-      █████╗ ██╗      ███╗   ███╗ █████╗ ████████╗███████╗
-     ██╔══██╗██║      ████╗ ████║██╔══██╗╚══██╔══╝██╔════╝
-     ███████║██║█████╗██╔████╔██║███████║   ██║   █████╗  
-     ██╔══██║██║╚════╝██║╚██╔╝██║██╔══██║   ██║   ██╔══╝  
-     ██║  ██║██║      ██║ ╚═╝ ██║██║  ██║   ██║   ███████╗
-     ╚═╝  ╚═╝╚═╝      ╚═╝     ╚═╝╚═╝  ╚═╝   ╚═╝   ╚══════╝
-     "#;
+ _______ _____      _______ _______ _______ _______
+ |_____|   |        |  |  | |_____|    |    |______
+ |     | __|__      |  |  | |     |    |    |______
+                                                   "#;
     handle_line_message(
       &mut out,
       banner,
@@ -368,6 +365,9 @@ fn render_bottom_bar<W: Write>(
   status_line: &Arc<Mutex<String>>,
   y: u16,
 ) -> String {
+  if ui_state.quiet {
+    return String::new();
+  }
   let state = GLOBAL_STATE.get().expect("AppState not initialized");
   let agent_name = state.agent_name.lock().unwrap().clone();
   let speak = ui_state.agent_speaking.load(Ordering::Relaxed);

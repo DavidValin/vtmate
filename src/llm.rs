@@ -88,6 +88,7 @@ pub async fn llama_server_stream_response_into(
         let payload = json!({
           "model": llama_model,
           "messages": messages.iter().map(|m| json!({ "role": m.role, "content": m.content })).collect::<Vec<_>>(),
+          "think": false,
           "stream": true
         });
         client.post(&url).json(&payload)
@@ -101,6 +102,7 @@ pub async fn llama_server_stream_response_into(
         let payload = json!({
           "model": llama_model,
           "prompt": prompt_str,
+          "think": false,
           "stream": true,
           "max_tokens": 1024
         });
@@ -110,13 +112,14 @@ pub async fn llama_server_stream_response_into(
         let payload = json!({
           "model": llama_model,
           "messages": messages.iter().map(|m| json!({ "role": m.role, "content": m.content })).collect::<Vec<_>>(),
+          "think": false,
           "stream": true
         });
         client.post(&url).json(&payload)
       }
     };
 
-    let resp = match tokio::time::timeout(std::time::Duration::from_secs(3), req.send()).await {
+    let resp = match tokio::time::timeout(std::time::Duration::from_secs(10), req.send()).await {
       Ok(Ok(r)) => r,
       Ok(Err(e)) => {
         last_err = Some(format!("Request to {} failed: {}", url, e));

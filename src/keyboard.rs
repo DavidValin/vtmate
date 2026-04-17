@@ -71,8 +71,8 @@ pub fn keyboard_thread(
           }
 
           match k.code {
-            KeyCode::Char('u') | KeyCode::Char('U') => {
-              // 'u': previous phrase
+            KeyCode::Up => {
+              // ARROW_UP: previous phrase
               let curr = rfm.current_phrase.load(Ordering::SeqCst);
               if curr > 0 {
                 // Stop current playback
@@ -85,8 +85,8 @@ pub fn keyboard_thread(
                 let _ = rfm.display_update_tx.send(());
               }
             }
-            KeyCode::Char('d') | KeyCode::Char('D') => {
-              // 'd': next phrase
+            KeyCode::Down => {
+              // ARROW_DOWN: next phrase
               let curr = rfm.current_phrase.load(Ordering::SeqCst);
               if curr < rfm.phrases_len - 1 {
                 // Stop current playback
@@ -99,26 +99,23 @@ pub fn keyboard_thread(
                 let _ = rfm.display_update_tx.send(());
               }
             }
-            KeyCode::Char('s') | KeyCode::Char('S') => {
-              // Stop TTS playback
-              rfm.tts_paused.store(true, Ordering::SeqCst);
-              let _ = stop_play_tx.try_send(());
-              interrupt_counter.fetch_add(1, Ordering::SeqCst);
-            }
-            KeyCode::Char('p') | KeyCode::Char('P') => {
-              if (rfm.tts_paused.load(Ordering::SeqCst)) {
-                // Move index back one element
+            KeyCode::Char(' ') => {
+              let paused = rfm.tts_paused.load(Ordering::SeqCst);
+              if paused {
+                // Resume TTS playback - move index back one element if possible
                 let curr = rfm.current_phrase.load(Ordering::SeqCst);
                 if curr > 0 {
                   let _ = stop_play_tx.try_send(());
                   interrupt_counter.fetch_add(1, Ordering::SeqCst);
                   rfm.current_phrase.store(curr - 1, Ordering::SeqCst);
-                  rfm.tts_paused.store(false, Ordering::SeqCst);
                   let _ = rfm.display_update_tx.send(());
                 }
-
-                // Continue TTS playback
                 rfm.tts_paused.store(false, Ordering::SeqCst);
+              } else {
+                // Stop TTS playback
+                rfm.tts_paused.store(true, Ordering::SeqCst);
+                let _ = stop_play_tx.try_send(());
+                interrupt_counter.fetch_add(1, Ordering::SeqCst);
               }
             }
             _ => {}

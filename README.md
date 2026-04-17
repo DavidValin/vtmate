@@ -154,28 +154,73 @@ Explanation on the fields:
 
 The first agent defined in `~/ai-mate/settings` will always be selected agent when running ai-mate, unless `--agent <agent_name>` is used.
 
-**Conversation mode**
-Voice chat with an agent
+Before running ai-mate make sure ollama is running: `ollama serve`
 
+#### Conversation mode
+
+Start conversation (wait for user voice input and respond)
 ```
-ollama serve
 ai-mate --agent "main agent"
+```
+
+Start conversation with an initial text prompt
+```
+ai-mate --agent "main agent" -p "Are we alone in the galaxy?"
+```
+
+Start conversation with an initial prompt from file
+```
+ai-mate --agent "main agent" -i myprompt.txt
+```
+
+Start conversation with an initial prompt from stdin
+```
+echo "How to fly without wings?" | ai-mate --agent "main agent" -i -
 ```
 
 * You can switch agents in realtime by pressing `ARROW_LEFT` / `ARROW_RIGHT` keyword arrows (you need at least 2 agents defined in `~/ai-mate/settings`).
 
-**Debate mode**
+#### Debate mode
+
 Initialize a debate between two agents and be able to participate in the debate by speaking at any time. To create a good debate adjust the system prompts of each agent and give a detailed initial input.
 
+Start a debate with an initial subject
 ```
-ollama serve
-ai-mate --debate "socrates" "seneca" "How to be happy in a busy world?"
+ai-mate --debate "God" "Devil" "How to succeed in life?"
+```
+
+Start a debate with an initial prompt from file
+```
+ai-mate --debate "God" "Devil" -i myprompt.txt
+```
+
+Start a debate with an initial prompt from stdin
+```
+echo "Lets discuss the permissions of this files: \n\n $(ls -la)" | ai-mate --debate "Unix administrator" "Security Expert" -i -
 ```
 
 * You can also start a debate from conversation mode by pressing Control+D and picking the debate agents.
 
-**File to speech**
+#### Single run
+
+Get a single response from prompt
+```
+ai-mate -q -p "Explain me the Zettelkasten Method"
+```
+
+Get a single response from prompt from file
+```
+ai-mate -q -i myprompt.txt
+```
+
+Get a single response from prompt from stdin
+```
+echo "Is $(date) a national holiday day in Spain?" | ai-mate -q -i -
+```
+
+####  File to speech
 Read a text file or stdin text phrase by phrase. Ensure the agent you choose has correct language and voice for your text.
+In this mode, only the next agent settings are used: "tts", "voice" and "language".
 
 from a txt file:
 ```
@@ -189,12 +234,11 @@ ai-mate -r - --agent "main agent"
 
 In this mode you can:
 
-* Move to previous phrase by pressing `U`
-* Move to next phrase by pressing `D`
-* Stop playback by pressing `S`
-* Resume playback by pressing `P`
+* Move to previous phrase by pressing `ARROW_UP`
+* Move to next phrase by pressing `ARROW_DOWN`
+* Stop / Resume playback by pressing `SPACE`
 
-**Other info**
+####  Other info
 
 * If you want to avoid sound interruptions you can use `ptt` mode or increase the `sound_threshold_peak` for your microphone levels.
 * If you want to use OpenTTS, start the docker service first: `docker run --rm --platform=linux/amd64 -p 5500:5500 synesthesiam/opentts:all` (it will pull the image the first time). Adjust the platform as needed depending on your hardware.

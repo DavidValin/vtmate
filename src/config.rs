@@ -6,11 +6,11 @@ use crate::tts;
 use crate::util::get_user_home_path;
 use anyhow::Error;
 use clap::Parser;
-use cpal::Device;
 use cpal::traits::DeviceTrait;
+use cpal::Device;
 use serde::Deserialize;
 use serde_ini::from_str;
-use std::fs::{File, create_dir_all, read_to_string};
+use std::fs::{create_dir_all, read_to_string, File};
 use std::io::Write;
 use std::panic;
 use std::process;
@@ -89,6 +89,17 @@ Explanation on the fields:
 
 "#)]
 pub struct Args {
+  #[arg(short = 'p', long = "prompt", value_name = "PROMPT")]
+  pub prompt: Option<String>,
+
+  #[arg(
+    short = 'i',
+    long = "prompt-file",
+    value_name = "FILE",
+    default_missing_value = "-"
+  )]
+  pub prompt_file: Option<String>,
+
   #[arg(long, action = clap::ArgAction::SetTrue)]
   pub verbose: bool,
 
@@ -101,11 +112,14 @@ pub struct Args {
   #[arg(long)]
   pub ptt: Option<bool>,
 
-  #[arg(long, num_args=3.., value_name = "AGENT1 AGENT2 SUBJECT")]
+  #[arg(long, num_args=2.., value_name = "AGENT1 AGENT2 SUBJECT")]
   pub debate: Option<Vec<String>>,
 
   #[arg(short = 'r', long = "read-file", value_name = "FILENAME")]
   pub read_file: Option<String>,
+
+  #[arg(short = 'q', long = "quiet", action = clap::ArgAction::SetTrue)]
+  pub quiet: bool,
 }
 
 // internal static values

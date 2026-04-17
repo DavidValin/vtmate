@@ -429,7 +429,7 @@ pub fn speak_via_kokoro_stream(
       // crate::log::log("info", "TTS synthesis completed, audio chunks sent to playback");
       Ok(SpeakOutcome::Completed)
     }
-    Err(e) => {
+    Err(_e) => {
       // crate::log::log("info", &format!("TTS synthesis interrupted or failed: {:?}", e));
       Ok(SpeakOutcome::Interrupted)
     }

@@ -140,3 +140,20 @@ pub fn resample_to(input: &[f32], channels: u16, in_sr: u32, out_sr: u32) -> Vec
     resample_interleaved_linear(input, channels, in_sr, out_sr)
   }
 }
+
+pub fn convert_to_mono(utt: &crate::audio::AudioChunk) -> Vec<f32> {
+  let pcm_f32 = &utt.data;
+  if utt.channels == 1 {
+    pcm_f32.clone()
+  } else {
+    let ch = utt.channels as usize;
+    let frames = pcm_f32.len() / ch;
+    let mut mono = Vec::with_capacity(frames);
+    for f in 0..frames {
+      let start = f * ch;
+      let sum: f32 = pcm_f32[start..start + ch].iter().sum();
+      mono.push(sum / ch as f32);
+    }
+    mono
+  }
+}

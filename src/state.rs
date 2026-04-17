@@ -15,6 +15,7 @@ pub struct UiState {
   pub agent_speaking: Arc<AtomicBool>, // voice activity flag
   pub peak: Arc<Mutex<f32>>,           // current audio peak
   pub spinner_index: usize,
+  pub quiet: bool,
 }
 
 #[derive(Debug)]
@@ -76,6 +77,7 @@ impl AppState {
         agent_speaking: Arc::new(AtomicBool::new(false)), // tts synthesizing
         peak: Arc::new(Mutex::new(0.0)),
         spinner_index: 0,
+        quiet: false,
       },
       speed: AtomicU32::new(12),
       conversation_history: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
@@ -108,8 +110,10 @@ impl AppState {
   pub fn with_agent(
     settings: crate::config::AgentSettings,
     agents: Vec<crate::config::AgentSettings>,
+    quiet: bool,
   ) -> Self {
     let mut state = Self::new();
+    state.ui.quiet = quiet;
     // SAFETY: we have exclusive access to the Mutex here.
     *state.voice.lock().unwrap() = settings.voice.clone();
     *state.agent_name.lock().unwrap() = settings.name.clone();
