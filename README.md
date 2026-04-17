@@ -4,7 +4,7 @@ Powerful ai toolkit to interact with ai models via voice from your terminal at e
 
 Finally the cross platform voice ui you were waiting on now available for MacOS, Windows and Linux, no need for external installations.
 
-🚀🚀🚀 NOW automated ai agents debate possible. Initialize an infinite debate between two agents and interrupt at any time to change the subject
+🚀 Now it also supports automatic infinite debates between agents. Listen and learn, and you can participate in the debate too via voice
 
 #### **Sponsor this project**
 [![Sponsor ai-mate](https://img.shields.io/static/v1?label=Sponsor&message=%E2%9D%A4&logo=GitHub&color=%23fe8e86)](https://github.com/sponsors/DavidValin)
