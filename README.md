@@ -1,8 +1,8 @@
-## the final AI voice conversational system all running in your terminal!
+## The final AI voice conversational system all running in your terminal!
 
-As easy as it sounds. Includes all you need to voice chat with ai models.
-Finally the cross platform voice ui you were waiting on now available
-for MacOS, Windows and Linux, no need for external installations.
+Powerful ai toolkit to interact with ai models via voice from your terminal at extremely low latency with realistic voices. Allows live voice conversations and run debates between ai agents with user intervention, stdin and text file inputs and more
+
+Finally the cross platform voice ui you were waiting on now available for MacOS, Windows and Linux, no need for external installations.
 
 🚀🚀🚀 NOW automated ai agents debate possible. Initialize an infinite debate between two agents and interrupt at any time to change the subject
 
@@ -10,10 +10,6 @@ for MacOS, Windows and Linux, no need for external installations.
 [![Sponsor ai-mate](https://img.shields.io/static/v1?label=Sponsor&message=%E2%9D%A4&logo=GitHub&color=%23fe8e86)](https://github.com/sponsors/DavidValin)
 
 ![ai mate screenshot](https://github.com/DavidValin/ai-mate/raw/main/preview.png)
-
-<img src="https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/docs/keyboard/agent-switch.jpg" width="49.3%" height="auto"> <img src="https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/docs/keyboard/change-voice-speed.jpg" width="49.3%" height="auto">
-
-<img src="https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/docs/keyboard/push-to-talk.jpg" width="49.3%" height="auto"> <img src="https://raw.githubusercontent.com/DavidValin/ai-mate/refs/heads/main/docs/keyboard/stop-record.jpg" width="49.3%" height="auto">
 
 ### English demo
 https://github.com/user-attachments/assets/d9c27108-41f7-4148-8c32-28c8ca6d8516
@@ -72,25 +68,6 @@ You can run the models locally (by default) or remotely by configuring the base 
 - ✅ Kokoro TTS (default and integrated)
 - ✅ OpenTTS (requires external service)
 
-## Acceleration support
-
-Do you have GPU? (nvidia? an apple computer?) Great! then ai-mate speed is at lighting speed =)
-
-* To be able to use acceleration, pick the built version for your hardware from [Releases list](https://github.com/DavidValin/ai-mate/releases)
-* For CUDA install CUDA Toolkit. For Vulkan install VULKAN SDK
-
-```
-Platform   Arch    CPU    OpenBLAS   CUDA   Metal   Vulkan
---------   ----    ---    --------   ----   -----   ------
-macOS      ARM64   ✅    optional     n/a     ✅      ⚠️
-Linux      AMD64   ✅       ✅        ✅      n/a     ⚠️
-Linux      ARM64   ✅       ✅        ⚠️      n/a     ⚠️
-Windows    x86     ✅       ✅        ✅      n/a     ⚠️
-Windows    ARM64   ✅       ⚠️        ⚠️      n/a     ⚠️
-```
-
-⚠️ Currently working on full static builds for all OS. You can download a release or build it yourself
-
 ## Installation
 
 ### 📌 1. **Download ai-mate**
@@ -117,7 +94,9 @@ Option B- llama-server support.
 
 ## Configure agents
 
-The first time you run ai-mate it will create a configuration file if it doesn't exist in `~/.ai-mate/settings`. Example:
+The first time you run ai-mate it will create a configuration file if it doesn't exist in `~/.ai-mate/settings` with 2 agents. You can define as many agents as you want.
+
+Example of agent definition:
 
 ```
 [agent]
@@ -135,20 +114,10 @@ ptt = false
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 ```
 
-Explanation on the fields:
-
-* **name**: a short name for the agent
-* **language**: any of the languages available used for speech recognition and tts
-* **voice**: the voice name to use by the agent (see available voices for each language and tts system running `ai-mate --list-voices`)
-* **provider**: the system it will use to query the llm, it can be `ollama` or `llama-server`
-* **baseurl**: the base url used to contact the provider (it needs to be without path)
-* **model**: the model name to use in ollama (some llama-server versions will ignore this option as llama-server runs for a single model)
-* **system_prompt**: the system prompt to be sent to the llm when querying it
-* **sound_threshold_peak**: a value between 0 and 1 which will be used as a peak base to detect user speech
-* **end_silence_ms**: the milliseconds of silence below sound_threshold_peak level that have to elapse for user speech to be submitted
-* **tts**: the tts system to use, it can be `kokoro` or `opentts`
-* **ptt**: push to talk mode, when its set to true you have to keep the space pushed while speaking, then release.
-* **whisper_model_path**: the path to the whisper model. ai-mate unzips 2 models in ~/.whisper-models, tiny and small. You can download bigger models and point to them here
+To see explanation of each field:
+```
+ai-mate --help
+```
 
 ## How to use it
 
@@ -179,6 +148,7 @@ echo "How to fly without wings?" | ai-mate --agent "main agent" -i -
 ```
 
 * You can switch agents in realtime by pressing `ARROW_LEFT` / `ARROW_RIGHT` keyword arrows (you need at least 2 agents defined in `~/ai-mate/settings`).
+* You can change the voice speed by pressing `ARROW_UP` / `ARROW_DOWN`
 
 #### Debate mode
 
@@ -199,7 +169,7 @@ Start a debate with an initial prompt from stdin
 echo "Lets discuss the permissions of this files: \n\n $(ls -la)" | ai-mate --debate "Unix administrator" "Security Expert" -i -
 ```
 
-* You can also start a debate from conversation mode by pressing Control+D and picking the debate agents.
+* You can also start/stop a debate from conversation mode by pressing `Control+D` and picking the debate agents.
 
 #### Single run
 
@@ -238,7 +208,15 @@ In this mode you can:
 * Move to next phrase by pressing `ARROW_DOWN`
 * Stop / Resume playback by pressing `SPACE`
 
-####  Other info
+####  Useful to know
+
+ai-mate self contains espeak-ng-data, the whisper tiny & small models and kokoro model and voices which will be autoextracted when running ai-mate if they are not found in next locations:
+
+- `~/.ai-mate/espeak-ng-data.tar.gz`
+- `~/.whisper-models/ggml-tiny.bin`
+- `~/.whisper-models/ggml-small.bin`
+- `~/.cache/k/0.onnx`
+- `~/.cache/k/0.bin`
 
 * If you want to avoid sound interruptions you can use `ptt` mode or increase the `sound_threshold_peak` for your microphone levels.
 * If you want to use OpenTTS, start the docker service first: `docker run --rm --platform=linux/amd64 -p 5500:5500 synesthesiam/opentts:all` (it will pull the image the first time). Adjust the platform as needed depending on your hardware.
@@ -250,6 +228,58 @@ If you need help:
 ```
 ai-mate --help
 ```
+
+## Acceleration support
+
+Do you have GPU? (nvidia? an apple computer?) Great! then ai-mate speed is at lighting speed =)
+
+* To be able to use acceleration, pick the built version for your hardware from [Releases list](https://github.com/DavidValin/ai-mate/releases)
+* For CUDA install CUDA Toolkit. For Vulkan install VULKAN SDK
+
+```
+Platform   Arch    CPU    OpenBLAS   CUDA   Metal   Vulkan
+--------   ----    ---    --------   ----   -----   ------
+macOS      ARM64   ✅    optional     n/a     ✅      ⚠️
+Linux      AMD64   ✅       ✅        ✅      n/a     ⚠️
+Linux      ARM64   ✅       ✅        ⚠️      n/a     ⚠️
+Windows    x86     ✅       ✅        ✅      n/a     ⚠️
+Windows    ARM64   ✅       ⚠️        ⚠️      n/a     ⚠️
+```
+
+⚠️ Currently working on full static builds for all OS. You can download a release or build it yourself
+
+## Language support
+
+| ID |           Language           |      Support       |        TTS supported           |
+|----|------------------------------|--------------------|--------------------------------|
+| en |       🇺🇸  English            |  🏆 Best support   |    ✅ Kokoro    ✅ OpenTTS     |
+| es |       🇪🇸  Spanish            |  🏆 Best support   |    ✅ Kokoro    ✅ OpenTTS     |
+| zh |       🇨🇳  Mandarin Chinese   |  🏆 Best support   |    ✅ Kokoro    ✅ OpenTTS     |
+| ja |       🇯🇵  Japanese           |  🏆 Best support   |    ✅ Kokoro    ✅ OpenTTS     |
+| pt |       🇵🇹  Portuguese         |  🏆 Best support   |    ✅ Kokoro    ❌ OpenTTS     |
+| it |       🇮🇹  Italian            |  🏆 Best support   |    ✅ Kokoro    ✅ OpenTTS     |
+| hi |       🇮🇳  Hindi              |  🏆 Best support   |    ✅ Kokoro    ✅ OpenTTS     |
+| fr |       🇫🇷  French             |  🏆 Best support   |    ✅ Kokoro    ✅ OpenTTS     |
+| ar |       🇸🇦  Arabic             |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
+| bn |       🇧🇩  Bengali            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
+| ca |       🇪🇸  Catalan            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
+| cs |       🇨🇿  Czech              |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
+| de |       🇩🇪  German             |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
+| el |       🇬🇷  Greek              |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
+| fi |       🇫🇮  Finnish            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
+| gu |       🇮🇳  Gujarati           |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
+| hu |       🇭🇺  Hungarian          |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
+| kn |       🇮🇳  Kannada            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
+| ko |       🇰🇷  Korean             |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
+| mr |       🇮🇳  Marathi            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
+| nl |       🇳🇱  Dutch              |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
+| pa |       🇮🇳  Punjabi            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
+| ru |       🇷🇺  Russian            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
+| sv |       🇸🇪  Swedish            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
+| sw |       🇰🇪  Swahili            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
+| ta |       🇮🇳  Tamil              |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
+| te |       🇮🇳  Telugu             |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
+| tr |       🇹🇷  Turkish            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
 
 ## Build ai-mate from source code
 
@@ -297,48 +327,5 @@ build_windows.bat cuda
 build_windows.bat openblas
 build_windows.bat vulkan
 ```
-
-## Useful to know
-
-ai-mate self contains espeak-ng-data, the whisper tiny & small models and kokoro model and voices which will be autoextracted when running ai-mate if they are not found in next locations:
-
-- `~/.ai-mate/espeak-ng-data.tar.gz`
-- `~/.whisper-models/ggml-tiny.bin`
-- `~/.whisper-models/ggml-small.bin`
-- `~/.cache/k/0.onnx`
-- `~/.cache/k/0.bin`
-
-## Language support
-
-| ID |           Language           |      Support       |        TTS supported           |
-|----|------------------------------|--------------------|--------------------------------|
-| en |       🇺🇸  English            |  🏆 Best support   |    ✅ Kokoro    ✅ OpenTTS     |
-| es |       🇪🇸  Spanish            |  🏆 Best support   |    ✅ Kokoro    ✅ OpenTTS     |
-| zh |       🇨🇳  Mandarin Chinese   |  🏆 Best support   |    ✅ Kokoro    ✅ OpenTTS     |
-| ja |       🇯🇵  Japanese           |  🏆 Best support   |    ✅ Kokoro    ✅ OpenTTS     |
-| pt |       🇵🇹  Portuguese         |  🏆 Best support   |    ✅ Kokoro    ❌ OpenTTS     |
-| it |       🇮🇹  Italian            |  🏆 Best support   |    ✅ Kokoro    ✅ OpenTTS     |
-| hi |       🇮🇳  Hindi              |  🏆 Best support   |    ✅ Kokoro    ✅ OpenTTS     |
-| fr |       🇫🇷  French             |  🏆 Best support   |    ✅ Kokoro    ✅ OpenTTS     |
-| ar |       🇸🇦  Arabic             |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| bn |       🇧🇩  Bengali            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| ca |       🇪🇸  Catalan            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| cs |       🇨🇿  Czech              |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| de |       🇩🇪  German             |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| el |       🇬🇷  Greek              |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| fi |       🇫🇮  Finnish            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| gu |       🇮🇳  Gujarati           |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| hu |       🇭🇺  Hungarian          |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| kn |       🇮🇳  Kannada            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| ko |       🇰🇷  Korean             |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| mr |       🇮🇳  Marathi            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| nl |       🇳🇱  Dutch              |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| pa |       🇮🇳  Punjabi            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| ru |       🇷🇺  Russian            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| sv |       🇸🇪  Swedish            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| sw |       🇰🇪  Swahili            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| ta |       🇮🇳  Tamil              |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| te |       🇮🇳  Telugu             |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| tr |       🇹🇷  Turkish            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
 
 Have fun o:)
