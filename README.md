@@ -116,6 +116,8 @@ ptt = false
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 ```
 
+* Voice mixing is supported, you can create a voice by mixing 2 voices by percentage. Example mixing 50% of bm_daniel and 50% of am_puck: set voice name to `bm_daniel.5+am_puck.5`
+
 To see explanation of each field:
 ```
 ai-mate --help
