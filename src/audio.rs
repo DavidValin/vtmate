@@ -14,21 +14,34 @@ pub struct AudioChunk {
   pub sample_rate: u32,
 }
 
+/// Convert a slice of f32 samples to 16‑bit signed PCM.
+pub fn f32_to_i16(samples: &[f32]) -> Vec<i16> {
+  samples
+    .iter()
+    .map(|s| {
+      let v = s.clamp(-1.0, 1.0);
+      (v * i16::MAX as f32) as i16
+    })
+    .collect()
+}
+
+/// Append silence of given duration in milliseconds to a buffer of i16 samples.
+pub fn add_silence(buf: &mut Vec<i16>, sample_rate: u32, duration_ms: u32) {
+  let samples = (sample_rate * duration_ms / 1000) as usize;
+  buf.extend(std::iter::repeat(0_i16).take(samples));
+}
+
 pub fn pick_input_stream(host: &cpal::Host) -> Result<(cpal::Device, cpal::Stream), String> {
   let err = || {
     "No usable microphone stream could be opened.\n".to_string()
       + "    • On MacOS: System Settings → Privacy & Security → Microphone → allow your app/Terminal\n"
       + "    • Also check System Settings → Sound → Input\n"
   };
-
   let dev = host.default_input_device().ok_or_else(err)?;
-
   let cfg = dev.default_input_config().map_err(|_| err())?;
-
   let stream = dev
     .build_input_stream(&cfg.clone().into(), |_data: &[f32], _| {}, |_err| {}, None)
     .map_err(|_| err())?;
-
   Ok((dev, stream))
 }
 
@@ -37,10 +50,8 @@ pub fn pick_output_stream(host: &cpal::Host) -> Result<(cpal::Device, cpal::Stre
     "No usable output stream could be opened.".to_string()
       + "   • On MacOS: System Settings → Sound → Output (select a device)"
   };
-
   let dev = host.default_output_device().ok_or_else(err)?;
   let cfg = dev.default_output_config().map_err(|_| err())?;
-
   let stream = dev
     .build_output_stream(
       &cfg.clone().into(),
@@ -49,7 +60,6 @@ pub fn pick_output_stream(host: &cpal::Host) -> Result<(cpal::Device, cpal::Stre
       None,
     )
     .map_err(|_| err())?;
-
   Ok((dev, stream))
 }
 
@@ -63,10 +73,8 @@ pub fn resample_interleaved_linear(
   if in_sr == out_sr || input.is_empty() {
     return input.to_vec();
   }
-
   let ch = channels as usize;
   let frames = input.len() / ch;
-
   // De-interleave
   let mut per_ch: Vec<Vec<f32>> = vec![Vec::with_capacity(frames); ch];
   for f in 0..frames {
@@ -74,14 +82,10 @@ pub fn resample_interleaved_linear(
       per_ch[c].push(input[f * ch + c]);
     }
   }
-
-  // Resample each channel
   let mut per_ch_rs: Vec<Vec<f32>> = Vec::with_capacity(ch);
   for c in 0..ch {
     per_ch_rs.push(resample_linear(&per_ch[c], in_sr, out_sr));
   }
-
-  // Re-interleave
   let out_frames = per_ch_rs[0].len();
   let mut out = Vec::with_capacity(out_frames * ch);
   for f in 0..out_frames {
@@ -89,7 +93,6 @@ pub fn resample_interleaved_linear(
       out.push(per_ch_rs[c][f]);
     }
   }
-
   out
 }
 
@@ -101,7 +104,6 @@ pub fn resample_linear(input: &[f32], in_sr: u32, out_sr: u32) -> Vec<f32> {
   let ratio = out_sr as f64 / in_sr as f64;
   let out_len = ((input.len() as f64) * ratio).round() as usize;
   let mut out = Vec::with_capacity(out_len);
-
   for i in 0..out_len {
     let src_pos = (i as f64) / ratio;
     let idx = src_pos.floor() as usize;
@@ -114,8 +116,6 @@ pub fn resample_linear(input: &[f32], in_sr: u32, out_sr: u32) -> Vec<f32> {
 }
 
 pub fn resample_to(input: &[f32], channels: u16, in_sr: u32, out_sr: u32) -> Vec<f32> {
-  // DEBUG: log resampling details
-  // Use the custom log module if available
   #[allow(unused_imports)]
   use std::fmt::Debug;
   // crate::log::log(

@@ -352,7 +352,7 @@ pub fn keyboard_thread(
               recording_paused.store(false, Ordering::Relaxed);
             }
             // Reset conversation history when changing agents
-            state.conversation_history.lock().unwrap().clear();
+            state.reset_conversation();
             let _ = tx_ui.send(format!(
               "line|\n\x1b[32m🤖 Agent switched to '\x1b[37m{}\x1b[0m\x1b[32m' language: \x1b[37m{}\x1b[0m",
               new_agent.name,
@@ -386,7 +386,7 @@ pub fn keyboard_thread(
               recording_paused.store(false, Ordering::Relaxed);
             }
             // Reset conversation history when changing agents
-            state.conversation_history.lock().unwrap().clear();
+            state.reset_conversation();
             let _ = tx_ui.send(format!(
               "line|\n\x1b[32m🤖 Agent switched to '\x1b[37m{}\x1b[0m\x1b[32m' language: \x1b[37m{}\x1b[0m",
               new_agent.name,

@@ -517,7 +517,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     agents.clone(),
     args.quiet,
   ));
-  
+
   state::GLOBAL_STATE.set(state.clone()).unwrap();
 
   // If initial prompt provided, process it before starting conversation thread
@@ -779,6 +779,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       tts_done_rx_for_conv.clone(),
       init_prompt_for_conv,
       args.quiet,
+      args.save,
     )
   });
 

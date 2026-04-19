@@ -4,6 +4,7 @@
 
 use crate::state::GLOBAL_STATE;
 use cpal::traits::{DeviceTrait, StreamTrait};
+use crossbeam_channel::Sender;
 use crossbeam_channel::{Receiver, select};
 use std::collections::VecDeque;
 use std::sync::OnceLock;
@@ -16,6 +17,13 @@ use std::time::Duration;
 use std::time::Instant;
 
 // API
+
+static WAV_TX: OnceLock<Sender<crate::audio::AudioChunk>> = OnceLock::new();
+
+/// Set the global channel used by the WAV writer thread.
+pub fn set_wav_tx(tx: Sender<crate::audio::AudioChunk>) {
+  WAV_TX.set(tx).ok();
+}
 // ------------------------------------------------------------------
 
 pub fn playback_thread(
@@ -288,6 +296,25 @@ pub fn playback_thread(
         }
         recv(rx_audio) -> msg => {
           let Ok(chunk) = msg else { break };
+          // Forward to wav writer if set
+          if let Some(tx) = WAV_TX.get() {
+            // Determine data that will actually be played
+            let mut out_data = if chunk.channels != out_channels {
+              convert_channels(&chunk.data, chunk.channels, out_channels)
+            } else {
+              chunk.data.clone()
+            };
+            if chunk.sample_rate != config.sample_rate.0 {
+              let resampled = crate::audio::resample_to(&out_data, out_channels, chunk.sample_rate, config.sample_rate.0);
+              out_data = resampled;
+            }
+            let writer_chunk = crate::audio::AudioChunk {
+              data: out_data,
+              channels: out_channels,
+              sample_rate: config.sample_rate.0,
+            };
+            tx.send(writer_chunk).unwrap_or(());
+          }
           if interrupted {
             // Drop any audio received during interrupt
             continue;

@@ -57,6 +57,8 @@ pub struct AppState {
   pub debate_modal_selected_agent1: Arc<Mutex<usize>>,
   pub debate_modal_selected_agent2: Arc<Mutex<usize>>,
   pub debate_modal_focus: Arc<Mutex<u8>>, // 0 = agent1, 1 = agent2, 2 = confirm
+  pub save_path: Arc<Mutex<Option<std::path::PathBuf>>>,
+  pub start_date: Arc<Mutex<String>>,
 }
 
 impl AppState {
@@ -103,6 +105,8 @@ impl AppState {
       debate_modal_selected_agent1: Arc::new(Mutex::new(0)),
       debate_modal_selected_agent2: Arc::new(Mutex::new(1)),
       debate_modal_focus: Arc::new(Mutex::new(0)),
+      save_path: Arc::new(Mutex::new(None)),
+      start_date: Arc::new(Mutex::new(String::new())),
     }
   }
 
@@ -127,6 +131,12 @@ impl AppState {
     state.ptt.store(settings.ptt, Ordering::Relaxed);
     state.agents = Arc::new(agents);
     state
+  }
+
+  pub fn reset_conversation(&self) {
+    self.conversation_history.lock().unwrap().clear();
+    *self.save_path.lock().unwrap() = None;
+    *self.start_date.lock().unwrap() = String::new();
   }
 }
 

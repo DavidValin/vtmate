@@ -2,7 +2,7 @@
 //  UI
 // ------------------------------------------------------------------
 
-use crate::state::{get_speed, get_voice, GLOBAL_STATE};
+use crate::state::{GLOBAL_STATE, get_speed, get_voice};
 use crossbeam_channel::Receiver;
 use crossterm::{
   cursor::{Hide, MoveTo},
@@ -12,8 +12,8 @@ use crossterm::{
 };
 use std::io::{self, Write};
 use std::sync::{
-  atomic::{AtomicBool, Ordering},
   Arc, Mutex,
+  atomic::{AtomicBool, Ordering},
 };
 use std::thread;
 use std::time::Duration;
@@ -26,6 +26,14 @@ pub static STOP_STREAM: AtomicBool = AtomicBool::new(false);
 // ANSI labels
 pub const USER_LABEL: &str = "\x1b[47;30mUSER:\x1b[0m";
 pub const ASSIST_LABEL: &str = "\x1b[48;5;22;37mASSISTANT:\x1b[0m";
+
+pub fn get_banner() -> &'static str {
+  r#"
+  _______ _____      _______ _______ _______ _______
+  |_____|   |        |  |  | |_____|    |    |______
+  |     | __|__      |  |  | |     |    |    |______
+                                                    "#
+}
 
 const CHAR_DELAY_MS: u64 = 4;
 
@@ -53,11 +61,7 @@ pub fn spawn_ui_thread(
     )
     .unwrap();
 
-    let banner = r#"
- _______ _____      _______ _______ _______ _______
- |_____|   |        |  |  | |_____|    |    |______
- |     | __|__      |  |  | |     |    |    |______
-                                                   "#;
+    let banner = get_banner();
     handle_line_message(
       &mut out,
       banner,
