@@ -106,6 +106,9 @@ pub struct Args {
   #[arg(long, action=clap::ArgAction::SetTrue)]
   pub list_voices: bool,
 
+  #[arg(short = 'c', long = "config", value_name = "CONFIG_FILE")]
+  pub config: Option<String>,
+
   #[arg(long, value_parser=validate_agent_name)]
   pub agent: Option<String>,
 
