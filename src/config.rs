@@ -51,36 +51,52 @@ Settings file is at ~/.ai-mate/settings
 Explanation on the fields:
 
   * name:                 a short name for the agent
+
   * language:             any of the languages available used
                           for speech recognition and tts
+
   * voice:                the voice name to use by the
                           agent (see available voices for each
                           language and tts system running
-                          `ai-mate --list-voices`)
+                          `ai-mate --list-voices`).
+
+                          Voice mixing:
+                            you can mix 2 voices. example of mixing
+                            50% of bm_daniel and 50% of am_puck:
+                            "bm_daniel.5+am_puck.5"
+
   * provider:             the system it will use to query
                           the llm, it can be 'ollama' or
                           'llama-server'
+
   * baseurl:              the base url used to contact the
                           provider (it needs to be without path)
+
   * model:                the model name to use in ollama
                           (some llama-server versions will
                           ignore this option as llama-server
                           runs for a single model)
+
   * system_prompt:        the system prompt to be sent to
                           the llm when querying it.
                           Use \n for new lines
+
   * sound_threshold_peak: a value between 0 and 1 which will
                           be used as a peak base to detect
                           user speech
+
   * end_silence_ms:       the milliseconds of silence below
                           sound_threshold_peak level that
                           have to elapse for user speech
                           to be submitted
+
   * tts:                  the tts system to use, it can be
                           'kokoro' or 'opentts'
+
   * ptt:                  push to talk mode, when its set
                           to true you have to keep the space
                           pushed while speaking, then release.
+
   * whisper_model_path:   the path to the whisper model.
                           ai-mate unzips 2 models in
                           ~/.whisper-models, tiny and small.
@@ -467,6 +483,7 @@ fn validate_language(language: &str, tts: &str) -> Result<(), std::io::Error> {
 }
 
 fn validate_voice(voice: &str, language: &str, tts: &str) -> Result<(), std::io::Error> {
+  // Validate voice format, supports mix of two voices
   let lang_clean = language.trim_matches('"');
   let voices = tts::get_voices_for(tts, lang_clean);
   if voices.is_empty() {
@@ -478,17 +495,11 @@ fn validate_voice(voice: &str, language: &str, tts: &str) -> Result<(), std::io:
       ),
     ));
   }
-
   let voice_clean = voice.trim_matches('"');
-  if !voices.iter().any(|v| *v == voice_clean) {
-    return Err(std::io::Error::new(
-      std::io::ErrorKind::Other,
-      format!("Unsupported voice '{}' for language {}", voice, language),
-    ));
-  } else {
-    Ok(())
-  }
+  // Call helper for validation
+  validate_voice_value(voice_clean, &voices, language)
 }
+
 
 fn validate_tts(tts: &str) -> Result<(), std::io::Error> {
   if tts != "kokoro" && tts != "opentts" {
@@ -499,6 +510,64 @@ fn validate_tts(tts: &str) -> Result<(), std::io::Error> {
   }
   Ok(())
 }
+
+// Voice mix validation helper
+fn validate_voice_value(voice: &str, voices: &Vec<&str>, language: &str) -> Result<(), std::io::Error> {
+  // If no mix, validate single voice
+  if !voice.contains('+') {
+    if voices.iter().any(|&v| v == voice) {
+      return Ok(());
+    } else {
+      return Err(std::io::Error::new(
+        std::io::ErrorKind::Other,
+        format!("Unsupported voice '{}' for language {}", voice, language),
+      ));
+    }
+  }
+
+  // Parse mix format <v1>.<w1>+<v2>.<w2>
+  let parts: Vec<&str> = voice.split('+').collect();
+  if parts.len() != 2 {
+    return Err(std::io::Error::new(
+      std::io::ErrorKind::Other,
+      format!("Unsupported voice '{}' for language {}", voice, language),
+    ));
+  }
+  let mut total_weight = 0u32;
+  for part in parts {
+    let subparts: Vec<&str> = part.split('.').collect();
+    if subparts.len() != 2 {
+      return Err(std::io::Error::new(
+        std::io::ErrorKind::Other,
+        format!("Unsupported voice '{}' for language {}", voice, language),
+      ));
+    }
+    let name = subparts[0];
+    let weight_str = subparts[1];
+    if weight_str.len() != 1 || !weight_str.chars().all(|c| c.is_ascii_digit()) {
+      return Err(std::io::Error::new(
+        std::io::ErrorKind::Other,
+        format!("Unsupported voice '{}' for language {}", voice, language),
+      ));
+    }
+    let weight: u32 = weight_str.parse().unwrap();
+    total_weight += weight;
+    if !voices.iter().any(|&v| v == name) {
+      return Err(std::io::Error::new(
+        std::io::ErrorKind::Other,
+        format!("Unsupported voice '{}' for language {}", voice, language),
+      ));
+    }
+  }
+  if total_weight != 10 {
+    return Err(std::io::Error::new(
+      std::io::ErrorKind::Other,
+      format!("Voice mix '{}' does not sum to 100%", voice),
+    ));
+  }
+  Ok(())
+}
+
 
 fn validate_provider(provider: &str) -> Result<(), std::io::Error> {
   if provider != "ollama" && provider != "llama-server" {
