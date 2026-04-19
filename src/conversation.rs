@@ -101,52 +101,7 @@ pub fn conversation_thread(
 
     // Setup save path and WAV writer if saving is requested
     if save {
-      let state = GLOBAL_STATE.get().expect("AppState not initialized");
-      if state.save_path.lock().unwrap().is_none() {
-        let now = Local::now();
-        let date_str = now.format("%Y-%m-%d_%H-%M-%S").to_string();
-        let uuid_str = &Uuid::new_v4().to_string()[..8];
-        let home = crate::util::get_user_home_path().ok_or("Unable to determine home directory")?;
-        let path = home
-          .join(".ai-mate")
-          .join("conversations")
-          .join(format!("{}_{}.txt", date_str, uuid_str));
-
-        *state.save_path.lock().unwrap() = Some(path);
-        *state.start_date.lock().unwrap() = date_str;
-
-        // Start WAV writer thread
-        if let Some(txt_path) = state.save_path.lock().unwrap().clone() {
-          let wav_path = txt_path.with_extension("wav");
-          let (wav_tx, wav_rx) = crossbeam_channel::unbounded::<crate::audio::AudioChunk>();
-          set_wav_tx(wav_tx.clone());
-          std::thread::spawn(move || {
-            let mut writer: Option<hound::WavWriter<std::io::BufWriter<std::fs::File>>> = None;
-            while let Ok(chunk) = wav_rx.recv() {
-              if writer.is_none() {
-                let spec = hound::WavSpec {
-                  channels: chunk.channels,
-                  sample_rate: chunk.sample_rate,
-                  bits_per_sample: 16,
-                  sample_format: hound::SampleFormat::Int,
-                };
-                writer = Some(hound::WavWriter::create(&wav_path, spec).unwrap());
-              }
-              let samples = crate::audio::f32_to_i16(&chunk.data);
-              for s in samples {
-                writer.as_mut().unwrap().write_sample(s).unwrap();
-              }
-              let silence_samples =
-                (chunk.sample_rate * 500 / 1000) as usize * chunk.channels as usize;
-              for _ in 0..silence_samples {
-                writer.as_mut().unwrap().write_sample(0_i16).unwrap();
-              }
-              writer.as_mut().unwrap().flush().unwrap();
-            }
-          });
-          wav_tx_opt = Some(wav_tx);
-        }
-      }
+      maybe_setup_and_save(&mut wav_tx_opt, &conversation_history, &settings_clone, save)?;
     }
 
     let rt = TokioBuilder::new_current_thread()
@@ -227,55 +182,7 @@ pub fn conversation_thread(
     let state = GLOBAL_STATE.get().expect("AppState not initialized");
 
     if save && state.save_path.lock().unwrap().is_none() {
-      let now = Local::now();
-      let date_str = now.format("%Y-%m-%d_%H-%M-%S").to_string();
-      let uuid_str = &Uuid::new_v4().to_string()[..8];
-      let home = crate::util::get_user_home_path().ok_or("Unable to determine home directory")?;
-      let path = home
-        .join(".ai-mate")
-        .join("conversations")
-        .join(format!("{}_{}.txt", date_str, uuid_str));
-
-      *state.save_path.lock().unwrap() = Some(path);
-      *state.start_date.lock().unwrap() = date_str;
-
-      // Initial save with banner
-      // Start WAV writer thread if saving is enabled
-      if save {
-        if let Some(txt_path) = state.save_path.lock().unwrap().clone() {
-          let wav_path = txt_path.with_extension("wav");
-          let (wav_tx, wav_rx) = crossbeam_channel::unbounded::<crate::audio::AudioChunk>();
-          set_wav_tx(wav_tx.clone());
-          std::thread::spawn(move || {
-            let mut writer: Option<hound::WavWriter<std::io::BufWriter<std::fs::File>>> = None;
-            while let Ok(chunk) = wav_rx.recv() {
-              if writer.is_none() {
-                let spec = hound::WavSpec {
-                  channels: chunk.channels,
-                  sample_rate: chunk.sample_rate,
-                  bits_per_sample: 16,
-                  sample_format: hound::SampleFormat::Int,
-                };
-                writer = Some(hound::WavWriter::create(&wav_path, spec).unwrap());
-              }
-              let samples = crate::audio::f32_to_i16(&chunk.data);
-              for s in samples {
-                writer.as_mut().unwrap().write_sample(s).unwrap();
-              }
-              let silence_samples =
-                (chunk.sample_rate * 500 / 1000) as usize * chunk.channels as usize;
-              for _ in 0..silence_samples {
-                writer.as_mut().unwrap().write_sample(0_i16).unwrap();
-              }
-              writer.as_mut().unwrap().flush().unwrap();
-            }
-          });
-          // Store the tx for later use
-          wav_tx_opt = Some(wav_tx);
-        }
-      }
-
-      perform_save(&conversation_history);
+      maybe_setup_and_save(&mut wav_tx_opt, &conversation_history, &settings_clone, save)?;
     }
 
     // Show initial prompt only if not in debate mode
@@ -527,7 +434,7 @@ pub fn conversation_thread(
         // start rendering for this turn (agent response to user query)
         state.processing_response.store(true, Ordering::Relaxed);
         let pcm_f32: Vec<f32> = utt.data.clone();
-         let mono_f32 = crate::audio::convert_to_mono(&utt);
+        let mono_f32 = crate::audio::convert_to_mono(&utt);
 
         crate::log::log("debug", &format!("Received audio chunk of len {}", utt.data.len()));
         crate::log::log("debug", &format!("Received mono f32 pcm len {}", pcm_f32.len()));
@@ -770,6 +677,84 @@ async fn get_response(
   Ok(result)
 }
 
+fn maybe_setup_and_save(
+  wav_tx_opt: &mut Option<crossbeam_channel::Sender<crate::audio::AudioChunk>>,
+  conversation_history: &ConversationHistory,
+  settings_clone: &crate::config::AgentSettings,
+  save: bool,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  if !save {
+    return Ok(());
+  }
+  let state = GLOBAL_STATE.get().expect("AppState not initialized");
+  if state.save_path.lock().unwrap().is_none() {
+    let now = Local::now();
+    let date_str = now.format("%Y-%m-%d_%H-%M-%S").to_string();
+    let uuid_str = &Uuid::new_v4().to_string()[..8];
+    let home = crate::util::get_user_home_path().ok_or("Unable to determine home directory")?;
+    let path = home
+      .join(".ai-mate")
+      .join("conversations")
+      .join(format!("{}_{}.txt", date_str, uuid_str));
+
+    *state.save_path.lock().unwrap() = Some(path.clone());
+    *state.start_date.lock().unwrap() = date_str;
+
+    if let Some(txt_path) = state.save_path.lock().unwrap().clone() {
+      let wav_path = txt_path.with_extension("wav");
+      let (wav_tx, wav_rx) = crossbeam_channel::unbounded::<crate::audio::AudioChunk>();
+      set_wav_tx(wav_tx.clone());
+      std::thread::spawn(move || {
+        let mut writer: Option<hound::WavWriter<std::io::BufWriter<std::fs::File>>> = None;
+        while let Ok(chunk) = wav_rx.recv() {
+          if writer.is_none() {
+            let spec = hound::WavSpec {
+              channels: chunk.channels,
+              sample_rate: chunk.sample_rate,
+              bits_per_sample: 16,
+              sample_format: hound::SampleFormat::Int,
+            };
+            writer = Some(hound::WavWriter::create(&wav_path, spec).unwrap());
+          }
+          let samples = crate::audio::f32_to_i16(&chunk.data);
+          for s in samples {
+            writer.as_mut().unwrap().write_sample(s).unwrap();
+          }
+          let silence_samples =
+            (chunk.sample_rate * 500 / 1000) as usize * chunk.channels as usize;
+          for _ in 0..silence_samples {
+            writer.as_mut().unwrap().write_sample(0_i16).unwrap();
+          }
+          writer.as_mut().unwrap().flush().unwrap();
+        }
+      });
+      *wav_tx_opt = Some(wav_tx);
+    }
+  }
+
+  // perform save
+  let state = GLOBAL_STATE.get().expect("AppState not initialized");
+  let save_path = state.save_path.lock().unwrap().clone();
+  if let Some(path) = save_path {
+    let is_debate = state.debate_enabled.load(Ordering::SeqCst);
+    let agents = if is_debate {
+      state.debate_agents.lock().unwrap().clone()
+    } else {
+      vec![settings_clone.clone()]
+    };
+    let metadata = SaveMetadata {
+      start_date: state.start_date.lock().unwrap().clone(),
+      agents,
+      is_debate,
+      system_prompt: settings_clone.system_prompt.clone(),
+      voice: settings_clone.voice.clone(),
+    };
+    let _ = save_conversation(conversation_history, Some(&path), Some(&metadata));
+  }
+  Ok(())
+}
+
+
 /// Emits phrases when punctuation/newline/length threshold happens.
 struct PhraseSpeaker {
   buf: String,
@@ -1004,6 +989,7 @@ pub fn save_conversation(
         content.push_str(&format!("  Agent model:\t\t{}\n", a2.model));
         content.push_str(&format!("  Agent voice:\t\t{}\n", a2.voice));
         content.push_str(&format!("  Agent system Prompt:\t{}\n", a2.system_prompt));
+        
       }
     } else if let Some(agent) = meta.agents.first() {
       content.push_str(" This conversation was a conversation between a user and an ai agent\n\n");
