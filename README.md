@@ -49,6 +49,7 @@ https://github.com/user-attachments/assets/e612feaa-8ab0-4761-9c67-53ec7d40cab7
 - 📌 Voice read a txt file: `ai-mate -r myfile.txt`
 - 📌 Voice read text from stdin phrase by phrase: `echo "Hello. How are you?" | ai-mate -r -`
 - 📌 Save conversation as audio and text: `ai-mate -s`
+- 📌 Load separate settings file with different agents: `ai-mate -c philosophers-settings.txt`
 - 📌 Integrated `whisper`
 - 📌 Integrated `kokoro TTS` system
 - 📌 Interface with `OpenTTS` system
@@ -217,6 +218,22 @@ In this mode you can:
 * Move to previous phrase by pressing `ARROW_UP`
 * Move to next phrase by pressing `ARROW_DOWN`
 * Stop / Resume playback by pressing `SPACE`
+
+####  Separate agents
+
+By default ai-mate uses `~/.ai-mate/settings` file.
+You can create different setting fields for different agent groups, example:
+
+```
+philosophers.txt
+scientists.txt
+employees.txt
+```
+
+And then load each as you need:
+```
+ai-mate -c philosophers.txt --debate "Aristoteles" "Ptahhotep" "how to achieve harmony?"
+```
 
 ####  Useful to know
 

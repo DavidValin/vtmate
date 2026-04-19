@@ -8,6 +8,7 @@ use std::sync::{Arc, OnceLock, atomic::Ordering};
 use std::thread::{self, Builder as ThreadBuilder};
 use std::time::Duration;
 use std::time::Instant;
+use std::path::PathBuf;
 
 mod assets;
 mod audio;
@@ -77,11 +78,24 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let _ = terminal::enable_raw_mode();
 
     // Load settings first to get agent configuration
-    let _ = config::ensure_settings_file();
-    let settings_path = get_user_home_path()
+  let _ = config::ensure_settings_file();
+  let settings_path = if let Some(ref cfg) = args.config {
+    // Resolve potential ~ path
+    let mut path = PathBuf::from(cfg.as_str());
+    if path.starts_with("~") {
+      if let Some(home) = get_user_home_path() {
+        let rel = path.strip_prefix("~").unwrap_or(&path);
+        path = home.join(rel.to_str().unwrap_or(""));
+      }
+    }
+    path
+  } else {
+    get_user_home_path()
       .ok_or("Unable to determine home directory")?
       .join(".ai-mate")
-      .join("settings");
+      .join("settings")
+  };
+
 
     let agents = match config::load_settings(&settings_path, &args) {
       Ok(v) => v,
@@ -474,10 +488,23 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   // ---------------------------------------------------
   // force creation of default config file if unexisting
   let _ = config::ensure_settings_file();
-  let settings_path = get_user_home_path()
-    .ok_or("Unable to determine home directory")?
-    .join(".ai-mate")
-    .join("settings");
+  let settings_path = if let Some(ref cfg) = args.config {
+    // Resolve potential ~ path
+    let mut path = PathBuf::from(cfg.as_str());
+    if path.starts_with("~") {
+      if let Some(home) = get_user_home_path() {
+        let rel = path.strip_prefix("~").unwrap_or(&path);
+        path = home.join(rel.to_str().unwrap_or(""));
+      }
+    }
+    path
+  } else {
+    get_user_home_path()
+      .ok_or("Unable to determine home directory")?
+      .join(".ai-mate")
+      .join("settings")
+  };
+
 
   // load and file settings, merge cli args and validate
   let agents = match config::load_settings(&settings_path, &args) {
