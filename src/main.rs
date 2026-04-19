@@ -205,7 +205,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       quiet: args.quiet,
     };
 
-    let _play_handle = thread::spawn({
+    let play_handle = thread::spawn({
       let playback_active = playback_active.clone();
       let gate_until_ms = gate_until_ms.clone();
       let paused = paused.clone();
@@ -474,6 +474,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     print!("\r✅ All phrases completed\n\r");
+
     execute!(out, cursor::Show).unwrap();
     let _ = terminal::disable_raw_mode();
     process::exit(0);

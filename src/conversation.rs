@@ -11,6 +11,8 @@ use hound;
 use std::fs;
 use std::path::Path;
 use std::sync::OnceLock;
+use std::thread;
+use std::time::Duration;
 use std::sync::{
   Arc,
   atomic::{AtomicU64, Ordering},
@@ -786,11 +788,19 @@ fn wait_for_playback(
   my_interrupt: u64,
 ) {
   let playback_active = state.playback.playback_active.clone();
+  // Wait until playback starts if it hasn't already
+  while !playback_active.load(Ordering::SeqCst) {
+    if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
+      return;
+    }
+    thread::sleep(Duration::from_millis(10));
+  }
+  // Playback is active, wait until it stops
   while playback_active.load(Ordering::SeqCst) {
     if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
-      break;
+      return;
     }
-    std::thread::sleep(std::time::Duration::from_millis(10));
+    thread::sleep(Duration::from_millis(10));
   }
 }
 
