@@ -393,7 +393,7 @@ model = llama3.2:3b
 system_prompt = "You are a neutral, helpful AI assistant. Follow the subject of the conversation with special attention to the user request. Provide accurate, concise answers. Keep replies ≤30 words; if a longer answer is required, limit it to 250 words. Assume no prior context unless the user supplies it, and do not mention yourself."
 sound_threshold_peak = 0.12
 end_silence_ms = 2500
-ptt = true
+ptt = false
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 
 [agent]
@@ -468,7 +468,7 @@ model = llama3.2:3b
 system_prompt = You are an ai assistant which assist the user in the creation of a plan based on user's goal. When defining the plan follow the next format standards:\n 1-The plan is composed by tasks and subtasks.\n 2-Each task has the next format: "[ ] <task name>".\n 3-Subtasks are indented with 2 spaces below the parent task.\n 4-Before defining a plan, make sure you have the relevant information from the user.
 sound_threshold_peak = 0.12
 end_silence_ms = 2000
-ptt = false
+ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 "#;
   let mut file = File::create(&settings_path)?;
