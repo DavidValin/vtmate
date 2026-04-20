@@ -2,12 +2,6 @@
 
 Powerful terminal-based voice ai toolkit with realistic voices and extremely low latency.
 
-🚀 live voice conversations with ai agents
-🚀 infinite debates between ai agents (you can also participate in between)
-🚀 read txt files with voice
-🚀 export to audio and text files
-🚀 pipe prompt via shell
-
 Finally the cross platform voice ui you were waiting on now available for MacOS, Windows and Linux, no need for external installations.
 
 #### **Sponsor this project**
@@ -15,7 +9,29 @@ Finally the cross platform voice ui you were waiting on now available for MacOS,
 
 ![ai mate screenshot](https://github.com/DavidValin/ai-mate/raw/main/preview.png)
 
-![how it works](https://github.com/DavidValin/ai-mate/raw/main/how-it-works.png)
+![how it works](https://github.com/DavidValin/ai-mate/raw/main/docs/diagrams/how-it-works.png)
+
+## Features
+
+- 📌 Continuous Voice chat (live conversation): `records user continuously and stops on silence, submitting the request to the agent`
+- 📌 Push to Talk mode (PTT): `keep <SPACE> pressed while talking and release to stop recording`
+- 🚀 AI agents debate (2 agents talking to each other): `give an initial input and let the agents talk to each other. You can interrupt in the middle of the debate changing the subject`
+- 📌 Realtime agent swap: `change the agent by pressing <ARROW_LEFT> / <ARROW_RIGHT> (applicable to next response)`
+- 📌 Voice interrupt: `the agent stops talking if you interrupt via voice`
+- 📌 Recording Pause / Resume: `toggle "<SPACE>" key to pause / resume voice recording only`
+- 📌 Stop PlayBack: `press "<ESCAPE>" ONCE to stop the playback for the current response`
+- 📌 Interrupt: `press "<ESCAPE>" TWICE to interrupt the current response alltogether`
+- 📌 Voice speed change: `change the agent voice speed by pressing <ARROW_UP> / <ARROW_DOWN> (applicable to next response)`
+- 📌 Voice read a txt file: `ai-mate -r myfile.txt`
+- 📌 Voice read text from stdin phrase by phrase: `echo "Hello. How are you?" | ai-mate -r -`
+- 📌 Save conversation as audio and text: `ai-mate -s`
+- 📌 Load separate settings file with different agents: `ai-mate -c philosophers-settings.txt`
+- 📌 Integrated `whisper`
+- 📌 Integrated `kokoro TTS` system
+- 📌 Interface with `OpenTTS` system
+- 📌 Supports `ollama` or `llama-server`
+- 📌 28 languages supported (`ai-mate --list-voices`)
+- 📌 Use any gguf model from huggingface.com or ollama models (small models reply faster)
 
 ### English demo
 https://github.com/user-attachments/assets/d9c27108-41f7-4148-8c32-28c8ca6d8516
@@ -40,28 +56,6 @@ https://github.com/user-attachments/assets/e612feaa-8ab0-4761-9c67-53ec7d40cab7
 - The text converted to audio using text to speech (tts) via OpenTTS.
 - You can interrupt the ai agent at any moment by start speaking, this will cause the response and audio to stop and you can continue talking.
 ```
-
-## Features
-
-- 📌 Continuous Voice chat (live conversation): `records user continuously and stops on silence, submitting the request to the agent`
-- 🚀 AI agents debate (2 agents talking to each other): `give an initial input and let the agents talk to each other. You can interrupt in the middle of the debate changing the subject`
-- 📌 Realtime agent swap: `change the agent by pressing <ARROW_LEFT> / <ARROW_RIGHT> (applicable to next response)`
-- 📌 Voice interrupt: `the agent stops talking if you interrupt via voice`
-- 📌 Recording Pause / Resume: `toggle "<SPACE>" key to pause / resume voice recording only`
-- 📌 Stop PlayBack: `press "<ESCAPE>" ONCE to stop the playback for the current response`
-- 📌 Interrupt: `press "<ESCAPE>" TWICE to interrupt the current response alltogether`
-- 📌 Push to Talk mode (PTT): `keep <SPACE> pressed while talking and release to stop recording`
-- 📌 Voice speed change: `change the agent voice speed by pressing <ARROW_UP> / <ARROW_DOWN> (applicable to next response)`
-- 📌 Voice read a txt file: `ai-mate -r myfile.txt`
-- 📌 Voice read text from stdin phrase by phrase: `echo "Hello. How are you?" | ai-mate -r -`
-- 📌 Save conversation as audio and text: `ai-mate -s`
-- 📌 Load separate settings file with different agents: `ai-mate -c philosophers-settings.txt`
-- 📌 Integrated `whisper`
-- 📌 Integrated `kokoro TTS` system
-- 📌 Interface with `OpenTTS` system
-- 📌 Supports `ollama` or `llama-server`
-- 📌 28 languages supported (`ai-mate --list-voices`)
-- 📌 Use any gguf model from huggingface.com or ollama models (small models reply faster)
 
 ## LLM integration
 
@@ -138,6 +132,8 @@ Before running ai-mate make sure ollama is running: `ollama serve`
 
 #### Conversation mode
 
+![conversation mode](https://github.com/DavidValin/ai-mate/raw/main/docs/diagrams/conversation-mode.png)
+
 Start conversation with default agent and save it as audio and text
 (waits for user voice input and respond)
 
@@ -171,6 +167,8 @@ echo "How to fly without wings?" | ai-mate -i -
 * Be able to save the conversation in a wav and text file by adding `-s` option. It will save it in `~/.ai-mate/conversations` folder
 
 #### Debate mode
+
+![debate mode](https://github.com/DavidValin/ai-mate/raw/main/docs/diagrams/debate-mode.png)
 
 Initialize a debate between two agents and be able to participate in the debate by speaking at any time. To create a good debate adjust the system prompts of each agent and give a detailed initial input.
 
@@ -214,10 +212,11 @@ Get a single response and save it as audio file and text file
 echo "Can you find any suspicious processes in the next list? If so, why?\n\n $(ps aux | head -20)" | ai-mate -q -i - -s
 ```
 
+####  File to speech mode
 
-####  File to speech
+![read file mode](https://github.com/DavidValin/ai-mate/raw/main/docs/diagrams/read-file-mode.png)
 
-Read a text file or stdin text phrase by phrase. Ensure the agent you choose has correct language and voice for your text.
+Read a text file or stdin text phrase by phrase using an agent voice. Ensure the agent you choose has correct language and voice for your text.
 In this mode, only the next agent settings are used: "tts", "voice" and "language".
 
 from a txt file:
