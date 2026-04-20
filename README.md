@@ -25,6 +25,8 @@ https://github.com/user-attachments/assets/e612feaa-8ab0-4761-9c67-53ec7d40cab7
 
 `RECORD -> STT -> LLM -> TTS -> PLAYBACK`
 
+![how it works](https://github.com/DavidValin/ai-mate/raw/main/how-it-works.png)
+
 ```
 - You start the program and start talking.
 - Once audio is detected (based on sound-threshold-peak option) it will start recording.
