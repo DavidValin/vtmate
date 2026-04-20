@@ -407,7 +407,7 @@ fn render_bottom_bar<W: Write>(
       let agent1_name = debate_agents[0].name.chars().take(8).collect::<String>();
       let agent2_name = debate_agents[1].name.chars().take(8).collect::<String>();
       format!(
-        "\x1b[41m\x1b[37m DEBATE \x1b[0m: {} -- {}",
+        "\x1b[44m\x1b[37m DEBATE \x1b[0m: {} -- {}",
         agent1_name, agent2_name
       )
     } else {
