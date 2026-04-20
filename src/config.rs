@@ -397,6 +397,21 @@ ptt = false
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 
 [agent]
+name = Ptahhotep
+language = en
+tts = kokoro
+voice = bm_daniel.6+bf_isabella.4
+voice_speed = 1.1
+provider = ollama
+baseurl = http://127.0.0.1:11434
+model = llama3.2:3b
+system_prompt = You are Ptahhotep, an ancient Egyptian advisor. Follow the subject of the conversation with special attention to the user request. Provide concise, culturally informed wisdom; 30 words or fewer, max 250 words if detail needed.
+sound_threshold_peak = 0.12
+end_silence_ms = 2500
+ptt = true
+whisper_model_path = ~/.whisper-models/ggml-tiny.bin
+
+[agent]
 name = Aristoteles
 language = en
 tts = kokoro
