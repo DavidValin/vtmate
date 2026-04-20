@@ -42,6 +42,7 @@ pub struct AgentSettings {
   pub whisper_model_path: String,
   pub sound_threshold_peak: f32,
   pub end_silence_ms: u64,
+  pub voice_speed: f32,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -64,6 +65,8 @@ Explanation on the fields:
                             you can mix 2 voices. example of mixing
                             50% of bm_daniel and 50% of am_puck:
                             "bm_daniel.5+am_puck.5"
+
+  * voice_speed:          the voice speed from 1.0 to 9.0
 
   * provider:             the system it will use to query
                           the llm, it can be 'ollama' or
@@ -324,6 +327,12 @@ pub fn load_settings(
       errors.push(format!("Agent {}: {}", agent.name, e));
     }
 
+    if let Err(e) = validate_voice_speed(agent.voice_speed)
+      .map_err(|e: std::io::Error| -> Error { Error::new(e) })
+    {
+      errors.push(format!("Agent {}: {}", agent.name, e));
+    }
+
     agents.push(agent);
   }
 
@@ -376,7 +385,8 @@ pub fn ensure_settings_file() -> Result<(), Error> {
 name = main agent
 language = en
 tts = kokoro
-voice = bm_george
+voice = bm_daniel
+voice_speed = 1.2
 provider = ollama
 baseurl = http://127.0.0.1:11434
 model = llama3.2:3b
@@ -391,6 +401,7 @@ name = Aristoteles
 language = en
 tts = kokoro
 voice = bm_daniel.4+am_santa.6
+voice_speed = 1.1
 provider = ollama
 baseurl = http://127.0.0.1:11434
 model = llama3.2:3b
@@ -405,6 +416,7 @@ name = Seneca
 language = en
 tts = kokoro
 voice = bm_daniel.6+bf_isabella.4
+voice_speed = 1.1
 provider = ollama
 baseurl = http://127.0.0.1:11434
 model = llama3.2:3b
@@ -419,6 +431,7 @@ name = Budda
 language = en
 tts = kokoro
 voice = bm_daniel
+voice_speed = 1.1
 provider = ollama
 baseurl = http://127.0.0.1:11434
 model = llama3.2:3b
@@ -433,6 +446,7 @@ name = Jesus Christ
 language = en
 tts = kokoro
 voice = bm_daniel.2+bm_george.8
+voice_speed = 1.1
 provider = ollama
 baseurl = http://127.0.0.1:11434
 model = llama3.2:3b
@@ -446,7 +460,8 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 name = planner
 language = en
 tts = kokoro
-voice = bm_daniel
+voice = bm_george
+voice_speed = 1.1
 provider = ollama
 baseurl = http://127.0.0.1:11434
 model = llama3.2:3b
@@ -542,16 +557,18 @@ fn validate_language(language: &str, tts: &str) -> Result<(), std::io::Error> {
 fn validate_voice(voice: &str, language: &str, tts: &str) -> Result<(), std::io::Error> {
   // Validate voice format, supports mix of two voices
   let lang_clean = language.trim_matches('"');
-  let voices = tts::get_voices_for(tts, lang_clean);
-  if voices.is_empty() {
+let voices_raw = tts::get_voices_for(tts, lang_clean);
+let voices: Vec<String> = voices_raw.iter().map(|s| s.to_string()).collect();
+if voices.is_empty() {
     return Err(std::io::Error::new(
-      std::io::ErrorKind::Other,
-      format!(
-        "No available voices for TTS '{}' and language '{}'",
-        tts, language
-      ),
+        std::io::ErrorKind::Other,
+        format!(
+            "No available voices for TTS '{}' and language '{}'",
+            tts, language
+        ),
     ));
-  }
+}
+
   let voice_clean = voice.trim_matches('"');
   // Call helper for validation
   validate_voice_value(voice_clean, &voices, language)
@@ -569,13 +586,14 @@ fn validate_tts(tts: &str) -> Result<(), std::io::Error> {
 
 // Voice mix validation helper
 fn validate_voice_value(
-  voice: &str,
-  voices: &Vec<&str>,
-  language: &str,
+    voice: &str,
+    voices: &Vec<String>,
+    language: &str,
 ) -> Result<(), std::io::Error> {
+
   // If no mix, validate single voice
   if !voice.contains('+') {
-    if voices.iter().any(|&v| v == voice) {
+    if voices.iter().any(|v| v.as_str() == voice) {
       return Ok(());
     } else {
       return Err(std::io::Error::new(
@@ -612,7 +630,7 @@ fn validate_voice_value(
     }
     let weight: u32 = weight_str.parse().unwrap();
     total_weight += weight;
-    if !voices.iter().any(|&v| v == name) {
+    if !voices.iter().any(|v| v.as_str() == name) {
       return Err(std::io::Error::new(
         std::io::ErrorKind::Other,
         format!("Unsupported voice '{}' for language {}", voice, language),
@@ -678,6 +696,7 @@ fn validate_system_prompt(prompt: &str) -> Result<(), std::io::Error> {
 }
 
 fn validate_sound_threshold_peak(value: f32) -> Result<(), std::io::Error> {
+   // Voice speed is not validated here
   if value < 0.0 || value > 1.0 {
     return Err(std::io::Error::new(
       std::io::ErrorKind::Other,
@@ -695,13 +714,31 @@ fn validate_sound_threshold_peak(value: f32) -> Result<(), std::io::Error> {
 }
 
 fn validate_end_silence_ms(value: u64) -> Result<(), std::io::Error> {
-  if value < 1 || value > 20000 {
-    return Err(std::io::Error::new(
-      std::io::ErrorKind::Other,
-      "'end_silence_ms' must be between 1 and 20000",
-    ));
-  }
-  Ok(())
+    if value < 1 || value > 20000 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "'end_silence_ms' must be between 1 and 20000",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_voice_speed(value: f32) -> Result<(), std::io::Error> {
+    if value < 1.0 || value > 9.0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "'voice_speed' must be between 1.0 and 9.0",
+        ));
+    }
+    // Ensure one decimal place only
+    let scaled = (value * 10.0).round();
+    if (scaled / 10.0 - value).abs() > 1e-6 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "'voice_speed' must have one decimal place",
+        ));
+    }
+    Ok(())
 }
 
 // PRIVATE

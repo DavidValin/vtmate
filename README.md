@@ -105,6 +105,7 @@ Example of agent definition:
 name = main agent
 language = en
 voice = bf_alice
+voice_speed = 1.1
 provider = ollama
 baseurl = http://localhost:8080
 model = gpt-oss-20b

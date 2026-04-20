@@ -129,6 +129,7 @@ impl AppState {
     *state.system_prompt.lock().unwrap() = settings.system_prompt.clone();
 
     state.ptt.store(settings.ptt, Ordering::Relaxed);
+    state.speed.store((settings.voice_speed * 10.0) as u32, Ordering::Relaxed);
     state.agents = Arc::new(agents);
     state
   }

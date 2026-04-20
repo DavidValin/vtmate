@@ -9,7 +9,12 @@ mod tts {
     vec!["en"]
   }
   pub fn get_voices_for(_tts: &str, lang: &str) -> Vec<String> {
-    vec![format!("voice-{}", lang)]
+    // Provide a voice matching the config
+    if lang == "en" {
+        vec!["bf_alice".to_string()]
+    } else {
+        vec![format!("voice-{}", lang)]
+    }
   }
 }
 
@@ -55,6 +60,7 @@ sound_threshold_peak = "0.1"
 end_silence_ms = "2000"
 ptt = "false"
 whisper_model_path = "~/.whisper-models/ggml-tiny.bin"
+voice_speed = 5.0
 "#;
 
   let mut file = File::create(&path).expect("Failed to create temp config file");
@@ -64,11 +70,17 @@ whisper_model_path = "~/.whisper-models/ggml-tiny.bin"
 
   // Prepare args with defaults
   let args = Args {
+    config: None,
+    prompt: None,
+    prompt_file: None,
     verbose: false,
-    agent: "main agent".to_string(),
+    agent: Some("main agent".to_string()),
     list_voices: false,
     ptt: Some(true),
     debate: None,
+    read_file: None,
+    quiet: false,
+    save: false,
   };
 
   let agents = load_settings(&path, &args).expect("Failed to load settings");
@@ -88,6 +100,7 @@ whisper_model_path = "~/.whisper-models/ggml-tiny.bin"
   assert_eq!(agent.ptt, true);
   assert_eq!(agent.sound_threshold_peak, 0.1);
   assert_eq!(agent.end_silence_ms, 2000);
+    assert_eq!(agent.voice_speed, 5.0);
   assert_eq!(agent.whisper_model_path, "~/.whisper-models/ggml-tiny.bin");
 }
 
@@ -117,6 +130,7 @@ sound_threshold_peak = 0.1
 end_silence_ms = 2000
 ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
+voice_speed = 5.0
 "#;
 
   let mut file = File::create(&path).expect("Failed to create temp config file");
@@ -126,11 +140,17 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 
   // Prepare args with defaults
   let args = Args {
+    config: None,
+    prompt: None,
+    prompt_file: None,
     verbose: false,
-    agent: "Test Agent".to_string(),
+    agent: Some("Test Agent".to_string()),
     list_voices: false,
     ptt: None,
     debate: None,
+    read_file: None,
+    quiet: false,
+    save: false,
   };
 
   let agents = load_settings(&path, &args).expect("Failed to load settings");
@@ -150,5 +170,6 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
   assert_eq!(agent.ptt, true);
   assert_eq!(agent.sound_threshold_peak, 0.1);
   assert_eq!(agent.end_silence_ms, 2000);
+    assert_eq!(agent.voice_speed, 5.0);
   assert_eq!(agent.whisper_model_path, "~/.whisper-models/ggml-tiny.bin");
 }

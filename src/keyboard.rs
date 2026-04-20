@@ -346,6 +346,7 @@ pub fn keyboard_thread(
             *state.model.lock().unwrap() = new_agent.model.clone();
             *state.system_prompt.lock().unwrap() = new_agent.system_prompt.clone();
             state.ptt.store(new_agent.ptt, Ordering::Relaxed);
+            state.speed.store((new_agent.voice_speed * 10.0) as u32, Ordering::Relaxed);
             if state.ptt.load(Ordering::Relaxed) {
               recording_paused.store(true, Ordering::Relaxed);
             } else {
@@ -380,6 +381,7 @@ pub fn keyboard_thread(
             *state.model.lock().unwrap() = new_agent.model.clone();
             *state.system_prompt.lock().unwrap() = new_agent.system_prompt.clone();
             state.ptt.store(new_agent.ptt, Ordering::Relaxed);
+            state.speed.store((new_agent.voice_speed * 10.0) as u32, Ordering::Relaxed);
             if state.ptt.load(Ordering::Relaxed) {
               recording_paused.store(true, Ordering::Relaxed);
             } else {
