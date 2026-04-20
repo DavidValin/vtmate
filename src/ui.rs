@@ -3,6 +3,7 @@
 // ------------------------------------------------------------------
 
 use crate::state::{GLOBAL_STATE, get_speed, get_voice};
+use crate::util::get_flag;
 use crossbeam_channel::Receiver;
 use crossterm::{
   cursor::{Hide, MoveTo},
@@ -396,7 +397,7 @@ fn render_bottom_bar<W: Write>(
 
   // Check if debate mode is enabled
   let debate_enabled = state.debate_enabled.load(Ordering::Relaxed);
-  let voice_or_debate_str = if debate_enabled {
+  let mode = if debate_enabled {
     let debate_agents = state.debate_agents.lock().unwrap();
     if debate_agents.len() >= 2 {
       let agent1_name = debate_agents[0].name.chars().take(8).collect::<String>();
@@ -406,16 +407,20 @@ fn render_bottom_bar<W: Write>(
         agent1_name, agent2_name
       )
     } else {
-      format!("({})", get_voice())
+      format!(
+        "\x1b[44m\x1b[37m CONVERSATION \x1b[0m"
+      )
     }
   } else {
-    format!("({})", get_voice())
+    format!(
+      "\x1b[44m\x1b[37m CONVERSATION \x1b[0m"
+    )
   };
 
   let recording_paused_str = if recording_paused {
     "\x1b[43m\x1b[30m  paused  \x1b[0m"
   } else {
-    "\x1b[41m\x1b[37m listening \x1b[0m"
+    "\x1b[42m\x1b[30m listening \x1b[0m"
   };
 
   let internal_status = format!(
@@ -448,12 +453,15 @@ fn render_bottom_bar<W: Write>(
     ""
   };
 
+  let lang_guard = state.language.lock().unwrap();
+  let flag = get_flag(&lang_guard);
+  let agent_display = format!("{} {}", flag, agent_name);
   let combined_status = if debate_enabled {
-    format!("{} {} {} ", voice_or_debate_str, ptt, internal_status)
+    format!("{} {} {} ", mode, ptt, internal_status)
   } else {
     format!(
-      "{} {} {} ({}) ",
-      voice_or_debate_str, ptt, internal_status, agent_name
+      "{} {} {} {} ",
+      mode, ptt, agent_display, internal_status
     )
   };
 

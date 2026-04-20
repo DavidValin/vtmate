@@ -289,7 +289,7 @@ Windows    ARM64   ✅       ⚠️        ⚠️      n/a     ⚠️
 
 | ID |           Language           |      Support       |        TTS supported           |
 |----|------------------------------|--------------------|--------------------------------|
-| en |       🇺🇸  English            |  🏆 Best support   |    ✅ Kokoro    ✅ OpenTTS     |
+| en |       🇬🇧  English            |  🏆 Best support   |    ✅ Kokoro    ✅ OpenTTS     |
 | es |       🇪🇸  Spanish            |  🏆 Best support   |    ✅ Kokoro    ✅ OpenTTS     |
 | zh |       🇨🇳  Mandarin Chinese   |  🏆 Best support   |    ✅ Kokoro    ✅ OpenTTS     |
 | ja |       🇯🇵  Japanese           |  🏆 Best support   |    ✅ Kokoro    ✅ OpenTTS     |
