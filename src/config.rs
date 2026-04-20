@@ -52,10 +52,10 @@ Settings file is at ~/.ai-mate/settings
 Explanation on the fields:
 
   * name:                 a short name for the agent
-
+  ------------------------------------------------------------
   * language:             any of the languages available used
                           for speech recognition and tts
-
+  ------------------------------------------------------------
   * voice:                the voice name to use by the
                           agent (see available voices for each
                           language and tts system running
@@ -65,41 +65,48 @@ Explanation on the fields:
                             you can mix 2 voices. example of mixing
                             50% of bm_daniel and 50% of am_puck:
                             "bm_daniel.5+am_puck.5"
-
+  ------------------------------------------------------------
   * voice_speed:          the voice speed from 1.0 to 9.0
-
+  ------------------------------------------------------------
   * provider:             the system it will use to query
                           the llm, it can be 'ollama' or
                           'llama-server'
-
+  ------------------------------------------------------------
   * baseurl:              the base url used to contact the
                           provider (it needs to be without path)
-
+  ------------------------------------------------------------
   * model:                the model name to use in ollama
                           (some llama-server versions will
                           ignore this option as llama-server
                           runs for a single model)
-
+  ------------------------------------------------------------
   * system_prompt:        the system prompt to be sent to
                           the llm when querying it.
                           Use \n for new lines
-
+  ------------------------------------------------------------
   * sound_threshold_peak: a value between 0 and 1 which will
                           be used as a peak base to detect
                           user speech
-
+  ------------------------------------------------------------
   * end_silence_ms:       the milliseconds of silence below
                           sound_threshold_peak level that
                           have to elapse for user speech
-                          to be submitted
-
+                          to be submitted.
+                          in ptt mode, this option is ignored,
+                          the program will wait for SPACE key
+                          to be released to submit the audio.
+  ------------------------------------------------------------
   * tts:                  the tts system to use, it can be
-                          'kokoro' or 'opentts'
+                          'kokoro' or 'opentts'.
 
+                            - opentts requires opentts docker
+                            container to be running:
+                            docker run -p 5500:5500 synesthesiam/opentts:all
+  ------------------------------------------------------------
   * ptt:                  push to talk mode, when its set
                           to true you have to keep the space
                           pushed while speaking, then release.
-
+  ------------------------------------------------------------
   * whisper_model_path:   the path to the whisper model.
                           ai-mate unzips 2 models in
                           ~/.whisper-models, tiny and small.

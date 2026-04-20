@@ -28,7 +28,7 @@ https://github.com/user-attachments/assets/e612feaa-8ab0-4761-9c67-53ec7d40cab7
 ```
 - You start the program and start talking.
 - Once audio is detected (based on sound-threshold-peak option) it will start recording.
-- As soon as there is a time of silence (based on end_silence_ms option), it will transcribe the recorded audio using speech to text (stt).
+- As soon as there is a time of silence (based on end_silence_ms option), it will transcribe the recorded audio using speech to text (stt). In ptt mode, this option is ignored, the program will wait for SPACE key to be released to submit the audio.
 - The transcribed text will be sent to the ai model (through ollama)
 - The ai model will reply with text.
 - The text converted to audio using text to speech (tts) via OpenTTS.
