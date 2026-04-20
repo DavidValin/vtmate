@@ -130,7 +130,7 @@ The first agent defined in `~/ai-mate/settings` will always be selected agent wh
 
 Before running ai-mate make sure ollama is running: `ollama serve`
 
-#### Conversation mode
+### Conversation mode
 
 ![conversation mode](https://github.com/DavidValin/ai-mate/raw/main/docs/diagrams/conversation-mode.png)
 
@@ -166,7 +166,7 @@ echo "How to fly without wings?" | ai-mate -i -
 * You can change the voice speed by pressing `ARROW_UP` / `ARROW_DOWN`
 * Be able to save the conversation in a wav and text file by adding `-s` option. It will save it in `~/.ai-mate/conversations` folder
 
-#### Debate mode
+### Debate mode
 
 ![debate mode](https://github.com/DavidValin/ai-mate/raw/main/docs/diagrams/debate-mode.png)
 
@@ -190,7 +190,7 @@ echo "Lets discuss the permissions of this files: \n\n $(ls -la)" | ai-mate --de
 * You can also start/stop a debate from conversation mode by pressing `Control+D` and picking the debate agents.
 * Be able to save the conversation in a wav and text file by adding `-s` option. It will save it in `~/.ai-mate/conversations` folder
 
-#### Single run
+### Single run
 
 Get a single response from prompt
 ```
@@ -212,7 +212,7 @@ Get a single response and save it as audio file and text file
 echo "Can you find any suspicious processes in the next list? If so, why?\n\n $(ps aux | head -20)" | ai-mate -q -i - -s
 ```
 
-####  File to speech mode
+###  File to speech mode
 
 ![read file mode](https://github.com/DavidValin/ai-mate/raw/main/docs/diagrams/read-file-mode.png)
 
