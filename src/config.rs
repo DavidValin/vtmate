@@ -500,7 +500,6 @@ fn validate_voice(voice: &str, language: &str, tts: &str) -> Result<(), std::io:
   validate_voice_value(voice_clean, &voices, language)
 }
 
-
 fn validate_tts(tts: &str) -> Result<(), std::io::Error> {
   if tts != "kokoro" && tts != "opentts" {
     return Err(std::io::Error::new(
@@ -512,7 +511,11 @@ fn validate_tts(tts: &str) -> Result<(), std::io::Error> {
 }
 
 // Voice mix validation helper
-fn validate_voice_value(voice: &str, voices: &Vec<&str>, language: &str) -> Result<(), std::io::Error> {
+fn validate_voice_value(
+  voice: &str,
+  voices: &Vec<&str>,
+  language: &str,
+) -> Result<(), std::io::Error> {
   // If no mix, validate single voice
   if !voice.contains('+') {
     if voices.iter().any(|&v| v == voice) {
@@ -567,7 +570,6 @@ fn validate_voice_value(voice: &str, voices: &Vec<&str>, language: &str) -> Resu
   }
   Ok(())
 }
-
 
 fn validate_provider(provider: &str) -> Result<(), std::io::Error> {
   if provider != "ollama" && provider != "llama-server" {

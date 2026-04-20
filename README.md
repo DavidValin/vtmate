@@ -131,13 +131,15 @@ Before running ai-mate make sure ollama is running: `ollama serve`
 
 #### Conversation mode
 
-Start conversation with default agent (waits for user voice input and respond)
+Start conversation with default agent and save it as audio and text
+(waits for user voice input and respond)
 
 ```
-ai-mate
+ai-mate -s
 ```
 
-Start conversation with a specific agent (waits for user voice input and respond)
+Start conversation with a specific agent
+(waits for user voice input and respond)
 ```
 ai-mate --agent "main agent"
 ```
@@ -199,6 +201,12 @@ Get a single response from prompt from stdin
 ```
 echo "Is $(date) a national holiday day in Spain?" | ai-mate -q -i -
 ```
+
+Get a single response and save it as audio file and text file
+```
+echo "Can you find any suspicious processes in the next list? If so, why?\n\n $(ps aux | head -20)" | ai-mate -q -i - -s
+```
+
 
 ####  File to speech
 
