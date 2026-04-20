@@ -5,19 +5,18 @@
 use crate::START_INSTANT;
 use crate::playback::set_wav_tx;
 use crate::state::GLOBAL_STATE;
-use crate::ui::get_banner;
 use chrono::Local;
 use crossbeam_channel::{Receiver, Sender, select};
 use hound;
 use std::fs;
 use std::path::Path;
 use std::sync::OnceLock;
-use std::thread;
-use std::time::Duration;
 use std::sync::{
   Arc,
   atomic::{AtomicU64, Ordering},
 };
+use std::thread;
+use std::time::Duration;
 use tokio::runtime::Builder as TokioBuilder;
 use uuid::Uuid;
 
@@ -95,13 +94,17 @@ pub fn conversation_thread(
   //  –––––––––––––––––––––––––––––––––––––
   //   single run mode
   //  –––––––––––––––––––––––––––––––––––––
-
   if quiet {
     crate::log::log("info", "Running in quiet mode");
 
     // Setup save path and WAV writer if saving is requested
     if save {
-      maybe_setup_and_save(&mut wav_tx_opt, &conversation_history, &settings_clone, save)?;
+      maybe_setup_and_save(
+        &mut wav_tx_opt,
+        &conversation_history,
+        &settings_clone,
+        save,
+      )?;
     }
 
     let rt = TokioBuilder::new_current_thread()
@@ -183,7 +186,12 @@ pub fn conversation_thread(
     let state = GLOBAL_STATE.get().expect("AppState not initialized");
 
     if save && state.save_path.lock().unwrap().is_none() {
-      maybe_setup_and_save(&mut wav_tx_opt, &conversation_history, &settings_clone, save)?;
+      maybe_setup_and_save(
+        &mut wav_tx_opt,
+        &conversation_history,
+        &settings_clone,
+        save,
+      )?;
     }
 
     // Show initial prompt only if not in debate mode
@@ -195,6 +203,7 @@ pub fn conversation_thread(
         pending_user_msg = Some(prompt.clone());
       }
     }
+
     //  –––––––––––––––––––––––––––––––––––––
     //   debate mode
     //  –––––––––––––––––––––––––––––––––––––
@@ -512,16 +521,15 @@ pub fn conversation_thread(
         let tx_ui_cloned_for_closure = tx_ui.clone();
         let tts_tx_cloned_for_closure = tts_tx.clone();
         let ui_thinking_cloned_for_closure = ui.thinking.clone();
-        let conversation_history_cloned_for_closure = conversation_history.clone();
         // clones for closure
         let ui_thinking_for_closure = ui_thinking_cloned_for_closure.clone();
-        let conversation_history_for_closure_cloned = conversation_history_cloned_for_closure.clone();
 
         // called on every chunk received from llm
         let voice_for_tts = settings.voice.clone();
-        let settings_for_closure = settings.clone();
+        // reply accumulator for single ChatMessage
+        let reply_accum = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let reply_accum_cloned = reply_accum.clone();
         let on_piece = move |piece: &str| {
-          let hist = conversation_history_for_closure_cloned.clone();
           if interrupted {
             let _ = stop_all_tx_cloned_for_closure.try_send(());
             return;
@@ -538,38 +546,22 @@ pub fn conversation_thread(
             got_any_token = true;
             ui_thinking_for_closure.store(false, Ordering::Relaxed);
           }
-          if let Some(phrase) = speaker_arc_cloned_for_closure.lock().unwrap().push_text(piece) {
-            if !first_phrase_logged {
-              let elapsed_ms = crate::util::now_ms(&START_INSTANT) - speech_end_ms;
-              crate::log::log("info", &format!("Time from speech end to first phrase playback: {:.2?}", elapsed_ms));
-              first_phrase_logged = true;
-            }
-            hist.lock().unwrap().push(ChatMessage{role:"assistant".to_string(), content:phrase.clone(), agent_name:Some(settings_for_closure.name.clone())});
+           if let Some(phrase) = speaker_arc_cloned_for_closure.lock().unwrap().push_text(piece) {
+             if !first_phrase_logged {
+               let elapsed_ms = crate::util::now_ms(&START_INSTANT) - speech_end_ms;
+               crate::log::log("info", &format!("Time from speech end to first phrase playback: {:.2?}", elapsed_ms));
+               first_phrase_logged = true;
+             }
+             // accumulate reply for single ChatMessage
+             if let Ok(mut acc) = reply_accum_cloned.lock() {
+                 acc.push_str(&phrase);
+             }
+             // send the complete phrase to tts
+             let cleaned = crate::util::strip_special_chars(&phrase);
+             crate::log::log("info", &format!("Sending phrase to TTS: '{}' (original: '{}'), interrupt={}", cleaned, phrase, my_interrupt));
+             let _ = tts_tx_cloned_for_closure.send((cleaned, my_interrupt, voice_for_tts.clone()));
+           }
 
-            let state = GLOBAL_STATE.get().expect("AppState not initialized");
-            let save_path = state.save_path.lock().unwrap().clone();
-            if let Some(path) = save_path {
-              let is_debate = state.debate_enabled.load(Ordering::SeqCst);
-              let agents = if is_debate {
-                state.debate_agents.lock().unwrap().clone()
-              } else {
-                vec![settings_for_closure.clone()]
-              };
-              let metadata = SaveMetadata {
-                start_date: state.start_date.lock().unwrap().clone(),
-                agents,
-                is_debate,
-                  system_prompt: settings_for_closure.system_prompt.clone(),
-                  voice: settings_for_closure.voice.clone(),
-              };
-
-              let _ = save_conversation(&hist, Some(&path), Some(&metadata));
-            }
-            // send the complete phrase to tts
-            let cleaned = crate::util::strip_special_chars(&phrase);
-            crate::log::log("info", &format!("Sending phrase to TTS: '{}' (original: '{}'), interrupt={}", cleaned, phrase, my_interrupt));
-            let _ = tts_tx_cloned_for_closure.send((cleaned, my_interrupt, voice_for_tts.clone()));
-          }
           // send raw piece immediately
           let _ = tx_ui_cloned_for_closure.send(format!("stream|{}", piece));
         };
@@ -634,16 +626,22 @@ pub fn conversation_thread(
           let _join_result = handle.join();
         }
         ui_thinking_cloned_for_closure.store(false, Ordering::Relaxed);
-        if let Some(phrase) = speaker_arc.lock().unwrap().flush() {
-          let phrase_clone = phrase.clone();
-          let _ = tx_ui.send(phrase_clone);
-          conversation_history.lock().unwrap().push(ChatMessage{role:"assistant".to_string(), content:phrase.clone(), agent_name:Some(settings.name.clone())});
-
-          perform_save(&conversation_history);
-          let cleaned = crate::util::strip_special_chars(&phrase);
-          crate::log::log("info", &format!("Sending final phrase to TTS: '{}' (original: '{}'), interrupt={}", cleaned, phrase, my_interrupt));
-          let _ = tts_tx.send((cleaned, my_interrupt, settings.voice.clone()));
+        // After the LLM thread finishes, push the accumulated reply as a single message
+        {
+          // Retrieve and clear the accumulated reply
+          let acc_clone = {
+            let mut acc = reply_accum.lock().unwrap();
+            let cloned = acc.clone();
+            acc.clear();
+            cloned
+          };
+          if !acc_clone.is_empty() {
+            conversation_history.lock().unwrap().push(ChatMessage{role:"assistant".to_string(), content:acc_clone, agent_name:Some(settings.name.clone())});
+            perform_save(&conversation_history);
+          }
         }
+
+
       }
     }
   }
@@ -721,8 +719,7 @@ fn maybe_setup_and_save(
           for s in samples {
             writer.as_mut().unwrap().write_sample(s).unwrap();
           }
-          let silence_samples =
-            (chunk.sample_rate * 500 / 1000) as usize * chunk.channels as usize;
+          let silence_samples = (chunk.sample_rate * 500 / 1000) as usize * chunk.channels as usize;
           for _ in 0..silence_samples {
             writer.as_mut().unwrap().write_sample(0_i16).unwrap();
           }
@@ -754,7 +751,6 @@ fn maybe_setup_and_save(
   }
   Ok(())
 }
-
 
 /// Emits phrases when punctuation/newline/length threshold happens.
 struct PhraseSpeaker {
@@ -980,23 +976,22 @@ pub fn save_conversation(
         ));
         content.push_str(" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n");
         content.push_str(&format!("  Agent name:\t\t{}\n", a1.name));
-        content.push_str(&format!("  Agent TTS system:\t{}\n\n", a1.tts));
+        content.push_str(&format!("  Agent TTS:\t{}\n\n", a1.tts));
         content.push_str(&format!("  Agent model:\t\t{}\n", a1.model));
         content.push_str(&format!("  Agent voice:\t\t{}\n", a1.voice));
-        content.push_str(&format!("  Agent system Prompt:\t{}\n", a1.system_prompt));
+        content.push_str(&format!("  Agent system prompt:\t{}\n", a1.system_prompt));
         content.push_str(" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n");
         content.push_str(&format!("  Agent name:\t\t{}\n", a2.name));
-        content.push_str(&format!("  Agent TTS system:\t{}\n", a2.tts));
+        content.push_str(&format!("  Agent TTS:\t{}\n", a2.tts));
         content.push_str(&format!("  Agent model:\t\t{}\n", a2.model));
         content.push_str(&format!("  Agent voice:\t\t{}\n", a2.voice));
-        content.push_str(&format!("  Agent system Prompt:\t{}\n", a2.system_prompt));
-        
+        content.push_str(&format!("  Agent system prompt:\t{}\n", a2.system_prompt));
       }
     } else if let Some(agent) = meta.agents.first() {
       content.push_str(" This conversation was a conversation between a user and an ai agent\n\n");
       content.push_str(" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n");
       content.push_str(&format!("  Agent name:\t\t{}\n", agent.name));
-      content.push_str(&format!("  Agent TTS system:\t{}\n", agent.tts));
+      content.push_str(&format!("  Agent TTS:\t{}\n", agent.tts));
       content.push_str(&format!("  Agent model:\t\t{}\n", agent.model));
       content.push_str(&format!("  Agent voice:\t\t{}\n", meta.voice));
       content.push_str(&format!("  Agent system prompt:\t{}\n", meta.system_prompt));
