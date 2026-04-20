@@ -959,7 +959,7 @@ pub fn save_conversation(
     } else {
       &msg.role
     };
-    content.push_str(&format!("{}: {}\n\n", label, msg.content));
+    content.push_str(&format!("{}:\n{}\n\n", label, msg.content));
   }
 
   if let Some(meta) = metadata {
@@ -976,13 +976,13 @@ pub fn save_conversation(
         ));
         content.push_str(" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n");
         content.push_str(&format!("  Agent name:\t\t{}\n", a1.name));
-        content.push_str(&format!("  Agent TTS:\t{}\n\n", a1.tts));
+        content.push_str(&format!("  Agent TTS:\t\t{}\n\n", a1.tts));
         content.push_str(&format!("  Agent model:\t\t{}\n", a1.model));
         content.push_str(&format!("  Agent voice:\t\t{}\n", a1.voice));
         content.push_str(&format!("  Agent system prompt:\t{}\n", a1.system_prompt));
         content.push_str(" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n");
         content.push_str(&format!("  Agent name:\t\t{}\n", a2.name));
-        content.push_str(&format!("  Agent TTS:\t{}\n", a2.tts));
+        content.push_str(&format!("  Agent TTS:\t\t{}\n", a2.tts));
         content.push_str(&format!("  Agent model:\t\t{}\n", a2.model));
         content.push_str(&format!("  Agent voice:\t\t{}\n", a2.voice));
         content.push_str(&format!("  Agent system prompt:\t{}\n", a2.system_prompt));
@@ -991,7 +991,7 @@ pub fn save_conversation(
       content.push_str(" This conversation was a conversation between a user and an ai agent\n\n");
       content.push_str(" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n");
       content.push_str(&format!("  Agent name:\t\t{}\n", agent.name));
-      content.push_str(&format!("  Agent TTS:\t{}\n", agent.tts));
+      content.push_str(&format!("  Agent TTS:\t\t{}\n", agent.tts));
       content.push_str(&format!("  Agent model:\t\t{}\n", agent.model));
       content.push_str(&format!("  Agent voice:\t\t{}\n", meta.voice));
       content.push_str(&format!("  Agent system prompt:\t{}\n", meta.system_prompt));
