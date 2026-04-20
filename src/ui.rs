@@ -74,10 +74,9 @@ pub fn spawn_ui_thread(
     );
 
     let mut waiting_for_first_line = true;
-    let mut skip_bottom_bar = false;
+    let mut skip_next_bottom_bar = false;
 
     loop {
-      skip_bottom_bar = false;
       while let Ok(msg) = rx_ui.try_recv() {
         let mut parts = msg.splitn(2, '|');
         let msg_type = parts.next().unwrap_or("");
@@ -144,7 +143,7 @@ pub fn spawn_ui_thread(
               &status_line,
               &mut bottom_bar,
             );
-            skip_bottom_bar = true;
+            skip_next_bottom_bar = true;
           }
 
           "modal_show" => {
@@ -184,8 +183,10 @@ pub fn spawn_ui_thread(
       ui_state.spinner_index = (ui_state.spinner_index + 1) % spinner.len();
 
       let (_cols, term_height) = terminal::size().unwrap_or((80, 24));
-      if !skip_bottom_bar {
+      if !skip_next_bottom_bar {
         bottom_bar = render_bottom_bar(&mut out, &ui_state, &spinner, &status_line, term_height - 1);
+      } else {
+        skip_next_bottom_bar = false;
       }
       thread::sleep(Duration::from_millis(10));
     }
