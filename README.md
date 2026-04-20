@@ -1,15 +1,21 @@
 ## The final AI voice conversational system all running in your terminal!
 
-Powerful ai toolkit to interact with ai models via voice from your terminal at extremely low latency with realistic voices. Allows live voice conversations and run debates between ai agents with user intervention, stdin and text file inputs and more
+Powerful terminal-based voice ai toolkit with realistic voices and extremely low latency.
+
+🚀 live voice conversations with ai agents
+🚀 infinite debates between ai agents (you can also participate in between)
+🚀 read txt files with voice
+🚀 export to audio and text files
+🚀 pipe prompt via shell
 
 Finally the cross platform voice ui you were waiting on now available for MacOS, Windows and Linux, no need for external installations.
-
-🚀 Now it also supports automatic infinite debates between agents. Listen and learn, and you can participate in the debate too via voice
 
 #### **Sponsor this project**
 [![Sponsor ai-mate](https://img.shields.io/static/v1?label=Sponsor&message=%E2%9D%A4&logo=GitHub&color=%23fe8e86)](https://github.com/sponsors/DavidValin)
 
 ![ai mate screenshot](https://github.com/DavidValin/ai-mate/raw/main/preview.png)
+
+![how it works](https://github.com/DavidValin/ai-mate/raw/main/how-it-works.png)
 
 ### English demo
 https://github.com/user-attachments/assets/d9c27108-41f7-4148-8c32-28c8ca6d8516
@@ -24,8 +30,6 @@ https://github.com/user-attachments/assets/e612feaa-8ab0-4761-9c67-53ec7d40cab7
 ## How it works
 
 `RECORD -> STT -> LLM -> TTS -> PLAYBACK`
-
-![how it works](https://github.com/DavidValin/ai-mate/raw/main/how-it-works.png)
 
 ```
 - You start the program and start talking.
