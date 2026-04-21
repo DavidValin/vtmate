@@ -34,5 +34,5 @@ Features:
   - 📌 Integrated `kokoro TTS` system
   - 📌 Interface with `OpenTTS` system
   - 📌 Supports `ollama` or `llama-server` or `llamafile`
-  - 📌 28 languages supported (`ai-mate --list-voices`)
+  - 📌 28 languages supported (`vtmate --list-voices`)
   - 📌 Use any gguf model from huggingface.com or ollama models (small models reply faster)

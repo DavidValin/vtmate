@@ -92,7 +92,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     } else {
       get_user_home_path()
         .ok_or("Unable to determine home directory")?
-        .join(".ai-mate")
+        .join(".vtmate")
         .join("settings")
     };
 
@@ -501,7 +501,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   } else {
     get_user_home_path()
       .ok_or("Unable to determine home directory")?
-      .join(".ai-mate")
+      .join(".vtmate")
       .join("settings")
   };
 

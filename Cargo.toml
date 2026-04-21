@@ -1,11 +1,11 @@
 [package]
-name = "ai-mate"
-version = "0.3.8"
+name = "vtmate"
+version = "0.3.9"
 edition = "2024"
 
 authors = ["David Valin <hola@davidvalin.com>"]
-homepage = "https://github.com/DavidValin/ai-mate"
-repository = "https://github.com/DavidValin/ai-mate"
+homepage = "https://github.com/DavidValin/vtmate"
+repository = "https://github.com/DavidValin/vtmate"
 description = "A simple audio ai conversation system"
 license-file = "LICENSE"
 readme = "README.md"

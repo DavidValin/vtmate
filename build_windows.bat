@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 REM ===== Config =====
-set "BIN_BASE=ai-mate"
+set "BIN_BASE=vtmate"
 set "PROJECT_ROOT=%~dp0"
 set "DIST_DIR=%PROJECT_ROOT%dist"
 set "TARGET_DIR=%PROJECT_ROOT%target-cross"

@@ -19,7 +19,7 @@ pub fn ensure_piper_espeak_env() {
     Some(h) => h,
     None => return,
   };
-  let base = home.join(".ai-mate");
+  let base = home.join(".vtmate");
   let espeak_dir = base.join("espeak-ng-data");
   let marker = base.join(".espeak_extracted");
   if !(marker.exists() && espeak_dir.is_dir()) {

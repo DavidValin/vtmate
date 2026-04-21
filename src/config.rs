@@ -47,7 +47,7 @@ pub struct AgentSettings {
 
 #[derive(Parser, Debug, Clone)]
 #[clap(after_help = r#"
-Settings file is at ~/.ai-mate/settings
+Settings file is at ~/.vtmate/settings
 
 Explanation on the fields:
 
@@ -59,7 +59,7 @@ Explanation on the fields:
   * voice:                the voice name to use by the
                           agent (see available voices for each
                           language and tts system running
-                          `ai-mate --list-voices`).
+                          `vtmate --list-voices`).
 
                           Voice mixing:
                             you can mix 2 voices. example of mixing
@@ -108,7 +108,7 @@ Explanation on the fields:
                           pushed while speaking, then release.
   ------------------------------------------------------------
   * whisper_model_path:   the path to the whisper model.
-                          ai-mate unzips 2 models in
+                          vtmate unzips 2 models in
                           ~/.whisper-models, tiny and small.
                           You can download bigger models and
                           point to them here
@@ -377,7 +377,7 @@ pub fn ensure_settings_file() -> Result<(), Error> {
   let home =
     get_user_home_path().ok_or_else(|| Error::msg("Unable to determine home directory"))?;
 
-  let ai_mate_dir = home.join(".ai-mate");
+  let ai_mate_dir = home.join(".vtmate");
   // Ensure directory exists
   if !ai_mate_dir.exists() {
     create_dir_all(&ai_mate_dir)?;

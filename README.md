@@ -5,11 +5,11 @@ Powerful terminal-based voice ai toolkit with realistic voices and extremely low
 Finally the cross platform voice ui you were waiting on now available for MacOS, Windows and Linux, no need for external installations.
 
 #### **Sponsor this project**
-[![Sponsor ai-mate](https://img.shields.io/static/v1?label=Sponsor&message=%E2%9D%A4&logo=GitHub&color=%23fe8e86)](https://github.com/sponsors/DavidValin)
+[![Sponsor vtmate](https://img.shields.io/static/v1?label=Sponsor&message=%E2%9D%A4&logo=GitHub&color=%23fe8e86)](https://github.com/sponsors/DavidValin)
 
-![ai mate screenshot](https://github.com/DavidValin/ai-mate/raw/main/preview.png)
+![ai mate screenshot](https://github.com/DavidValin/vtmate/raw/main/preview.png)
 
-![how it works](https://github.com/DavidValin/ai-mate/raw/main/docs/diagrams/how-it-works.png)
+![how it works](https://github.com/DavidValin/vtmate/raw/main/docs/en/diagrams/how-it-works.png)
 
 ## Features
 
@@ -22,15 +22,15 @@ Finally the cross platform voice ui you were waiting on now available for MacOS,
 - 📌 Stop PlayBack: `press "<ESCAPE>" ONCE to stop the playback for the current response`
 - 📌 Interrupt: `press "<ESCAPE>" TWICE to interrupt the current response alltogether`
 - 📌 Voice speed change: `change the agent voice speed by pressing <ARROW_UP> / <ARROW_DOWN> (applicable to next response)`
-- 📌 Voice read a txt file: `ai-mate -r myfile.txt`
-- 📌 Voice read text from stdin phrase by phrase: `echo "Hello. How are you?" | ai-mate -r -`
-- 📌 Save conversation as audio and text: `ai-mate -s`
-- 📌 Load separate settings file with different agents: `ai-mate -c philosophers-settings.txt`
+- 📌 Voice read a txt file: `vtmate -r myfile.txt`
+- 📌 Voice read text from stdin phrase by phrase: `echo "Hello. How are you?" | vtmate -r -`
+- 📌 Save conversation as audio and text: `vtmate -s`
+- 📌 Load separate settings file with different agents: `vtmate -c philosophers-settings.txt`
 - 📌 Integrated `whisper`
 - 📌 Integrated `kokoro TTS` system
 - 📌 Interface with `OpenTTS` system
 - 📌 Supports `ollama` or `llama-server`
-- 📌 28 languages supported (`ai-mate --list-voices`)
+- 📌 28 languages supported (`vtmate --list-voices`)
 - 📌 Use any gguf model from huggingface.com or ollama models (small models reply faster)
 
 ### English demo
@@ -41,7 +41,7 @@ https://github.com/user-attachments/assets/e612feaa-8ab0-4761-9c67-53ec7d40cab7
 
 ### Status
 
-✅ Ready to kick in! [Download](https://github.com/DavidValin/ai-mate/releases)
+✅ Ready to kick in! [Download](https://github.com/DavidValin/vtmate/releases)
 
 ## How it works
 
@@ -61,7 +61,7 @@ https://github.com/user-attachments/assets/e612feaa-8ab0-4761-9c67-53ec7d40cab7
 
 - ✅ ollama (default)
 - ✅ llama-server
-- ✅ openclaw / clawbot (voice chat with your agent by connecting ai-mate to the endpoint)
+- ✅ openclaw / clawbot (voice chat with your agent by connecting vtmate to the endpoint)
 
 You can run the models locally (by default) or remotely by configuring the base urls via cli option.
 
@@ -72,15 +72,15 @@ You can run the models locally (by default) or remotely by configuring the base 
 
 ## Installation
 
-### 📌 1. **Download ai-mate**
-- `https://github.com/DavidValin/ai-mate/releases`
-- Move the binary to a folder in your $PATH so you can use `ai-mate` command anywhere
+### 📌 1. **Download vtmate**
+- `https://github.com/DavidValin/vtmate/releases`
+- Move the binary to a folder in your $PATH so you can use `vtmate` command anywhere
 
 ### 📌 2. **Install llm engine (needed for ai responses)**
 
 Option A- ollama (the default)
 - Install `https://ollama.com/download`.
-- Pull the model you want to use with ai-mate, for instance: `ollama pull llama3.2:3b`.
+- Pull the model you want to use with vtmate, for instance: `ollama pull llama3.2:3b`.
 
 Option B- llama-server support.
 - Install llama.cpp: `https://github.com/ggml-org/llama.cpp`.
@@ -88,7 +88,7 @@ Option B- llama-server support.
 
 ### 📌 3. **(Windows only) Install supported terminal**
 
-- Install Windows Terminal (which supports emojis): `https://apps.microsoft.com/detail/9n0dx20hk701` (use this terminal to run ai-mate)
+- Install Windows Terminal (which supports emojis): `https://apps.microsoft.com/detail/9n0dx20hk701` (use this terminal to run vtmate)
 
 ### 📌 4. **(Optional) OpenTTS support**
 
@@ -96,7 +96,7 @@ Option B- llama-server support.
 
 ## Configure agents
 
-The first time you run ai-mate it will create a configuration file if it doesn't exist in `~/.ai-mate/settings` with 2 agents. You can define as many agents as you want.
+The first time you run vtmate it will create a configuration file if it doesn't exist in `~/.vtmate/settings` with 2 agents. You can define as many agents as you want.
 
 Example of agent definition:
 
@@ -121,112 +121,112 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 
 To see explanation of each field:
 ```
-ai-mate --help
+vtmate --help
 ```
 
 ## How to use it
 
-The first agent defined in `~/ai-mate/settings` will always be selected agent when running ai-mate, unless `--agent <agent_name>` is used.
+The first agent defined in `~/vtmate/settings` will always be selected agent when running vtmate, unless `--agent <agent_name>` is used.
 
-Before running ai-mate make sure ollama is running: `ollama serve`
+Before running vtmate make sure ollama is running: `ollama serve`
 
 ### Conversation mode
 
-![conversation mode](https://github.com/DavidValin/ai-mate/raw/main/docs/diagrams/conversation-mode.png)
+![conversation mode](https://github.com/DavidValin/vtmate/raw/main/docs/en/diagrams/conversation-mode.png)
 
 Start conversation with default agent and save it as audio and text
 (waits for user voice input and respond)
 
 ```
-ai-mate -s
+vtmate -s
 ```
 
 Start conversation with a specific agent
 (waits for user voice input and respond)
 ```
-ai-mate --agent "main agent"
+vtmate --agent "main agent"
 ```
 
 Start conversation with an initial text prompt
 ```
-ai-mate -p "Are we alone in the galaxy?"
+vtmate -p "Are we alone in the galaxy?"
 ```
 
 Start conversation with an initial prompt from file
 ```
-ai-mate -i myprompt.txt
+vtmate -i myprompt.txt
 ```
 
 Start conversation with an initial prompt from stdin
 ```
-echo "How to fly without wings?" | ai-mate -i -
+echo "How to fly without wings?" | vtmate -i -
 ```
 
-* You can switch agents in realtime by pressing `ARROW_LEFT` / `ARROW_RIGHT` keyword arrows (you need at least 2 agents defined in `~/ai-mate/settings`).
+* You can switch agents in realtime by pressing `ARROW_LEFT` / `ARROW_RIGHT` keyword arrows (you need at least 2 agents defined in `~/vtmate/settings`).
 * You can change the voice speed by pressing `ARROW_UP` / `ARROW_DOWN`
-* Be able to save the conversation in a wav and text file by adding `-s` option. It will save it in `~/.ai-mate/conversations` folder
+* Be able to save the conversation in a wav and text file by adding `-s` option. It will save it in `~/.vtmate/conversations` folder
 
 ### Debate mode
 
-![debate mode](https://github.com/DavidValin/ai-mate/raw/main/docs/diagrams/debate-mode.png)
+![debate mode](https://github.com/DavidValin/vtmate/raw/main/docs/en/diagrams/debate-mode.png)
 
 Initialize a debate between two agents and be able to participate in the debate by speaking at any time. To create a good debate adjust the system prompts of each agent and give a detailed initial input.
 
 Start a debate with an initial subject
 ```
-ai-mate --debate "God" "Devil" "How to succeed in life?"
+vtmate --debate "God" "Devil" "How to succeed in life?"
 ```
 
 Start a debate with an initial prompt from file
 ```
-ai-mate --debate "God" "Devil" -i myprompt.txt
+vtmate --debate "God" "Devil" -i myprompt.txt
 ```
 
 Start a debate with an initial prompt from stdin
 ```
-echo "Lets discuss the permissions of this files: \n\n $(ls -la)" | ai-mate --debate "Unix administrator" "Security Expert" -i -
+echo "Lets discuss the permissions of this files: \n\n $(ls -la)" | vtmate --debate "Unix administrator" "Security Expert" -i -
 ```
 
 * You can also start/stop a debate from conversation mode by pressing `Control+D` and picking the debate agents.
-* Be able to save the conversation in a wav and text file by adding `-s` option. It will save it in `~/.ai-mate/conversations` folder
+* Be able to save the conversation in a wav and text file by adding `-s` option. It will save it in `~/.vtmate/conversations` folder
 
 ### Single run
 
 Get a single response from prompt
 ```
-ai-mate -q -p "Explain me the Zettelkasten Method"
+vtmate -q -p "Explain me the Zettelkasten Method"
 ```
 
 Get a single response from prompt from file
 ```
-ai-mate -q -i myprompt.txt
+vtmate -q -i myprompt.txt
 ```
 
 Get a single response from prompt from stdin
 ```
-echo "Is $(date) a national holiday day in Spain?" | ai-mate -q -i -
+echo "Is $(date) a national holiday day in Spain?" | vtmate -q -i -
 ```
 
 Get a single response and save it as audio file and text file
 ```
-echo "Can you find any suspicious processes in the next list? If so, why?\n\n $(ps aux | head -20)" | ai-mate -q -i - -s
+echo "Can you find any suspicious processes in the next list? If so, why?\n\n $(ps aux | head -20)" | vtmate -q -i - -s
 ```
 
 ###  File to speech mode
 
-![read file mode](https://github.com/DavidValin/ai-mate/raw/main/docs/diagrams/read-file-mode.png)
+![read file mode](https://github.com/DavidValin/vtmate/raw/main/docs/en/diagrams/reading-mode.png)
 
 Read a text file or stdin text phrase by phrase using an agent voice. Ensure the agent you choose has correct language and voice for your text.
 In this mode, only the next agent settings are used: "tts", "voice" and "language".
 
 from a txt file:
 ```
-ai-mate -r myfile.txt --agent "main agent"
+vtmate -r myfile.txt --agent "main agent"
 ```
 
 from stdin text:
 ```
-ai-mate -r - --agent "main agent"
+vtmate -r - --agent "main agent"
 ```
 
 In this mode you can:
@@ -237,7 +237,7 @@ In this mode you can:
 
 ####  Separate agents
 
-By default ai-mate uses `~/.ai-mate/settings` file.
+By default vtmate uses `~/.vtmate/settings` file.
 You can create different setting fields for different agent groups, example:
 
 ```
@@ -248,14 +248,14 @@ employees.txt
 
 And then load each as you need:
 ```
-ai-mate -c philosophers.txt --debate "Aristoteles" "Ptahhotep" "how to achieve harmony?"
+vtmate -c philosophers.txt --debate "Aristoteles" "Ptahhotep" "how to achieve harmony?"
 ```
 
 ####  Useful to know
 
-ai-mate self contains espeak-ng-data, the whisper tiny & small models and kokoro model and voices which will be autoextracted when running ai-mate if they are not found in next locations:
+vtmate self contains espeak-ng-data, the whisper tiny & small models and kokoro model and voices which will be autoextracted when running vtmate if they are not found in next locations:
 
-- `~/.ai-mate/espeak-ng-data.tar.gz`
+- `~/.vtmate/espeak-ng-data.tar.gz`
 - `~/.whisper-models/ggml-tiny.bin`
 - `~/.whisper-models/ggml-small.bin`
 - `~/.cache/k/0.onnx`
@@ -263,20 +263,20 @@ ai-mate self contains espeak-ng-data, the whisper tiny & small models and kokoro
 
 * If you want to avoid sound interruptions you can use `ptt` mode or increase the `sound_threshold_peak` for your microphone levels.
 * If you want to use OpenTTS, start the docker service first: `docker run --rm --platform=linux/amd64 -p 5500:5500 synesthesiam/opentts:all` (it will pull the image the first time). Adjust the platform as needed depending on your hardware.
-* If you have problems starting ai-mate you can remove `~/ai-mate/settings` so it recreates the default configuration
+* If you have problems starting vtmate you can remove `~/vtmate/settings` so it recreates the default configuration
 * By default whisper tiny is used (from ~/.whisper-models/ggml-small.bin). If you need better speech recognition, download a better whisper model and update the `whisper_model_path` setting.
 
 If you need help:
 
 ```
-ai-mate --help
+vtmate --help
 ```
 
 ## Acceleration support
 
-Do you have GPU? (nvidia? an apple computer?) Great! then ai-mate speed is at lighting speed =)
+Do you have GPU? (nvidia? an apple computer?) Great! then vtmate speed is at lighting speed =)
 
-* To be able to use acceleration, pick the built version for your hardware from [Releases list](https://github.com/DavidValin/ai-mate/releases)
+* To be able to use acceleration, pick the built version for your hardware from [Releases list](https://github.com/DavidValin/vtmate/releases)
 * For CUDA install CUDA Toolkit. For Vulkan install VULKAN SDK
 
 ```
@@ -324,11 +324,11 @@ Windows    ARM64   ✅       ⚠️        ⚠️      n/a     ⚠️
 | te |       🇮🇳  Telugu             |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
 | tr |       🇹🇷  Turkish            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
 
-## Build ai-mate from source code
+## Build vtmate from source code
 
 Simplest way:
 ```
-cargo install ai-mate
+cargo install vtmate
 ```
 
 For custom builds:

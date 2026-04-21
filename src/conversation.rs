@@ -692,7 +692,7 @@ fn maybe_setup_and_save(
     let uuid_str = &Uuid::new_v4().to_string()[..8];
     let home = crate::util::get_user_home_path().ok_or("Unable to determine home directory")?;
     let path = home
-      .join(".ai-mate")
+      .join(".vtmate")
       .join("conversations")
       .join(format!("{}_{}.txt", date_str, uuid_str));
 
@@ -924,7 +924,7 @@ pub fn save_conversation(
   metadata: Option<&SaveMetadata>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let home = crate::util::get_user_home_path().ok_or("Unable to determine home directory")?;
-  let conv_dir = home.join(".ai-mate").join("conversations");
+  let conv_dir = home.join(".vtmate").join("conversations");
 
   if !conv_dir.exists() {
     fs::create_dir_all(&conv_dir)?;
@@ -998,7 +998,7 @@ pub fn save_conversation(
     }
     content.push_str("\n ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n");
     content.push_str(&format!("  * Date: {}\n", meta.start_date));
-    content.push_str("  * Created with ai-mate - www.github.com/DavidValin/ai-mate\n");
+    content.push_str("  * Created with vtmate - www.github.com/DavidValin/vtmate\n");
   }
 
   fs::write(filepath, content)?;
