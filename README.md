@@ -242,7 +242,7 @@ In this mode you can:
 * Move to next phrase by pressing `ARROW_DOWN`
 * Stop / Resume playback by pressing `SPACE`
 
-####  Separate agents
+###  Separate agents
 
 By default vtmate uses `~/.vtmate/settings` file.
 You can create different setting fields for different agent groups, example:
@@ -258,7 +258,7 @@ And then load each as you need:
 vtmate -c philosophers.txt --debate "Aristoteles" "Ptahhotep" "how to achieve harmony?"
 ```
 
-####  Useful to know
+###  Useful to know
 
 vtmate self contains espeak-ng-data, the whisper tiny & small models and kokoro model and voices which will be autoextracted when running vtmate if they are not found in next locations:
 
