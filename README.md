@@ -14,14 +14,14 @@ Finally the cross platform voice ui you were waiting on now available for MacOS,
 ## Features
 
 - 📌 Continuous Voice chat (live conversation): `records user continuously and stops on silence, submitting the request to the agent`
-- 📌 Push to Talk mode (PTT): `keep <SPACE> pressed while talking and release to stop recording`
+- 📌 Push to Talk mode (PTT): `keep &lt;SPACE&gt; pressed while talking and release to stop recording`
 - 🚀 AI agents debate (2 agents talking to each other): `give an initial input and let the agents talk to each other. You can interrupt in the middle of the debate changing the subject`
-- 📌 Realtime agent swap: `change the agent by pressing <ARROW_LEFT> / <ARROW_RIGHT> (applicable to next response)`
+- 📌 Realtime agent swap: `change the agent by pressing &lt;ARROW_LEFT&gt; / &lt;ARROW_RIGHT&gt; (applicable to next response)`
 - 📌 Voice interrupt: `the agent stops talking if you interrupt via voice`
-- 📌 Recording Pause / Resume: `toggle "<SPACE>" key to pause / resume voice recording only`
-- 📌 Stop PlayBack: `press "<ESCAPE>" ONCE to stop the playback for the current response`
-- 📌 Interrupt: `press "<ESCAPE>" TWICE to interrupt the current response alltogether`
-- 📌 Voice speed change: `change the agent voice speed by pressing <ARROW_UP> / <ARROW_DOWN> (applicable to next response)`
+- 📌 Recording Pause / Resume: `toggle "&lt;SPACE&gt;" key to pause / resume voice recording only`
+- 📌 Stop PlayBack: `press "&lt;ESCAPE&gt;" ONCE to stop the playback for the current response`
+- 📌 Interrupt: `press "&lt;ESCAPE&gt;" TWICE to interrupt the current response alltogether`
+- 📌 Voice speed change: `change the agent voice speed by pressing &lt;ARROW_UP&gt; / &lt;ARROW_DOWN&gt; (applicable to next response)`
 - 📌 Voice read a txt file: `vtmate -r myfile.txt`
 - 📌 Voice read text from stdin phrase by phrase: `echo "Hello. How are you?" | vtmate -r -`
 - 📌 Save conversation as audio and text: `vtmate -s`

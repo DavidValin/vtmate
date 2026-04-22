@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>vtmate | Documentation</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Nunito:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="../styles.css" />
+    <script defer src="../app.js"></script>
+  </head>
+  <body data-site-lang="en" data-page="documentation.html" data-title-en="vtmate | Documentation" data-title-es="vtmate | Documentacion">
+    <div class="grain"></div>
+
+    <div class="layout">
+      <aside class="docs-sidebar panel">
+        <h3 class="docs-title">Navigation</h3>
+        <ul class="docs-list">
+          <li><a data-page-link="index.html">Home</a></li>
+          <li><a data-page-link="installation.html">Installation</a></li>
+          <li><a data-page-link="configuration.html">Configuration</a></li>
+          <li><a data-page-link="documentation.html">Tutorials</a></li>
+          <li><a data-page-link="video.html">Video</a></li>
+          <li><a data-page-link="features.html">Features</a></li>
+        </ul>
+        <a href="https://github.com/DavidValin/vtmate" target="_blank" style="display:block;padding-top: 10px">
+          <img src="https://upload.wikimedia.org/wikipedia/commons/c/c2/GitHub_Invertocat_Logo.svg" alt="GitHub" width="32" height="32" style="width: 23px; height: 14px;" /> Github
+        </a>
+        <a href="https://crates.io/crates/vtmate" target="_blank" style="display:block;padding-top: 10px">
+          <img src="https://cdn-1.webcatalog.io/catalog/crates-io/crates-io-icon.png?v=1714780430365" alt="crates.io" width="32" height="32" style="width: 23px; height: 14px;" /> Crates.io
+        </a>
+      </aside>
+      <main class="container">
+        <div class="topbar panel">
+          <div class="brand-lockup">
+            <div class="brand-title">vtmate</div>
+            <div class="brand-subtitle">Reference and usage guides</div>
+          </div>
+          <div class="lang-switch">
+            <a class="flag-link" data-lang-switch="en" href="#" aria-label="English">🇬🇧</a>
+            <a class="flag-link" data-lang-switch="es" href="#" aria-label="Espanol">🇪🇸</a>
+          </div>
+        </div>
+
+        <section class="panel">
+          <h1 class="eyebrow">Documentation</h1>
+          <p>
+            The final AI voice conversational system running in your terminal. This page
+            covers installation, configuration, and the main interaction modes.
+          </p>
+
+          <div class="doc-index">
+            <a class="doc-index-link" href="#docs-configuration"><strong>Configuration</strong><span>Set up agents, voices, providers, and settings files.</span></a>
+            <a class="doc-index-link" href="#docs-conversation"><strong>Conversation Mode</strong><span>Run the live voice loop and control it from the keyboard.</span></a>
+            <a class="doc-index-link" href="#docs-debate"><strong>Debate Mode</strong><span>Start two agents talking to each other from one initial input.</span></a>
+            <a class="doc-index-link" href="#docs-reading"><strong>Reading Mode</strong><span>Read text files or stdin aloud with the selected agent voice.</span></a>
+            <a class="doc-index-link" href="#docs-single-run"><strong>Single Run Mode</strong><span>Get one response and exit for automation or shell workflows.</span></a>
+          </div>
+
+          <div class="doc-blocks">
+            <article id="docs-configuration" class="doc-block">
+              <h3>Configuration</h3>
+              <p>
+                On first run, <code>vtmate</code> creates <code>~/.vtmate/settings</code>
+                with two agents if it does not exist. You can define as many agents as
+                you want, swap them in realtime with the arrow keys, load alternate
+                settings files with <code>-c</code>, and list voices with
+                <code>vtmate --list-voices</code>.
+              </p>
+              <p class="command-label">Example agent configuration</p>
+              <pre><code>[agent]
+name = main agent
+language = en
+voice = bf_alice
+voice_speed = 1.1
+provider = ollama
+baseurl = http://localhost:8080
+model = gpt-oss-20b
+system_prompt = You are a smart ai assistant.
+sound_threshold_peak = 0.1
+end_silence_ms = 2000
+tts = kokoro
+ptt = false
+whisper_model_path = ~/.whisper-models/ggml-tiny.bin</code></pre>
+              <p class="command-label">Load an alternate settings file</p>
+              <pre><code>vtmate -c philosophers-settings.txt</code></pre>
+              <p class="command-label">List available voices</p>
+              <pre><code>vtmate --list-voices</code></pre>
+            </article>
+
+            <article id="docs-conversation" class="doc-block">
+              <h3>Conversation Mode</h3>
+              <p>
+                The live loop is <code>RECORD -> STT -> LLM -> TTS -> PLAYBACK</code>.
+                Recording starts when audio crosses the configured threshold and stops on
+                silence, unless push-to-talk is enabled. You can pause recording with
+                <code>SPACE</code>, stop playback with one <code>ESCAPE</code>, interrupt
+                the full response with two <code>ESCAPE</code> presses, swap agents with
+                <code>ARROW_LEFT</code>/<code>ARROW_RIGHT</code>, and adjust voice speed
+                with <code>ARROW_UP</code>/<code>ARROW_DOWN</code>.
+              </p>
+              <img class="doc-image" src="img/conversation-mode.png" alt="Conversation mode diagram" />
+              <p class="command-label">Default live conversation and save audio plus text</p>
+              <pre><code>vtmate -s</code></pre>
+              <p class="command-label">Start with a specific agent</p>
+              <pre><code>vtmate --agent "main agent"</code></pre>
+              <p class="command-label">Start with an initial prompt from the CLI</p>
+              <pre><code>vtmate -p "Are we alone in the galaxy?"</code></pre>
+              <p class="command-label">Start with an initial prompt from a file</p>
+              <pre><code>vtmate -i myprompt.txt</code></pre>
+              <p class="command-label">Start with an initial prompt from stdin</p>
+              <pre><code>echo "How to fly without wings?" | vtmate -i -</code></pre>
+            </article>
+
+            <article id="docs-debate" class="doc-block">
+              <h3>Debate Mode</h3>
+              <p>
+                Debate mode lets two agents talk to each other from an initial prompt.
+                It is useful for adversarial reasoning or role-based exploration. You can
+                interrupt and redirect the discussion at any point. From conversation mode
+                you can also start or stop a debate with <code>Control+D</code>.
+              </p>
+              <img class="doc-image" src="img/debate-mode.png" alt="Debate mode diagram" />
+              <p class="command-label">Start a debate from an initial subject</p>
+              <pre><code>vtmate --debate "God" "Devil" "How to succeed in life?"</code></pre>
+              <p class="command-label">Start a debate with a prompt from a file</p>
+              <pre><code>vtmate --debate "God" "Devil" -i myprompt.txt</code></pre>
+              <p class="command-label">Start a debate with a prompt from stdin</p>
+              <pre><code>echo "Lets discuss the permissions of this files:" | vtmate --debate "Unix administrator" "Security Expert" -i -</code></pre>
+              <p class="command-label">Save the debate as audio plus text</p>
+              <pre><code>vtmate --debate "Aristoteles" "Ptahhotep" "Who was the first philosofer?" -s</code></pre>
+            </article>
+
+            <article id="docs-reading" class="doc-block">
+              <h3>Reading Mode</h3>
+              <p>
+                Reading mode converts file or stdin text into spoken output phrase by
+                phrase using the selected agent voice. In this mode, the relevant agent
+                settings are <code>tts</code>, <code>voice</code>, and
+                <code>language</code>. Use <code>ARROW_UP</code> and
+                <code>ARROW_DOWN</code> to move between phrases, and <code>SPACE</code>
+                to stop or resume playback.
+              </p>
+              <img class="doc-image" src="img/reading-mode.png" alt="Read file mode diagram" />
+              <p class="command-label">Read from a text file</p>
+              <pre><code>vtmate -r myfile.txt --agent "main agent"</code></pre>
+              <p class="command-label">Read from stdin</p>
+              <pre><code>echo "Hello. How are you?" | vtmate -r - --agent "main agent"</code></pre>
+            </article>
+
+            <article id="docs-single-run" class="doc-block">
+              <h3>Single Run Mode</h3>
+              <p>
+                Single run mode gets one response and exits. It is useful for automation,
+                shell pipelines, and scripts. You can provide the prompt directly, from a
+                file, or from stdin, and optionally save the result as both audio and text.
+              </p>
+              <p class="command-label">Run a single direct prompt</p>
+              <pre><code>vtmate -q -p "Explain me the Zettelkasten Method"</code></pre>
+              <p class="command-label">Run a prompt from a file</p>
+              <pre><code>vtmate -q -i myprompt.txt</code></pre>
+              <p class="command-label">Run a prompt from stdin</p>
+              <pre><code>echo "Is $(date) a national holiday day in Spain?" | vtmate -q -i -</code></pre>
+              <p class="command-label">Save the result as audio plus text</p>
+              <pre><code>echo "Can you find any suspicious processes in the next list? If so, why?\n\n $(ps aux | head -20)" | vtmate -q -i - -s</code></pre>
+            </article>
+          </div>
+        </section>
+      </main>
+    </div>
+
+  </body>
+</html>
