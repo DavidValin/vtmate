@@ -4,6 +4,16 @@ Powerful terminal-based voice ai toolkit with realistic voices and extremely low
 
 Finally the cross platform voice ui you were waiting on now available for MacOS, Windows and Linux, no need for external installations.
 
+### Video demonstration
+<details>
+<summary>(🇬🇧 English) Conversation video demo</summary>
+https://github.com/user-attachments/assets/d9c27108-41f7-4148-8c32-28c8ca6d8516
+</details>
+<details>
+<summary>(🇪🇸 Spanish) Conversation video demo</summary>
+https://github.com/user-attachments/assets/e612feaa-8ab0-4761-9c67-53ec7d40cab7
+</details>
+
 #### **Sponsor this project**
 [![Sponsor vtmate](https://img.shields.io/static/v1?label=Sponsor&message=%E2%9D%A4&logo=GitHub&color=%23fe8e86)](https://github.com/sponsors/DavidValin)
 
@@ -31,19 +41,6 @@ Finally the cross platform voice ui you were waiting on now available for MacOS,
 - 📌 Supports `ollama` or `llama-server`
 - 📌 28 languages supported (`vtmate --list-voices`)
 - 📌 Use any gguf model from huggingface.com or ollama models (small models reply faster)
-
-### Video demonstration
-<details>
-<summary>Conversation video demo (🇬🇧 English)</summary>
-
-https://github.com/user-attachments/assets/d9c27108-41f7-4148-8c32-28c8ca6d8516
-</details>
-
-<details>
-<summary>Conversation video demo (🇪🇸 Spanish)</summary>
-
-https://github.com/user-attachments/assets/e612feaa-8ab0-4761-9c67-53ec7d40cab7
-</details>
 
 ### Status
 
