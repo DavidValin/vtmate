@@ -7,12 +7,15 @@ Finally the cross platform voice ui you were waiting on now available for MacOS,
 ### Video demonstration
 <details>
 <summary>(🇬🇧 English) Conversation video demo</summary>
-https://github.com/user-attachments/assets/d9c27108-41f7-4148-8c32-28c8ca6d8516
-</details>
 
+https://github.com/user-attachments/assets/d9c27108-41f7-4148-8c32-28c8ca6d8516
+
+</details>
 <details>
 <summary>(🇪🇸 Spanish) Conversation video demo</summary>
+
 https://github.com/user-attachments/assets/e612feaa-8ab0-4761-9c67-53ec7d40cab7
+
 </details>
 
 #### **Sponsor this project**
