@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>vtmate | Home</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Nunito:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="../styles.css" />
+<style>
+    .feature-cards {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+    .small.card {
+      flex: 1 1 calc(33% - 1rem);
+      min-width: 300px;
+    }
+    .page-panel {
+      margin-bottom: 1.2rem;
+    }
+    table {
+      width: 100%;
+      margin: 0 auto;
+    }
+    table th {
+      text-align: left;
+      padding-bottom: 15px;
+      padding-top: 15px;
+    }
+    td, th {
+        padding-left: 30px;
+        padding-right: 30px;
+      }
+    /* Flex table fallback for narrow screens */
+    @media (max-width: 600px) {
+      table, thead, tbody, tr, td, th {
+        display: block;
+      }
+      thead {display:none;}
+      tr {
+        margin-bottom: 30px;
+      }
+      td, th {
+        width: 100%;
+        text-align: center;
+        padding-left: 70px;
+        padding-right: 70px;
+      }
+      h3.card-title {text-align:center;}
+    }
+  </style>
+    <script defer src="../app.js"></script>
+  </head>
+  <body data-site-lang="es" data-page="index.html" data-title-en="vtmate | Home" data-title-es="vtmate | Home">
+    <div class="grain"></div>
+
+    <div class="layout">
+      <aside class="docs-sidebar panel">
+        <h3 class="docs-title">Navegacion</h3>
+        <ul class="docs-list">
+          <li><a data-page-link="index.html">Home</a></li>
+          <li><a data-page-link="installation.html">Instalacion</a></li>
+          <li><a data-page-link="configuration.html">Configuration</a></li>
+          <li><a data-page-link="documentation.html">Tutoriales</a></li>
+          <li><a data-page-link="video.html">Video</a></li>
+          <li><a data-page-link="features.html">Funciones</a></li> 
+        </ul>
+        <a href="https://github.com/DavidValin/vtmate" target="_blank" style="display:block;padding-top: 10px">
+          <img src="https://upload.wikimedia.org/wikipedia/commons/c/c2/GitHub_Invertocat_Logo.svg" alt="GitHub" width="32" height="32" style="width: 23px; height: 14px;" /> Github
+        </a>
+        <a href="https://crates.io/crates/vtmate" target="_blank" style="display:block;padding-top: 10px">
+          <img src="https://cdn-1.webcatalog.io/catalog/crates-io/crates-io-icon.png?v=1714780430365" alt="crates.io" width="32" height="32" style="width: 23px; height: 14px;" /> Crates.io
+        </a>
+      </aside>
+
+      <main class="container">
+        <div class="topbar panel">
+          <div class="brand-lockup">
+            <div class="brand-title">vtmate</div>
+            <div class="brand-subtitle">IA de voz local para la terminal</div>
+          </div>
+          <div class="lang-switch">
+            <a class="flag-link" data-lang-switch="en" href="#" aria-label="English">🇬🇧</a>
+            <a class="flag-link" data-lang-switch="es" href="#" aria-label="Espanol">🇪🇸</a>
+          </div>
+        </div>
+        <header class="panel hero page-panel">
+          <div class="hero-intro">
+            <h1 class="eyebrow">Descarga Inmediata</h1>
+            <h2>vtmate</h2>
+            <p>
+              El sistema final de conversacion por voz con IA ejecutandose directamente
+              en tu terminal. Habla con naturalidad, transcribe con whisper integrado,
+              procesa con modelos locales o remotos y recibe respuestas de voz realistas
+              con latencia muy baja.
+</p>
+<img src="https://github.com/DavidValin/vtmate/raw/main/preview.png" alt="Preview" style="width:100%;height:auto;display:block;margin-top:1rem;">
+          </div>
+
+
+        </header>
+        <div class="feature-cards">
+          <div class="small card">
+            <h3 class="card-title">Modo de Conversación</h3>
+            <img width="100%" height="auto" src="./img/conversation-mode.png" alt="Modo de Conversación">
+          </div>
+          <div class="small card">
+            <h3 class="card-title">Modo de Debate</h3>
+            <img width="100%" height="auto" src="./img/debate-mode.png" alt="Modo de Debate">
+          </div>
+          <div class="small card">
+            <h3 class="card-title">Modo de Lectura</h3>
+            <img width="100%" height="auto" src="./img/reading-mode.png" alt="Modo de Lectura">
+          </div>
+          <div class="card">
+            <h3 class="card-title">Cómo funciona</h3>
+            <img width="100%" height="auto" src="./img/how-it-works.png" alt="Cómo funciona">
+          </div>
+          <div class="card">
+            <h3 class="card-title">Idiomas Soportados</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Idioma</th>
+                  <th>Soporte</th>
+                  <th>Soporte TTS</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td>en</td><td>🇬🇧 Inglés</td><td>🏆 Mejor soporte</td><td>✅ Kokoro &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✅ OpenTTS</td></tr>
+                <tr><td>es</td><td>🇪🇸 Español</td><td>🏆 Mejor soporte</td><td>✅ Kokoro &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✅ OpenTTS</td></tr>
+                <tr><td>zh</td><td>🇨🇳 Chino mandarín</td><td>🏆 Mejor soporte</td><td>✅ Kokoro &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✅ OpenTTS</td></tr>
+                <tr><td>ja</td><td>🇯🇵 Japonés</td><td>🏆 Mejor soporte</td><td>✅ Kokoro &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✅ OpenTTS</td></tr>
+                <tr><td>pt</td><td>🇵🇹 Portugués</td><td>🏆 Mejor soporte</td><td>✅ Kokoro &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;❌ OpenTTS</td></tr>
+                <tr><td>it</td><td>🇮🇹 Italiano</td><td>🏆 Mejor soporte</td><td>✅ Kokoro &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✅ OpenTTS</td></tr>
+                <tr><td>hi</td><td>🇮🇳 Hindi</td><td>🏆 Mejor soporte</td><td>✅ Kokoro &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✅ OpenTTS</td></tr>
+                <tr><td>fr</td><td>🇫🇷 Francés</td><td>🏆 Mejor soporte</td><td>✅ Kokoro &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✅ OpenTTS</td></tr>
+                <tr><td>ar</td><td>🇸🇦 Árabe</td><td>Soportado</td><td>❌ Kokoro &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✅ OpenTTS</td></tr>
+                <tr><td>bn</td><td>🇧🇩 Bengalí</td><td>Soportado</td><td>❌ Kokoro &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✅ OpenTTS</td></tr>
+                <tr><td>ca</td><td>🇪🇸 Catalán</td><td>Soportado</td><td>❌ Kokoro &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✅ OpenTTS</td></tr>
+                <tr><td>cs</td><td>🇨🇿 Checo</td><td>Soportado</td><td>❌ Kokoro &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✅ OpenTTS</td></tr>
+                <tr><td>de</td><td>🇩🇪 Alemán</td><td>Soportado</td><td>❌ Kokoro &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✅ OpenTTS</td></tr>
+                <tr><td>el</td><td>🇬🇷 Griego</td><td>Soportado</td><td>❌ Kokoro &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✅ OpenTTS</td></tr>
+                <tr><td>fi</td><td>🇫🇮 Finlandés</td><td>Soportado</td><td>❌ Kokoro &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✅ OpenTTS</td></tr>
+                <tr><td>gu</td><td>🇮🇳 Gujarati</td><td>Soportado</td><td>❌ Kokoro &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✅ OpenTTS</td></tr>
+                <tr><td>hu</td><td>🇭🇺 Húngaro</td><td>Soportado</td><td>❌ Kokoro &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✅ OpenTTS</td></tr>
+                <tr><td>kn</td><td>🇮🇳 Kannada</td><td>Soportado</td><td>❌ Kokoro &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✅ OpenTTS</td></tr>
+                <tr><td>ko</td><td>🇰🇷 Coreano</td><td>Soportado</td><td>❌ Kokoro &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✅ OpenTTS</td></tr>
+                <tr><td>mr</td><td>🇮🇳 Marathi</td><td>Soportado</td><td>❌ Kokoro &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✅ OpenTTS</td></tr>
+                <tr><td>nl</td><td>🇳🇱 Holandés</td><td>Soportado</td><td>❌ Kokoro &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✅ OpenTTS</td></tr>
+                <tr><td>pa</td><td>🇮🇳 Punjabí</td><td>Soportado</td><td>❌ Kokoro &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✅ OpenTTS</td></tr>
+                <tr><td>ru</td><td>🇷🇺 Ruso</td><td>Soportado</td><td>❌ Kokoro &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✅ OpenTTS</td></tr>
+                <tr><td>sv</td><td>🇸🇪 Sueco</td><td>Soportado</td><td>❌ Kokoro &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✅ OpenTTS</td></tr>
+                <tr><td>sw</td><td>🇰🇪 Suajili</td><td>Soportado</td><td>❌ Kokoro &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✅ OpenTTS</td></tr>
+                <tr><td>ta</td><td>🇮🇳 Tamil</td><td>Soportado</td><td>❌ Kokoro &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✅ OpenTTS</td></tr>
+                <tr><td>te</td><td>🇮🇳 Telugu</td><td>Soportado</td><td>❌ Kokoro &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✅ OpenTTS</td></tr>
+                <tr><td>tr</td><td>🇹🇷 Turco</td><td>Soportado</td><td>❌ Kokoro &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✅ OpenTTS</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <div id="download-modal" class="modal" aria-hidden="true">
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div class="modal-head">
+          <div>
+            <h3 id="modal-title" class="modal-title">Elegir compilacion</h3>
+            <p id="modal-subtitle" class="modal-subtitle"></p>
+          </div>
+          <button id="modal-close" class="modal-close" type="button" aria-label="Cerrar opciones de descarga">X</button>
+        </div>
+        <p id="modal-note" class="modal-note"></p>
+        <div id="modal-options" class="modal-options"></div>
+      </div>
+    </div>
+
+  </body>
+</html>
