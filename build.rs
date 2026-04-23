@@ -38,7 +38,7 @@ fn find_url_for_file(file_name: &str) -> Option<String> {
     }
     "0.bin" => Some("https://github.com/DavidValin/kokoro-micro/raw/main/models/0.bin".to_string()),
     "supersonic2-model.tgz" => Some(
-      "https://github.com/DavidValin/supersonic2-tts/releases/download/1.0.0/supersonic2-model.tgz"
+      "https://github.com/DavidValin/supersonic2-tts/releases/download/1.0.1/supersonic2-model.tgz"
         .to_string(),
     ),
     _ => None,
