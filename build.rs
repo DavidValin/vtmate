@@ -34,7 +34,6 @@ fn find_url_for_file(file_name: &str) -> Option<String> {
       Some("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin".to_string())
     }
     "0.onnx" => {
-      Some("https://github.com/DavidValin/kokoro-tiny/raw/main/models/0.onnx".to_string())
       Some("https://github.com/DavidValin/kokoro-micro/raw/main/models/0.onnx".to_string())
     }
     "0.bin" => Some("https://github.com/DavidValin/kokoro-micro/raw/main/models/0.bin".to_string()),

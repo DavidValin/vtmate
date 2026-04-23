@@ -48,16 +48,15 @@ https://github.com/user-attachments/assets/e612feaa-8ab0-4761-9c67-53ec7d40cab7
 
 ## How it works
 
-`RECORD -> STT -> LLM -> TTS -> PLAYBACK`
-
 ```
-- You start the program and start talking.
-- Once audio is detected (based on sound-threshold-peak option) it will start recording.
-- As soon as there is a time of silence (based on end_silence_ms option), it will transcribe the recorded audio using speech to text (stt). In ptt mode, this option is ignored, the program will wait for SPACE key to be released to submit the audio.
-- The transcribed text will be sent to the ai model (through ollama)
-- The ai model will reply with text.
-- The text converted to audio using text to speech (tts) via OpenTTS.
+- You start the program and start talking
+- Once audio is detected (based on sound-threshold-peak option) it will start recording
+- As soon as there is a time of silence (based on end_silence_ms option), it will transcribe the recorded audio using speech to text system (whisper). In ptt mode, this option is ignored, the program will wait for SPACE key to be released to submit the audio
+- The transcribed text will be sent to the ai model
+- The ai model will reply with text
+- The text converted to audio using text to speech system
 - You can interrupt the ai agent at any moment by start speaking, this will cause the response and audio to stop and you can continue talking.
+- In debate mode, the agents reply to each other automatically, playing the audio in each turn
 ```
 
 ## LLM integration
@@ -306,6 +305,39 @@ If you need help:
 ```
 vtmate --help
 ```
+
+## Language support
+
+| ID |           Language       |      Support       |        TTS supported   |   Number of voices  |
+|----|--------------------------|--------------------|---------------------------------------------------|-------------|
+| en |   🇬🇧  English            |  🏆 Best support   |    ✅ Supersonic 2    ✅ Kokoro    ✅ OpenTTS     | > 38 voices
+| es |   🇪🇸  Spanish            |  🏆 Best support   |    ✅ Supersonic 2    ✅ Kokoro    ✅ OpenTTS     | > 14 voices
+| fr |   🇫🇷  French             |  🏆 Best support   |    ✅ Supersonic 2    ✅ Kokoro    ✅ OpenTTS     | > 12 voices
+| zh |   🇨🇳  Mandarin Chinese   |  🥈 Good support   |    ❌ Supersonic 2    ✅ Kokoro    ✅ OpenTTS     | > 9 voices
+| ja |   🇯🇵  Japanese           |  🥈 Good support   |    ❌ Supersonic 2    ✅ Kokoro    ✅ OpenTTS     | > 6 voices
+| pt |   🇵🇹  Portuguese         |  🥈 Good support   |    ✅ Supersonic 2    ✅ Kokoro    ❌ OpenTTS     | > 13 voices
+| ko |   🇰🇷  Korean             |  🥈 Good support   |    ✅ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 11 voices
+| it |   🇮🇹  Italian            |  🥈 Good support   |    ❌ Supersonic 2    ✅ Kokoro    ✅ OpenTTS     | > 3 voices
+| hi |   🇮🇳  Hindi              |  🥈 Good support   |    ❌ Supersonic 2    ✅ Kokoro    ✅ OpenTTS     | > 4 voices
+| ar |   🇸🇦  Arabic             |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| bn |   🇧🇩  Bengali            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| ca |   🇪🇸  Catalan            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| cs |   🇨🇿  Czech              |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| de |   🇩🇪  German             |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| el |   🇬🇷  Greek              |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| fi |   🇫🇮  Finnish            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| gu |   🇮🇳  Gujarati           |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| hu |   🇭🇺  Hungarian          |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| kn |   🇮🇳  Kannada            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| mr |   🇮🇳  Marathi            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| nl |   🇳🇱  Dutch              |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| pa |   🇮🇳  Punjabi            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| ru |   🇷🇺  Russian            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| sv |   🇸🇪  Swedish            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| sw |   🇰🇪  Swahili            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| ta |   🇮🇳  Tamil              |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| te |   🇮🇳  Telugu             |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| tr |   🇹🇷  Turkish            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
 
 ## Acceleration support
 
