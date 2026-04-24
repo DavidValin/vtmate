@@ -398,7 +398,7 @@ name = main agent
 language = en
 tts = supersonic2
 voice = M1
-voice_speed = 1.2
+voice_speed = 1.1
 provider = ollama
 baseurl = http://127.0.0.1:11434
 model = llama3.2:3b
@@ -409,22 +409,7 @@ ptt = false
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 
 [agent]
-name = Ptahhotep
-language = en
-tts = kokoro
-voice = bm_daniel.6+bf_isabella.4
-voice_speed = 1.1
-provider = ollama
-baseurl = http://127.0.0.1:11434
-model = llama3.2:3b
-system_prompt = You are Ptahhotep, an ancient Egyptian advisor. Follow the subject of the conversation with special attention to the user request. Provide concise, culturally informed wisdom; 30 words or fewer, max 250 words if detail needed.
-sound_threshold_peak = 0.12
-end_silence_ms = 2500
-ptt = true
-whisper_model_path = ~/.whisper-models/ggml-tiny.bin
-
-[agent]
-name = Aristoteles
+name = explainer
 language = en
 tts = supersonic2
 voice = F1
@@ -432,52 +417,7 @@ voice_speed = 1.1
 provider = ollama
 baseurl = http://127.0.0.1:11434
 model = llama3.2:3b
-system_prompt = "You are Aristoteles, a creative thinker. Follow the subject of the conversation with special attention to the user request. Give clear, imaginative responses; keep them ≤30 words, with a maximum of 250 words when elaboration is necessary."
-sound_threshold_peak = 0.12
-end_silence_ms = 2500
-ptt = true
-whisper_model_path = ~/.whisper-models/ggml-tiny.bin
-
-[agent]
-name = Seneca
-language = en
-tts = supersonic2
-voice = M4
-voice_speed = 1.1
-provider = ollama
-baseurl = http://127.0.0.1:11434
-model = llama3.2:3b
-system_prompt = You are Seneca, a stoic sage. Follow the subject of the conversation with special attention to the user request. Respond with calm, concise wisdom; 30 words or fewer, max 250 words if more detail is essential.
-sound_threshold_peak = 0.12
-end_silence_ms = 2500
-ptt = true
-whisper_model_path = ~/.whisper-models/ggml-tiny.bin
-
-[agent]
-name = Budda
-language = en
-tts = kokoro
-voice = bf_isabella
-voice_speed = 1.1
-provider = ollama
-baseurl = http://127.0.0.1:11434
-model = llama3.2:3b
-system_prompt = You are Budda, a serene guide. Follow the subject of the conversation with special attention to the user request. Offer tranquil, succinct answers; 30 words or less, extending to 250 words only when required.
-sound_threshold_peak = 0.12
-end_silence_ms = 2500
-ptt = true
-whisper_model_path = ~/.whisper-models/ggml-tiny.bin
-
-[agent]
-name = Jesus Christ
-language = en
-tts = supersonic2
-voice = F5
-voice_speed = 1.1
-provider = ollama
-baseurl = http://127.0.0.1:11434
-model = llama3.2:3b
-system_prompt = You are Jesus Christ, a compassionate teacher. Follow the subject of the conversation with special attention to the user request. Provide gentle, clear answers; 30 words or fewer, with a ceiling of 250 words for longer explanations.
+system_prompt = "You are a helpful AI assistant. Your only funcion is to explain things as simple as possible in no more than 150 words or 450 words if the user asks for a longer explanation."
 sound_threshold_peak = 0.12
 end_silence_ms = 2500
 ptt = true
@@ -497,6 +437,68 @@ sound_threshold_peak = 0.12
 end_silence_ms = 2000
 ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
+
+[agent]
+name = Ptahhotep
+language = en
+tts = supersonic2
+voice = M2
+voice_speed = 1.1
+provider = ollama
+baseurl = http://127.0.0.1:11434
+model = llama3.2:3b
+system_prompt = You are Ptahhotep, an ancient Egyptian advisor. Follow the subject of the conversation with special attention to the user request. Provide concise, culturally informed wisdom; 30 words or fewer, max 250 words if detail needed.
+sound_threshold_peak = 0.12
+end_silence_ms = 2500
+ptt = true
+whisper_model_path = ~/.whisper-models/ggml-tiny.bin
+
+[agent]
+name = Aristoteles
+language = en
+tts = supersonic2
+voice = M3
+voice_speed = 1.1
+provider = ollama
+baseurl = http://127.0.0.1:11434
+model = llama3.2:3b
+system_prompt = "You are Aristoteles, a creative thinker. Follow the subject of the conversation with special attention to the user request. Give clear, imaginative responses; keep them ≤30 words, with a maximum of 250 words when elaboration is necessary."
+sound_threshold_peak = 0.12
+end_silence_ms = 2500
+ptt = true
+whisper_model_path = ~/.whisper-models/ggml-tiny.bin
+
+[agent]
+name = Budda
+language = en
+tts = supersonic2
+voice = M4
+voice_speed = 1.1
+provider = ollama
+baseurl = http://127.0.0.1:11434
+model = llama3.2:3b
+system_prompt = You are Budda, a serene guide. Follow the subject of the conversation with special attention to the user request. Offer tranquil, succinct answers; 30 words or less, extending to 250 words only when required.
+sound_threshold_peak = 0.12
+end_silence_ms = 2500
+ptt = true
+whisper_model_path = ~/.whisper-models/ggml-tiny.bin
+
+[agent]
+name = Jesus Christ
+language = en
+tts = supersonic2
+voice = M5
+voice_speed = 1.1
+provider = ollama
+baseurl = http://127.0.0.1:11434
+model = llama3.2:3b
+system_prompt = You are Jesus Christ, a compassionate teacher. Follow the subject of the conversation with special attention to the user request. Provide gentle, clear answers; 30 words or fewer, with a ceiling of 250 words for longer explanations.
+sound_threshold_peak = 0.12
+end_silence_ms = 2500
+ptt = true
+whisper_model_path = ~/.whisper-models/ggml-tiny.bin
+
+
 "#;
   let mut file = File::create(&settings_path)?;
   file.write_all(content.as_bytes())?;
