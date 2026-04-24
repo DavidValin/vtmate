@@ -5,6 +5,7 @@
 use crate::state::GLOBAL_STATE;
 use crossbeam_channel::{Receiver, Sender};
 use kokoro_micro::TtsEngine;
+use supertonic2_tts::TtsEngine as SupersonicTtsEngine;
 mod kokoro_tts;
 use reqwest;
 use std::io::{BufReader, Read};
@@ -36,6 +37,12 @@ pub enum SpeakOutcome {
   Interrupted,
 }
 
+static KOKORO_ENGINE: OnceLock<Arc<Mutex<TtsEngine>>> = OnceLock::new();
+static SUPSONIC_ENGINE: OnceLock<Arc<Mutex<SupersonicTtsEngine>>> = OnceLock::new();
+
+// Supported languages for Supersonic2 TTS
+static SUPSONIC_LANGS: &[&str] = &["en", "es", "fr", "ko", "pt"];
+
 pub fn speak(
   text: &str,
   tts: &str,
@@ -49,7 +56,7 @@ pub fn speak(
   expected_interrupt: u64,
 ) -> Result<SpeakOutcome, Box<dyn std::error::Error + Send + Sync>> {
   let outcome = if tts == "opentts" {
-    crate::tts::speak_via_opentts_stream(
+    crate::tts::speak_via_opentts(
       text,
       opentts_base_url,
       language,
@@ -60,9 +67,23 @@ pub fn speak(
       interrupt_counter,
       expected_interrupt,
     )
+  } else if tts == "supersonic2" {
+    let speed = crate::state::get_speed();
+    let gain = 1.0;
+    crate::tts::speak_via_supersonic2(
+      text,
+      voice,
+      speed,
+      gain,
+      language,
+      tx,
+      stop_all_rx.clone(),
+      interrupt_counter,
+      expected_interrupt,
+    )
   } else {
     let lang = if language == "zh" { "cmn" } else { language };
-    crate::tts::speak_via_kokoro_stream(
+    crate::tts::speak_via_kokoro(
       text,
       lang,
       voice,
@@ -162,8 +183,6 @@ pub fn tts_thread(
 
 //  Kokoro Tiny TTS integration -------------------------------------
 // +++++++++++++++++++++++++++++
-
-static KOKORO_ENGINE: OnceLock<Arc<Mutex<TtsEngine>>> = OnceLock::new();
 
 pub const KOKORO_VOICES_PER_LANGUAGE: &[(&str, &[&str])] = &[
   // English language
@@ -288,7 +307,7 @@ pub const KOKORO_VOICES_PER_LANGUAGE: &[(&str, &[&str])] = &[
   ),
 ];
 
-pub const DEFAULTKOKORO_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
+pub const DEFAULT_KOKORO_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
   ("en", "bf_emma"),
   ("es", "em_santa"),
   ("zh", "zf_xiaoni"),
@@ -309,6 +328,8 @@ pub fn get_all_available_languages() -> Vec<&'static str> {
       .iter()
       .map(|(lang, _)| *lang),
   );
+  // Include supersonic2 supported languages
+  langs.extend(SUPSONIC_LANGS.iter().copied());
   langs.sort();
   langs.dedup();
   langs
@@ -332,19 +353,54 @@ pub fn get_voices_for(tts: &str, language: &str) -> Vec<&'static str> {
       }
       Vec::new()
     }
+    "supersonic2" => {
+      // Supersonic2 voices are supported only for specific languages
+      let supersonic_voices = ["M1", "M2", "M3", "M4", "M5", "F1", "F2", "F3", "F4", "F5"];
+      if SUPSONIC_LANGS.contains(&language) {
+        supersonic_voices.to_vec()
+      } else {
+        Vec::new()
+      }
+    }
     _ => Vec::new(),
   }
 }
 
 pub fn print_voices() {
   let langs = get_all_available_languages();
-  // High Quality (Kokoro)
+
   println!(
-    "🏆 High Quality Voices\n======================================================\n{:<8}\t{:<12}\t{:<2}\t{}",
+    "supersonic2 🏆 High Quality Voices\n======================================================\n{:<8}\t{:<12}\t{:<2}\t{}",
     "TTS", "Language", "Flag", "Voices"
   );
   println!("======================================================");
+  // kokoro
+  for lang in langs.iter() {
+    let voices = get_voices_for("supersonic2", lang);
+    if voices.is_empty() {
+      continue;
+    }
+    let flag = crate::util::get_flag(lang);
+    let voices_str = voices.join(", ");
+    println!(
+      "{:<8}\t{:<12}\t{:<2}\t{}",
+      "supersonic2", lang, flag, voices_str
+    );
+  }
+  println!();
+  println!(
+    "Standard Quality Voices\n======================================================\n{:<8}\t{:<12}\t{:<2}\t{}",
+    "TTS", "Language", "Flag", "Voices"
+  );
+  println!();
+  println!();
 
+  println!(
+    "kokoro 🏆 High Quality Voices\n======================================================\n{:<8}\t{:<12}\t{:<2}\t{}",
+    "TTS", "Language", "Flag", "Voices"
+  );
+  println!("======================================================");
+  // kokoro
   for lang in langs.iter() {
     let voices = get_voices_for("kokoro", lang);
     if voices.is_empty() {
@@ -355,13 +411,10 @@ pub fn print_voices() {
     println!("{:<8}\t{:<12}\t{:<2}\t{}", "kokoro", lang, flag, voices_str);
   }
   println!();
-  // Standard Quality (OpenTTS)
-  println!(
-    "Standard Quality Voices\n======================================================\n{:<8}\t{:<12}\t{:<2}\t{}",
-    "TTS", "Language", "Flag", "Voices"
-  );
-  println!("======================================================");
+  println!();
 
+  println!("======================================================");
+  // OpenTTS
   for lang in langs.iter() {
     let voices = get_voices_for("opentts", lang);
     if voices.is_empty() {
@@ -376,7 +429,19 @@ pub fn print_voices() {
   }
 }
 
-pub fn speak_via_kokoro_stream(
+//  KOKORO integration ---------------------------------------------
+// +++++++++++++++++++++++++++++
+
+pub fn start_kokoro_engine() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  let rt = tokio::runtime::Builder::new_current_thread()
+    .enable_all()
+    .build()?;
+  let engine = rt.block_on(TtsEngine::new())?;
+  KOKORO_ENGINE.set(Arc::new(Mutex::new(engine))).ok();
+  Ok(())
+}
+
+fn speak_via_kokoro(
   text: &str,
   language: &str,
   voice: &str,
@@ -418,67 +483,93 @@ pub fn speak_via_kokoro_stream(
   });
 
   // Start synthesis - the monitoring thread will handle interruptions during synthesis
-  // crate::log::log("info", &format!("Starting TTS synthesis for phrase: '{}'", text));
   let rt = tokio::runtime::Builder::new_current_thread()
     .enable_all()
     .build()?;
   let res = rt.block_on(streaming.speak_stream(text, tx.clone(), language));
 
   match res {
-    Ok(_) => {
-      // crate::log::log("info", "TTS synthesis completed, audio chunks sent to playback");
-      Ok(SpeakOutcome::Completed)
-    }
-    Err(_e) => {
-      // crate::log::log("info", &format!("TTS synthesis interrupted or failed: {:?}", e));
-      Ok(SpeakOutcome::Interrupted)
-    }
+    Ok(_) => Ok(SpeakOutcome::Completed),
+    Err(_e) => Ok(SpeakOutcome::Interrupted),
   }
 }
 
-pub fn start_kokoro_engine() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+//  Supersonic2 integration ----------------------------------------
+// +++++++++++++++++++++++++++++
+
+pub fn start_supersonic_engine() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let rt = tokio::runtime::Builder::new_current_thread()
     .enable_all()
     .build()?;
-  let engine = rt.block_on(TtsEngine::new())?;
-  KOKORO_ENGINE.set(Arc::new(Mutex::new(engine))).ok();
+
+  let home = crate::util::get_user_home_path().expect("Could not determine home directory");
+  let onnx = home.join(".vtmate/tts/supersonic2-model/onnx");
+  let base = home.join(".vtmate/tts/supersonic2-model");
+  let engine = rt.block_on(SupersonicTtsEngine::new(onnx, base, false))?;
+
+  SUPSONIC_ENGINE.set(Arc::new(Mutex::new(engine))).ok();
   Ok(())
+}
+
+pub fn speak_via_supersonic2(
+  text: &str,
+  voice: &str,
+  speed: f32,
+  gain: f32,
+  language: &str,
+  tx: Sender<crate::audio::AudioChunk>,
+  stop_all_rx: Receiver<()>,
+  interrupt_counter: Arc<AtomicU64>,
+  expected_interrupt: u64,
+) -> Result<SpeakOutcome, Box<dyn std::error::Error + Send + Sync>> {
+  if text.is_empty() {
+    return Ok(SpeakOutcome::Completed);
+  }
+  let rt = tokio::runtime::Builder::new_current_thread()
+    .enable_all()
+    .build()?;
+  let engine = SUPSONIC_ENGINE.get_or_init(|| {
+    let home = crate::util::get_user_home_path().expect("Could not determine home directory");
+    let onnx = home.join(".vtmate/tts/supersonic2-model/onnx");
+    let base = home.join(".vtmate/tts/supersonic2-model");
+    let e = rt
+      .block_on(SupersonicTtsEngine::new(onnx, base, false))
+      .unwrap();
+    Arc::new(Mutex::new(e))
+  });
+
+  // Check early interrupt
+  if stop_all_rx.try_recv().is_ok()
+    || interrupt_counter.load(Ordering::SeqCst) != expected_interrupt
+  {
+    return Ok(SpeakOutcome::Interrupted);
+  }
+
+  let mut samples = {
+    let e = engine.lock().unwrap();
+    rt.block_on(e.synthesize_with_options(text, Some(voice), speed, gain, Some(language)))?
+  };
+  // sanitize
+  for s in &mut samples {
+    if !s.is_finite() {
+      *s = 0.0;
+    } else {
+      *s = s.clamp(-1.0, 1.0);
+    }
+  }
+  let audio = crate::audio::AudioChunk {
+    data: samples,
+    channels: 1,
+    sample_rate: 48000,
+  };
+  let _ = tx.send(audio);
+  Ok(SpeakOutcome::Completed)
 }
 
 //  OpenTTS integration ---------------------------------------------
 // +++++++++++++++++++++++++++++
 
-pub const DEFAULT_OPENTTS_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
-  ("ar", "festival:ara_norm_ziad_hts"),
-  ("bn", "flite:cmu_indic_ben_rm"),
-  ("ca", "festival:upc_ca_ona_hts"),
-  ("cs", "festival:czech_machac"),
-  ("de", "glow-speak:de_thorsten"),
-  ("el", "glow-speak:el_rapunzelina"),
-  ("en", "larynx:cmu_fem-glow_tts"),
-  ("es", "larynx:karen_savage-glow_tts"),
-  ("fi", "glow-speak:fi_harri_tapani_ylilammi"),
-  ("fr", "larynx:gilles_le_blanc-glow_tts"),
-  ("gu", "flite:cmu_indic_guj_ad"),
-  ("hi", "flite:cmu_indic_hin_ab"),
-  ("hu", "glow-speak:hu_diana_majlinger"),
-  ("it", "larynx:riccardo_fasol-glow_tts"),
-  ("ja", "coqui-tts:ja_kokoro"),
-  ("kn", "flite:cmu_indic_kan_plv"),
-  ("ko", "glow-speak:ko_kss"),
-  ("mr", "flite:cmu_indic_mar_aup"),
-  ("nl", "glow-speak:nl_rdh"),
-  ("pa", "flite:cmu_indic_pan_amp"),
-  ("ru", "glow-speak:ru_nikolaev"),
-  ("sv", "glow-speak:sv_talesyntese"),
-  ("sw", "glow-speak:sw_biblia_takatifu"),
-  ("ta", "flite:cmu_indic_tam_sdr"),
-  ("te", "marytts:cmu-nk-hsmm"),
-  ("tr", "marytts:dfki-ot-hsmm"),
-  ("zh", "coqui-tts:zh_baker"),
-];
-
-pub fn speak_via_opentts_stream(
+pub fn speak_via_opentts(
   text: &str,
   opentts_base_url: &str,
   language: &str,
@@ -800,3 +891,33 @@ fn stream_wav16le_over_http(
 
   Ok(SpeakOutcome::Completed)
 }
+
+pub const DEFAULT_OPENTTS_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
+  ("ar", "festival:ara_norm_ziad_hts"),
+  ("bn", "flite:cmu_indic_ben_rm"),
+  ("ca", "festival:upc_ca_ona_hts"),
+  ("cs", "festival:czech_machac"),
+  ("de", "glow-speak:de_thorsten"),
+  ("el", "glow-speak:el_rapunzelina"),
+  ("en", "larynx:cmu_fem-glow_tts"),
+  ("es", "larynx:karen_savage-glow_tts"),
+  ("fi", "glow-speak:fi_harri_tapani_ylilammi"),
+  ("fr", "larynx:gilles_le_blanc-glow_tts"),
+  ("gu", "flite:cmu_indic_guj_ad"),
+  ("hi", "flite:cmu_indic_hin_ab"),
+  ("hu", "glow-speak:hu_diana_majlinger"),
+  ("it", "larynx:riccardo_fasol-glow_tts"),
+  ("ja", "coqui-tts:ja_kokoro"),
+  ("kn", "flite:cmu_indic_kan_plv"),
+  ("ko", "glow-speak:ko_kss"),
+  ("mr", "flite:cmu_indic_mar_aup"),
+  ("nl", "glow-speak:nl_rdh"),
+  ("pa", "flite:cmu_indic_pan_amp"),
+  ("ru", "glow-speak:ru_nikolaev"),
+  ("sv", "glow-speak:sv_talesyntese"),
+  ("sw", "glow-speak:sw_biblia_takatifu"),
+  ("ta", "flite:cmu_indic_tam_sdr"),
+  ("te", "marytts:cmu-nk-hsmm"),
+  ("tr", "marytts:dfki-ot-hsmm"),
+  ("zh", "coqui-tts:zh_baker"),
+];

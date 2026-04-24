@@ -49,6 +49,9 @@ pub struct AppState {
   pub recording_paused: Arc<AtomicBool>,
   pub processing_response: Arc<AtomicBool>,
   pub ptt: Arc<AtomicBool>,
+  pub sound_threshold_peak: Arc<Mutex<f32>>,
+  pub end_silence_ms: Arc<Mutex<u64>>,
+  pub whisper_model_path: Arc<Mutex<String>>,
   pub debate_enabled: Arc<AtomicBool>,
   pub debate_subject: Arc<Mutex<String>>,
   pub debate_agents: Arc<Mutex<Vec<crate::config::AgentSettings>>>,
@@ -72,7 +75,6 @@ impl AppState {
       baseurl: Arc::new(Mutex::new(String::new())),
       model: Arc::new(Mutex::new(String::new())),
       system_prompt: Arc::new(Mutex::new(String::new())),
-
       ui: UiState {
         thinking: Arc::new(AtomicBool::new(false)),
         playing: Arc::new(AtomicBool::new(false)),
@@ -92,11 +94,13 @@ impl AppState {
         volume: Arc::new(Mutex::new(1.0_f32)),
       },
       status_line: Arc::new(Mutex::new(String::new())),
-
       interrupt_counter: Arc::new(AtomicU64::new(0)),
       recording_paused: Arc::new(AtomicBool::new(false)),
       processing_response: Arc::new(AtomicBool::new(false)),
       ptt: Arc::new(AtomicBool::new(false)),
+      sound_threshold_peak: Arc::new(Mutex::new(0.0)),
+      end_silence_ms: Arc::new(Mutex::new(0)),
+      whisper_model_path: Arc::new(Mutex::new(String::new())),
       debate_enabled: Arc::new(AtomicBool::new(false)),
       debate_subject: Arc::new(Mutex::new(String::new())),
       debate_agents: Arc::new(Mutex::new(Vec::new())),
@@ -110,7 +114,6 @@ impl AppState {
     }
   }
 
-  /// Create a new AppState and initialize the voice field with the provided value.
   pub fn with_agent(
     settings: crate::config::AgentSettings,
     agents: Vec<crate::config::AgentSettings>,
@@ -118,7 +121,6 @@ impl AppState {
   ) -> Self {
     let mut state = Self::new();
     state.ui.quiet = quiet;
-    // SAFETY: we have exclusive access to the Mutex here.
     *state.voice.lock().unwrap() = settings.voice.clone();
     *state.agent_name.lock().unwrap() = settings.name.clone();
     *state.tts.lock().unwrap() = settings.tts.clone();
@@ -127,9 +129,13 @@ impl AppState {
     *state.baseurl.lock().unwrap() = settings.baseurl.clone();
     *state.model.lock().unwrap() = settings.model.clone();
     *state.system_prompt.lock().unwrap() = settings.system_prompt.clone();
-
     state.ptt.store(settings.ptt, Ordering::Relaxed);
-    state.speed.store((settings.voice_speed * 10.0) as u32, Ordering::Relaxed);
+    *state.sound_threshold_peak.lock().unwrap() = settings.sound_threshold_peak;
+    *state.end_silence_ms.lock().unwrap() = settings.end_silence_ms;
+    *state.whisper_model_path.lock().unwrap() = settings.whisper_model_path.clone();
+    state
+      .speed
+      .store((settings.voice_speed * 10.0) as u32, Ordering::Relaxed);
     state.agents = Arc::new(agents);
     state
   }
@@ -151,7 +157,6 @@ pub fn get_voice() -> String {
   state.voice.lock().unwrap().clone()
 }
 
-/// Increase speed by 0.1, capped at 8.0.
 pub fn increase_voice_speed() {
   let state = GLOBAL_STATE.get().expect("AppState not initialized");
   let mut cur = state.speed.load(Ordering::Relaxed);
@@ -161,7 +166,6 @@ pub fn increase_voice_speed() {
   }
 }
 
-/// Decrease speed by 0.1, floored at 0.5.
 pub fn decrease_voice_speed() {
   let state = GLOBAL_STATE.get().expect("AppState not initialized");
   let mut cur = state.speed.load(Ordering::Relaxed);

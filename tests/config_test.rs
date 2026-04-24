@@ -11,9 +11,9 @@ mod tts {
   pub fn get_voices_for(_tts: &str, lang: &str) -> Vec<String> {
     // Provide a voice matching the config
     if lang == "en" {
-        vec!["bf_alice".to_string()]
+      vec!["bf_alice".to_string()]
     } else {
-        vec![format!("voice-{}", lang)]
+      vec![format!("voice-{}", lang)]
     }
   }
 }
@@ -100,7 +100,7 @@ voice_speed = 5.0
   assert_eq!(agent.ptt, true);
   assert_eq!(agent.sound_threshold_peak, 0.1);
   assert_eq!(agent.end_silence_ms, 2000);
-    assert_eq!(agent.voice_speed, 5.0);
+  assert_eq!(agent.voice_speed, 5.0);
   assert_eq!(agent.whisper_model_path, "~/.whisper-models/ggml-tiny.bin");
 }
 
@@ -170,6 +170,6 @@ voice_speed = 5.0
   assert_eq!(agent.ptt, true);
   assert_eq!(agent.sound_threshold_peak, 0.1);
   assert_eq!(agent.end_silence_ms, 2000);
-    assert_eq!(agent.voice_speed, 5.0);
+  assert_eq!(agent.voice_speed, 5.0);
   assert_eq!(agent.whisper_model_path, "~/.whisper-models/ggml-tiny.bin");
 }

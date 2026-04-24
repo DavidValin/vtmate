@@ -261,7 +261,14 @@ fn build_input_f32(
         let last = last_voice_ms.load(Ordering::Relaxed);
 
         // silence detected
-        if last > 0 && !crate::state::GLOBAL_STATE.get().unwrap().ptt.load(Ordering::Relaxed) && crate::util::now_ms(start_instant).saturating_sub(last) >= end_silence_ms {
+        if last > 0
+          && !crate::state::GLOBAL_STATE
+            .get()
+            .unwrap()
+            .ptt
+            .load(Ordering::Relaxed)
+          && crate::util::now_ms(start_instant).saturating_sub(last) >= end_silence_ms
+        {
           crate::log::log("info", "Silence detected");
           ui.agent_speaking.store(false, Ordering::Relaxed);
           user_speaking.store(false, Ordering::Relaxed);
@@ -422,7 +429,14 @@ fn build_input_i16(
           b.extend_from_slice(&tmp);
         }
         let last = last_voice_ms.load(Ordering::Relaxed);
-        if last > 0 && !crate::state::GLOBAL_STATE.get().unwrap().ptt.load(Ordering::Relaxed) && crate::util::now_ms(start_instant).saturating_sub(last) >= end_silence_ms {
+        if last > 0
+          && !crate::state::GLOBAL_STATE
+            .get()
+            .unwrap()
+            .ptt
+            .load(Ordering::Relaxed)
+          && crate::util::now_ms(start_instant).saturating_sub(last) >= end_silence_ms
+        {
           crate::log::log("info", "Silence detected");
           ui.agent_speaking.store(false, Ordering::Relaxed);
           user_speaking.store(false, Ordering::Relaxed);
@@ -583,7 +597,14 @@ fn build_input_u16(
           b.extend_from_slice(&tmp);
         }
         let last = last_voice_ms.load(Ordering::Relaxed);
-        if last > 0 && !crate::state::GLOBAL_STATE.get().unwrap().ptt.load(Ordering::Relaxed) && crate::util::now_ms(start_instant).saturating_sub(last) >= end_silence_ms {
+        if last > 0
+          && !crate::state::GLOBAL_STATE
+            .get()
+            .unwrap()
+            .ptt
+            .load(Ordering::Relaxed)
+          && crate::util::now_ms(start_instant).saturating_sub(last) >= end_silence_ms
+        {
           crate::log::log("info", "Silence detected");
           // FIX: ensure UI clears speaking state on silence
           ui.agent_speaking.store(false, Ordering::Relaxed);

@@ -329,71 +329,79 @@ pub fn keyboard_thread(
 
           // switch to previous agent
           KeyCode::Left => {
-            let agents = state.agents.as_ref();
-            let current_name = state.agent_name.lock().unwrap().clone();
-            let pos = agents
-              .iter()
-              .position(|a| a.name == current_name)
-              .unwrap_or(0);
-            let new_idx = if pos == 0 { agents.len() - 1 } else { pos - 1 };
-            let new_agent = &agents[new_idx];
-            *state.voice.lock().unwrap() = new_agent.voice.clone();
-            *state.agent_name.lock().unwrap() = new_agent.name.clone();
-            *state.tts.lock().unwrap() = new_agent.tts.clone();
-            *state.language.lock().unwrap() = new_agent.language.clone();
-            *state.provider.lock().unwrap() = new_agent.provider.clone();
-            *state.baseurl.lock().unwrap() = new_agent.baseurl.clone();
-            *state.model.lock().unwrap() = new_agent.model.clone();
-            *state.system_prompt.lock().unwrap() = new_agent.system_prompt.clone();
-            state.ptt.store(new_agent.ptt, Ordering::Relaxed);
-            state.speed.store((new_agent.voice_speed * 10.0) as u32, Ordering::Relaxed);
-            if state.ptt.load(Ordering::Relaxed) {
-              recording_paused.store(true, Ordering::Relaxed);
-            } else {
-              recording_paused.store(false, Ordering::Relaxed);
+            if !state.debate_enabled.load(Ordering::SeqCst) {
+              let agents = state.agents.as_ref();
+              let current_name = state.agent_name.lock().unwrap().clone();
+              let pos = agents
+                .iter()
+                .position(|a| a.name == current_name)
+                .unwrap_or(0);
+              let new_idx = if pos == 0 { agents.len() - 1 } else { pos - 1 };
+              let new_agent = &agents[new_idx];
+              *state.voice.lock().unwrap() = new_agent.voice.clone();
+              *state.agent_name.lock().unwrap() = new_agent.name.clone();
+              *state.tts.lock().unwrap() = new_agent.tts.clone();
+              *state.language.lock().unwrap() = new_agent.language.clone();
+              *state.provider.lock().unwrap() = new_agent.provider.clone();
+              *state.baseurl.lock().unwrap() = new_agent.baseurl.clone();
+              *state.model.lock().unwrap() = new_agent.model.clone();
+              *state.system_prompt.lock().unwrap() = new_agent.system_prompt.clone();
+              state.ptt.store(new_agent.ptt, Ordering::Relaxed);
+              state
+                .speed
+                .store((new_agent.voice_speed * 10.0) as u32, Ordering::Relaxed);
+              if state.ptt.load(Ordering::Relaxed) {
+                recording_paused.store(true, Ordering::Relaxed);
+              } else {
+                recording_paused.store(false, Ordering::Relaxed);
+              }
+              // Reset conversation history when changing agents
+              state.reset_conversation();
+              let _ = tx_ui.send(format!(
+                "line|\n\x1b[32m🤖 Agent switched to '\x1b[37m{}\x1b[0m\x1b[32m' language: \x1b[37m{}\x1b[0m",
+                new_agent.name,
+                new_agent.language
+              ));
             }
-            // Reset conversation history when changing agents
-            state.reset_conversation();
-            let _ = tx_ui.send(format!(
-              "line|\n\x1b[32m🤖 Agent switched to '\x1b[37m{}\x1b[0m\x1b[32m' language: \x1b[37m{}\x1b[0m",
-              new_agent.name,
-              new_agent.language
-            ));
           }
 
           // switch to next agent
           KeyCode::Right => {
-            let state = GLOBAL_STATE.get().unwrap();
-            let agents = state.agents.as_ref();
-            let current_name = state.agent_name.lock().unwrap().clone();
-            let pos = agents
-              .iter()
-              .position(|a| a.name == current_name)
-              .unwrap_or(0);
-            let new_idx = (pos + 1) % agents.len();
-            let new_agent = &agents[new_idx];
-            *state.voice.lock().unwrap() = new_agent.voice.clone();
-            *state.agent_name.lock().unwrap() = new_agent.name.clone();
-            *state.tts.lock().unwrap() = new_agent.tts.clone();
-            *state.language.lock().unwrap() = new_agent.language.clone();
-            *state.provider.lock().unwrap() = new_agent.provider.clone();
-            *state.baseurl.lock().unwrap() = new_agent.baseurl.clone();
-            *state.model.lock().unwrap() = new_agent.model.clone();
-            *state.system_prompt.lock().unwrap() = new_agent.system_prompt.clone();
-            state.ptt.store(new_agent.ptt, Ordering::Relaxed);
-            state.speed.store((new_agent.voice_speed * 10.0) as u32, Ordering::Relaxed);
-            if state.ptt.load(Ordering::Relaxed) {
-              recording_paused.store(true, Ordering::Relaxed);
-            } else {
-              recording_paused.store(false, Ordering::Relaxed);
+            if !state.debate_enabled.load(Ordering::SeqCst) {
+              let state = GLOBAL_STATE.get().unwrap();
+              let agents = state.agents.as_ref();
+              let current_name = state.agent_name.lock().unwrap().clone();
+              let pos = agents
+                .iter()
+                .position(|a| a.name == current_name)
+                .unwrap_or(0);
+              let new_idx = (pos + 1) % agents.len();
+              let new_agent = &agents[new_idx];
+              *state.voice.lock().unwrap() = new_agent.voice.clone();
+              *state.agent_name.lock().unwrap() = new_agent.name.clone();
+              *state.tts.lock().unwrap() = new_agent.tts.clone();
+              *state.language.lock().unwrap() = new_agent.language.clone();
+              *state.provider.lock().unwrap() = new_agent.provider.clone();
+              *state.baseurl.lock().unwrap() = new_agent.baseurl.clone();
+              *state.model.lock().unwrap() = new_agent.model.clone();
+              *state.system_prompt.lock().unwrap() = new_agent.system_prompt.clone();
+              state.ptt.store(new_agent.ptt, Ordering::Relaxed);
+              state
+                .speed
+                .store((new_agent.voice_speed * 10.0) as u32, Ordering::Relaxed);
+              if state.ptt.load(Ordering::Relaxed) {
+                recording_paused.store(true, Ordering::Relaxed);
+              } else {
+                recording_paused.store(false, Ordering::Relaxed);
+              }
+              // Reset conversation history when changing agents
+              state.reset_conversation();
+              let _ = tx_ui.send(format!(
+                "line|\n\x1b[32m🤖 Agent switched to '\x1b[37m{}\x1b[0m\x1b[32m' language: \x1b[37m{}\x1b[0m",
+                new_agent.name,
+                new_agent.language
+              ));
             }
-            // Reset conversation history when changing agents
-            state.reset_conversation();
-            let _ = tx_ui.send(format!(
-              "line|\n\x1b[32m🤖 Agent switched to '\x1b[37m{}\x1b[0m\x1b[32m' language: \x1b[37m{}\x1b[0m",
-              new_agent.name,
-              new_agent.language
-            ));
           }
           _ => {
             // Any other key while space was pressed indicates release
