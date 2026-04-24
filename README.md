@@ -8,15 +8,15 @@ The program self contains (1.2GB) all TTS models and voices and necessary files 
 
 ### Video demonstration
 <details>
-<summary>(🇬🇧 English) Conversation video demo</summary>
+<summary>(🇬🇧 English) Conversation mode demo</summary>
 
-https://github.com/user-attachments/assets/d9c27108-41f7-4148-8c32-28c8ca6d8516
+https://github.com/user-attachments/assets/8baef926-59dd-4887-b51c-b64efc885fb2
 
 </details>
 <details>
-<summary>(🇪🇸 Spanish) Conversation video demo</summary>
+<summary>(🇬🇧 English) Debate mode demo</summary>
 
-https://github.com/user-attachments/assets/e612feaa-8ab0-4761-9c67-53ec7d40cab7
+https://github.com/user-attachments/assets/063b069a-38aa-472c-b477-7382bb063008
 
 </details>
 
