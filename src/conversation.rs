@@ -283,13 +283,6 @@ pub fn conversation_thread(
         // No user input - run debate turn
         let turn = state.debate_turn.load(Ordering::SeqCst) as usize;
         let agent_count = debate_agents.len();
-        // If first debate turn, display subject as user input before agent reply
-        if turn == 0 {
-          let subject = state.debate_subject.lock().unwrap().clone();
-          if !subject.is_empty() {
-            send_user_message_ui(&tx_ui, &subject, false);
-          }
-        }
 
         // Determine current agent and message
         let (current_agent, user_msg) = if let Some(msg) = pending_user_msg.take() {
