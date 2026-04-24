@@ -20,6 +20,13 @@ https://github.com/user-attachments/assets/063b069a-38aa-472c-b477-7382bb063008
 
 </details>
 
+<details>
+<summary>(🇬🇧 English) Reading mode demo</summary>
+
+https://github.com/user-attachments/assets/8b9e982c-ba97-4aeb-8e55-1db6a92bc164
+
+</details>
+
 #### **Sponsor this project**
 [![Sponsor vtmate](https://img.shields.io/static/v1?label=Sponsor&message=%E2%9D%A4&logo=GitHub&color=%23fe8e86)](https://github.com/sponsors/DavidValin)
 
