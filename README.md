@@ -138,9 +138,10 @@ vtmate --help
 
 ## How to use it
 
-The first agent defined in `~/vtmate/settings` will always be selected agent when running vtmate, unless `--agent <agent_name>` is used.
+The first agent defined in `~/vtmate/settings` will always be selected agent when running vtmate, unless `--a <agent_name>` is used.
 
-Before running vtmate make sure ollama is running: `ollama serve`
+Before running vtmate make sure ollama is running: `ollama serve`.
+Optionally, if you want to use llama.cpp make sure llama-server is running.
 
 ### Conversation mode
 
@@ -156,7 +157,7 @@ vtmate -s
 Start conversation with a specific agent
 (waits for user voice input and respond)
 ```
-vtmate --agent "main agent"
+vtmate --a "main agent"
 ```
 
 Start conversation with an initial text prompt
@@ -233,12 +234,12 @@ In this mode, only the next agent settings are used: "tts", "voice" and "languag
 
 from a txt file:
 ```
-vtmate -r myfile.txt --agent "main agent"
+vtmate -r myfile.txt --a "main agent"
 ```
 
 from stdin text:
 ```
-vtmate -r - --agent "main agent"
+vtmate -r - --a "main agent"
 ```
 
 In this mode you can:

@@ -113,7 +113,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       }
     };
 
-    // Select agent: use --agent if specified, otherwise pick first
+    // Select agent: use --a if specified, otherwise pick first
     let settings = match &args.agent {
       Some(agent_name) => match agents.iter().find(|a| a.name == *agent_name).cloned() {
         Some(a) => a,
