@@ -146,10 +146,10 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let use_supersonic = agents.iter().any(|a| a.tts == "supersonic2");
     let use_kokoro = agents.iter().any(|a| a.tts == "kokoro");
     if use_supersonic {
-      tts::start_supersonic_engine()?;
+      tts::supersonic2_tts::start_supersonic_engine()?;
     }
     if use_kokoro {
-      tts::start_kokoro_engine()?;
+      tts::kokoro_tts::start_kokoro_engine()?;
     }
 
     // Initialize global state for TTS thread

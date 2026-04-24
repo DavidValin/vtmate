@@ -14,8 +14,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 // API
-
-use crate::state::GLOBAL_STATE;
 // ------------------------------------------------------------------
 
 pub fn record_thread(

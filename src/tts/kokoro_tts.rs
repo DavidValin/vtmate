@@ -2,14 +2,16 @@
 //  kokoro tts
 // ------------------------------------------------------------------
 
+use super::{KOKORO_ENGINE, SpeakOutcome};
 use crate::audio::AudioChunk;
-use crossbeam_channel::Sender;
+use crossbeam_channel::{Receiver, Sender};
 use kokoro_micro::TtsEngine;
 use std::sync::{
   Arc, Mutex,
-  atomic::{AtomicBool, Ordering},
+  atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::thread;
+use std::time::Duration;
 
 // API
 // ------------------------------------------------------------------
@@ -20,6 +22,204 @@ pub struct StreamingTts {
   voice: String,
   gain: f32,
 }
+
+// Engine initialization
+pub fn start_kokoro_engine() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  let rt = tokio::runtime::Builder::new_current_thread()
+    .enable_all()
+    .build()?;
+  let engine = rt.block_on(TtsEngine::new())?;
+  KOKORO_ENGINE.set(Arc::new(Mutex::new(engine))).ok();
+  Ok(())
+}
+
+// Speak via Kokoro
+pub fn speak_via_kokoro(
+  text: &str,
+  language: &str,
+  voice: &str,
+  tx: Sender<crate::audio::AudioChunk>,
+  stop_all_rx: Receiver<()>,
+  interrupt_counter: Arc<AtomicU64>,
+  expected_interrupt: u64,
+) -> Result<SpeakOutcome, Box<dyn std::error::Error + Send + Sync>> {
+  let engine = KOKORO_ENGINE.get_or_init(|| {
+    let rt = tokio::runtime::Builder::new_current_thread()
+      .enable_all()
+      .build()
+      .unwrap();
+    let e = rt.block_on(TtsEngine::new()).unwrap();
+    Arc::new(Mutex::new(e))
+  });
+
+  let mut streaming = StreamingTts::new(engine.clone());
+  streaming.set_voice(voice);
+
+  // interrupt monitoring
+  let interrupt_flag = streaming.interrupt_flag.clone();
+  let stop_rx = stop_all_rx.clone();
+  let int_counter = interrupt_counter.clone();
+  let expected = expected_interrupt;
+
+  // clones for early check
+  let stop_rx_clone = stop_rx.clone();
+  let int_counter_clone = int_counter.clone();
+
+  thread::spawn(move || {
+    loop {
+      if stop_rx_clone.try_recv().is_ok() || int_counter_clone.load(Ordering::SeqCst) != expected {
+        interrupt_flag.store(true, Ordering::Relaxed);
+        break;
+      }
+      thread::sleep(Duration::from_millis(10));
+    }
+  });
+
+  // Start synthesis - the monitoring thread will handle interruptions during synthesis
+  let rt = tokio::runtime::Builder::new_current_thread()
+    .enable_all()
+    .build()?;
+  let res = rt.block_on(streaming.speak_stream(text, tx.clone(), language));
+
+  match res {
+    Ok(_) => Ok(SpeakOutcome::Completed),
+    Err(_e) => Ok(SpeakOutcome::Interrupted),
+  }
+}
+
+pub const KOKORO_VOICES_PER_LANGUAGE: &[(&str, &[&str])] = &[
+  // English language
+  // ----------------------------------------
+  (
+    "en",
+    &[
+      // American english - female
+      "af_alloy",
+      "af_aoede",
+      "af_bella",
+      "af_heart",
+      "af_jessica",
+      "af_kore",
+      "af_nicole",
+      "af_nova",
+      "af_river",
+      "af_sarah",
+      "af_sky",
+      // American english - male
+      "am_adam",
+      "am_echo",
+      "am_eric",
+      "am_fenrir",
+      "am_liam",
+      "am_michael",
+      "am_onyx",
+      "am_puck",
+      "am_santa",
+      // British english - female
+      "bf_alice",
+      "bf_emma",
+      "bf_isabella",
+      "bf_lily",
+      // British english - male
+      "bm_daniel",
+      "bm_fable",
+      "bm_george",
+      "bm_lewis",
+    ],
+  ),
+  // Spanish language
+  // ----------------------------------------
+  (
+    "es",
+    &[
+      // Spanish - female
+      "ef_dora", // Spanish - male
+      "em_alex", "em_santa",
+    ],
+  ),
+  // Mandarin chinese language
+  // ----------------------------------------
+  (
+    "zh",
+    &[
+      // Mandarin chinese - female
+      "zf_xiaobei",
+      "zf_xiaoni",
+      "zf_xiaoxiao",
+      "zf_xiaoyi",
+      // Mandarin chinese - male
+      "zm_yunjian",
+      "zm_yunxi",
+      "zm_yunxia",
+      "zm_yunyang",
+    ],
+  ),
+  // Japanese language
+  // ----------------------------------------
+  (
+    "ja",
+    &[
+      // Japanese - female
+      "jf_alpha",
+      "jf_gongitsune",
+      "jf_nezumi",
+      "jf_tebukuro",
+      // Japanese - male
+      "jm_kumo",
+    ],
+  ),
+  // Portuguese / Brazil language
+  // ----------------------------------------
+  (
+    "pt",
+    &[
+      // Portuguese - female
+      "pf_dora", // Portuguese - male
+      "pm_alex", "pm_santa",
+    ],
+  ),
+  // Italian language
+  // ----------------------------------------
+  (
+    "it",
+    &[
+      // Italian - female
+      "if_sara",
+      // Italian - male
+      "im_nicola",
+    ],
+  ),
+  // Hindi language
+  // ----------------------------------------
+  (
+    "hi",
+    &[
+      // Hindi - female
+      "hf_alpha", "hf_beta", // Hindi - male
+      "hm_omega", "hm_psi",
+    ],
+  ),
+  // French language
+  // ----------------------------------------
+  (
+    "fr",
+    &[
+      // French - female
+      "ff_siwis",
+    ],
+  ),
+];
+
+pub const _DEFAULT_KOKORO_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
+  ("en", "bf_emma"),
+  ("es", "em_santa"),
+  ("zh", "zf_xiaoni"),
+  ("ja", "jm_kumo"),
+  ("pt", "pf_dora"),
+  ("it", "if_sara"),
+  ("hi", "hf_alpha"),
+  ("fr", "ff_siwis"),
+];
 
 // PRIVATE
 // ------------------------------------------------------------------
