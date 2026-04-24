@@ -40,6 +40,7 @@ pub struct AgentSettings {
 }
 
 #[derive(Parser, Debug, Clone)]
+#[clap(version = env!("CARGO_PKG_VERSION"))]
 #[clap(after_help = r#"
 Settings file is at ~/.vtmate/settings
 
@@ -114,42 +115,43 @@ Explanation on the fields:
 
 "#)]
 pub struct Args {
-  #[arg(short = 'p', long = "prompt", value_name = "PROMPT")]
+  #[arg(short = 'p', long = "prompt", value_name = "PROMPT", help = "initialize with a text prompt")]
   pub prompt: Option<String>,
 
   #[arg(
     short = 'i',
     long = "prompt-file",
     value_name = "FILE",
-    default_missing_value = "-"
+    default_missing_value = "-",
+    help = "initialize with a file prompt (use '-' for STDIN)"
   )]
   pub prompt_file: Option<String>,
 
-  #[arg(long, action = clap::ArgAction::SetTrue)]
+  #[arg(long, action = clap::ArgAction::SetTrue, help = "run the program in verbose mode")]
   pub verbose: bool,
 
-  #[arg(long, action=clap::ArgAction::SetTrue)]
+  #[arg(long, action=clap::ArgAction::SetTrue, help = "list all voices for all languages and tts systems")]
   pub list_voices: bool,
 
-  #[arg(short = 'c', long = "config", value_name = "CONFIG_FILE")]
+  #[arg(short = 'c', long = "config", value_name = "CONFIG_FILE", help = "use a specific settings file")]
   pub config: Option<String>,
 
-  #[arg(long, value_parser=validate_agent_name)]
+  #[arg(short = 'a', long = "agent", value_parser=validate_agent_name, help = "set a specific initial agent")]
   pub agent: Option<String>,
 
-  #[arg(long)]
+  #[arg(long, help = "override for this session the ptt setting for all agents independently of its settings")]
   pub ptt: Option<bool>,
 
-  #[arg(long, num_args=2.., value_name = "AGENT1 AGENT2 SUBJECT")]
+  #[arg(long, num_args=2.., value_name = "AGENT1 AGENT2 SUBJECT", help = "enable debate mode with two agents and a subject")]
   pub debate: Option<Vec<String>>,
 
-  #[arg(short = 'r', long = "read-file", value_name = "FILENAME")]
+  #[arg(short = 'r', long = "read-file", value_name = "FILENAME", default_missing_value = "-", help = "read a file with voice, phrase by phrase (no llm involved)")]
   pub read_file: Option<String>,
 
-  #[arg(short = 'q', long = "quiet", action = clap::ArgAction::SetTrue)]
+  #[arg(short = 'q', long = "quiet", action = clap::ArgAction::SetTrue, help = "produce a single response and exit (requires `-p` or `-i`)")]
   pub quiet: bool,
 
-  #[arg(short = 's', long = "save", action = clap::ArgAction::SetTrue)]
+  #[arg(short = 's', long = "save", action = clap::ArgAction::SetTrue, help = "save the conversation to text and audio file in ~/.vtmate/conversations")]
   pub save: bool,
 }
 
