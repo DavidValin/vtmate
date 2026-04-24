@@ -5,7 +5,7 @@
 use crate::state::GLOBAL_STATE;
 use crossbeam_channel::{Receiver, Sender};
 use kokoro_micro::TtsEngine;
-use supertonic2_tts::TtsEngine as SupersonicTtsEngine;
+use supersonic2_tts::TtsEngine as SupersonicTtsEngine;
 mod kokoro_tts;
 use reqwest;
 use std::io::{BufReader, Read};
