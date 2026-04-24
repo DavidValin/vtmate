@@ -25,12 +25,6 @@ pub fn f32_to_i16(samples: &[f32]) -> Vec<i16> {
     .collect()
 }
 
-/// Append silence of given duration in milliseconds to a buffer of i16 samples.
-pub fn add_silence(buf: &mut Vec<i16>, sample_rate: u32, duration_ms: u32) {
-  let samples = (sample_rate * duration_ms / 1000) as usize;
-  buf.extend(std::iter::repeat(0_i16).take(samples));
-}
-
 pub fn pick_input_stream(host: &cpal::Host) -> Result<(cpal::Device, cpal::Stream), String> {
   let err = || {
     "No usable microphone stream could be opened.\n".to_string()

@@ -21,12 +21,6 @@ use url::Url;
 // API
 // ------------------------------------------------------------------
 
-#[derive(Debug, Deserialize)]
-pub struct Settings {
-  pub agents: Vec<AgentSettings>,
-  pub default_agent: String,
-}
-
 #[derive(Debug, Deserialize, Clone)]
 pub struct AgentSettings {
   pub name: String,
