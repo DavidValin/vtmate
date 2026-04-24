@@ -28,7 +28,7 @@ hound = "3"
 crossterm = "0.27"
 tokio = { version = "1", features = ["rt", "macros"] }
 kokoro-micro = "1.0.0"
-supertonic2-tts = "1.0.1"
+supersonic2-tts = "1.0.1"
 espeak-rs = "0.1.9"
 flate2 = "1"
 tar = "0.4"

@@ -2593,10 +2593,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
-name = "supertonic2-tts"
-version = "1.0.1"
+name = "supersonic2-tts"
+version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19465002a37c2c1c9365f79fa9d82d3e395a54e90d505c32f4b279df03c3cc8e"
+checksum = "e85d39e25d0ece0239e42ac609d79e1b2d6cdbc04e3c7d70c0ea874170c642fb"
 dependencies = [
  "anyhow",
  "clap",
@@ -3108,7 +3108,7 @@ dependencies = [
  "serde_ini",
  "serde_json",
  "sha2",
- "supertonic2-tts",
+ "supersonic2-tts",
  "tar",
  "tokio",
  "url",
