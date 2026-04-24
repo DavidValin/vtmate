@@ -115,7 +115,12 @@ Explanation on the fields:
 
 "#)]
 pub struct Args {
-  #[arg(short = 'p', long = "prompt", value_name = "PROMPT", help = "initialize with a text prompt")]
+  #[arg(
+    short = 'p',
+    long = "prompt",
+    value_name = "PROMPT",
+    help = "initialize with a text prompt"
+  )]
   pub prompt: Option<String>,
 
   #[arg(
@@ -133,19 +138,33 @@ pub struct Args {
   #[arg(long, action=clap::ArgAction::SetTrue, help = "list all voices for all languages and tts systems")]
   pub list_voices: bool,
 
-  #[arg(short = 'c', long = "config", value_name = "CONFIG_FILE", help = "use a specific settings file")]
+  #[arg(
+    short = 'c',
+    long = "config",
+    value_name = "CONFIG_FILE",
+    help = "use a specific settings file"
+  )]
   pub config: Option<String>,
 
   #[arg(short = 'a', long = "agent", value_parser=validate_agent_name, help = "set a specific initial agent")]
   pub agent: Option<String>,
 
-  #[arg(long, help = "override for this session the ptt setting for all agents independently of its settings")]
+  #[arg(
+    long,
+    help = "override for this session the ptt setting for all agents independently of its settings"
+  )]
   pub ptt: Option<bool>,
 
   #[arg(long, num_args=2.., value_name = "AGENT1 AGENT2 SUBJECT", help = "enable debate mode with two agents and a subject")]
   pub debate: Option<Vec<String>>,
 
-  #[arg(short = 'r', long = "read-file", value_name = "FILENAME", default_missing_value = "-", help = "read a file with voice, phrase by phrase (no llm involved)")]
+  #[arg(
+    short = 'r',
+    long = "read-file",
+    value_name = "FILENAME",
+    default_missing_value = "-",
+    help = "read a file with voice, phrase by phrase (no llm involved)"
+  )]
   pub read_file: Option<String>,
 
   #[arg(short = 'q', long = "quiet", action = clap::ArgAction::SetTrue, help = "produce a single response and exit (requires `-p` or `-i`)")]

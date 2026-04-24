@@ -309,6 +309,11 @@ pub fn keyboard_thread(
                   .processing_response
                   .store(true, Ordering::Relaxed);
                 last_esc = None;
+                state.reset_conversation();
+                let _ = tx_ui.send("line|".to_string());
+                let _ = tx_ui.send(
+                  "line|\n\x1b[32m✨ Session restarted (history reset) \x1b[0m\n".to_string(),
+                );
               } else {
                 last_esc = Some(now);
               }
