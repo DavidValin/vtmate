@@ -184,20 +184,21 @@ echo "How to fly without wings?" | vtmate -i -
 ![debate mode](https://github.com/DavidValin/vtmate/raw/main/docs/en/diagrams/debate-mode.png)
 
 Initialize a debate between two agents and be able to participate in the debate by speaking at any time. To create a good debate adjust the system prompts of each agent and give a detailed initial input.
+In debate mode is good idea to set `--ptt <true/false>` option so that the ptt value is not switched on each agent turn.
 
 Start a debate with an initial subject
 ```
-vtmate --debate "God" "Devil" "How to succeed in life?"
+vtmate --debate "God" "Devil" "How to succeed in life?" --ptt true
 ```
 
 Start a debate with an initial prompt from file
 ```
-vtmate --debate "God" "Devil" -i myprompt.txt
+vtmate --debate "God" "Devil" -i myprompt.txt  --ptt false
 ```
 
 Start a debate with an initial prompt from stdin
 ```
-echo "Lets discuss the permissions of this files: \n\n $(ls -la)" | vtmate --debate "Unix administrator" "Security Expert" -i -
+echo "Lets discuss the permissions of this files: \n\n $(ls -la)" | vtmate --debate "Unix administrator" "Security Expert" -i -  --ptt true
 ```
 
 * You can also start/stop a debate from conversation mode by pressing `Control+D` and picking the debate agents.
