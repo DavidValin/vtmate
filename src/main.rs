@@ -134,8 +134,11 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Read the filename or stdin
     let content = util::read_file(filename);
 
-    tts::start_supersonic_engine()?;
-    tts::start_kokoro_engine()?;
+  // Initialize TTS engines only if needed
+  let use_supersonic = agents.iter().any(|a| a.tts == "supersonic2");
+  let use_kokoro = agents.iter().any(|a| a.tts == "kokoro");
+  if use_supersonic { tts::start_supersonic_engine()?; }
+  if use_kokoro { tts::start_kokoro_engine()?; }
 
     // Initialize global state for TTS thread
     let app_state = Arc::new(state::AppState::with_agent(
