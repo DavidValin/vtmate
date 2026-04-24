@@ -316,7 +316,9 @@ pub fn conversation_thread(
         if !user_msg.is_empty() {
           let system_prompt = current_agent.system_prompt.replace("\\n", "\n");
           // Set recording_paused according to current agent's ptt
-          state.recording_paused.store(current_agent.ptt, Ordering::Relaxed);
+          state
+            .recording_paused
+            .store(current_agent.ptt, Ordering::Relaxed);
           let messages = create_basic_messages(system_prompt, user_msg.clone());
 
           let my_interrupt = interrupt_counter.load(Ordering::SeqCst);

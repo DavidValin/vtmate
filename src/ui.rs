@@ -226,6 +226,8 @@ fn handle_line_message<W: Write>(
 
     if is_newline_or_wrap {
       buffer.push(String::new());
+      // Append the character that caused the wrap so it appears on the new line
+      buffer.last_mut().unwrap().push(ch);
 
       let (_view_start, visible) = viewport(buffer.len(), term_height);
 
@@ -328,6 +330,8 @@ fn stream_chunk<W: Write>(
         execute!(out, ScrollUp(1)).unwrap();
       }
       buffer.push(String::new());
+      // Append the character that caused the wrap so it appears on the new line
+      buffer.last_mut().unwrap().push(ch);
 
       execute!(
         out,
