@@ -226,7 +226,7 @@ pub const _DEFAULT_KOKORO_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
 
 // smaller chunks reduce long synth stalls -> fewer underruns/glitches.
 // (Words are variable length; 10–15 is a safer range for real-time streaming.)
-const MAX_CHUNK_SIZE: usize = 200;
+const MAX_CHUNK_SIZE: usize = 10;
 
 impl StreamingTts {
   pub fn new(engine: Arc<Mutex<TtsEngine>>) -> Self {

@@ -116,7 +116,7 @@ pub fn speak_via_supersonic2(
 
 // smaller chunks reduce long synth stalls -> fewer underruns/glitches.
 // (Words are variable length; 10–15 is a safer range for real-time streaming.)
-const MAX_CHUNK_SIZE: usize = 30;
+const MAX_CHUNK_SIZE: usize = 15;
 
 impl StreamingTts {
   pub fn new(engine: Arc<Mutex<TtsEngine>>) -> Self {
