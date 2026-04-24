@@ -1,10 +1,10 @@
-## The final AI voice conversational system all running in your terminal!
+## vtmate
 
-Powerful terminal-based voice ai toolkit with many realistic voices, extremely low latency, 28 languages supported. Allows you to voice conversate with local ai models. [Download](https://github.com/DavidValin/vtmate/releases) (⭐ MacOS ⭐ Linux and ⭐ Windows supported)
+The final AI voice conversational system all running in your terminal! vtmate is a Powerful terminal-based voice ai toolkit with many realistic voices, extremely low latency, 28 languages supported. Allows you to voice conversate with local ai models, pipe data and save into files. [Download](https://github.com/DavidValin/vtmate/releases) (⭐ MacOS ⭐ Linux and ⭐ Windows supported)
 
-The program self contains (1.2GB) all tts models and voices and necessary files to recognize speech and speak with voice with no external intallations ensuring maximum portability.
+The program self contains (1.2GB) all TTS models and voices and necessary files to recognize speech and speak with voice with no external intallations ensuring maximum portability.
 
-⚠️ Currently you can use only ONE TTS system at the time. The default is (see `~/.vtmate/settings` file)
+⚠️ Currently you can use only ONE TTS SYSTEM AT THE TIME. The default is supersonic2 (see `~/.vtmate/settings` file).
 
 ### Video demonstration
 <details>
@@ -23,7 +23,7 @@ https://github.com/user-attachments/assets/e612feaa-8ab0-4761-9c67-53ec7d40cab7
 #### **Sponsor this project**
 [![Sponsor vtmate](https://img.shields.io/static/v1?label=Sponsor&message=%E2%9D%A4&logo=GitHub&color=%23fe8e86)](https://github.com/sponsors/DavidValin)
 
-![ai mate screenshot](https://github.com/DavidValin/vtmate/raw/main/preview.png)
+![vtmate screenshot](https://github.com/DavidValin/vtmate/raw/main/preview.png)
 
 ![how it works](https://github.com/DavidValin/vtmate/raw/main/docs/en/diagrams/how-it-works.png)
 
@@ -107,22 +107,22 @@ Example of agent definition:
 
 ```
 [agent]
-name = main agent
+name = explainer
 language = en
-voice = bf_alice
+tts = supersonic2
+voice = F1
 voice_speed = 1.1
 provider = ollama
-baseurl = http://localhost:8080
-model = gpt-oss-20b
-system_prompt = You are a smart ai assistant. You reply to the user with the necessary information following the next rules: Avoid suggestions unless they contribute to the specific user request. If the user hasn't requested anything specific ask the exact questions to find out exactly what he needs assistance with. Replies are no longer than 20 words unless a longer explanation is required.
-sound_threshold_peak = 0.1
-end_silence_ms = 2000
-tts = kokoro
-ptt = false
+baseurl = http://127.0.0.1:11434
+model = llama3.2:3b
+system_prompt = "You are a helpful AI assistant. Your only funcion is to explain things as simple as possible in no more than 150 words or 450 words if the user asks for a longer explanation."
+sound_threshold_peak = 0.12
+end_silence_ms = 2500
+ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 ```
 
-* Voice mixing is supported for kokoro tts system only, you can create a voice by mixing 2 kokoro voices by percentage. Example mixing 50% of bm_daniel and 50% of am_puck: set voice name to `bm_daniel.5+am_puck.5`
+* Voice mixing is supported for kokoro TTS system only, you can create a voice by mixing 2 kokoro voices by percentage. Example mixing 50% of bm_daniel and 50% of am_puck: set voice name to `bm_daniel.5+am_puck.5`
 
 To see explanation of each field:
 ```
@@ -312,34 +312,34 @@ vtmate --help
 
 | ID |           Language       |      Support       |        TTS supported   |   Number of voices  |
 |----|--------------------------|--------------------|---------------------------------------------------|-------------|
-| en |   🇬🇧  English            |  🏆 Best support   |    ✅ Supersonic 2    ✅ Kokoro    ✅ OpenTTS     | > 38 voices
-| es |   🇪🇸  Spanish            |  🏆 Best support   |    ✅ Supersonic 2    ✅ Kokoro    ✅ OpenTTS     | > 14 voices
-| fr |   🇫🇷  French             |  🏆 Best support   |    ✅ Supersonic 2    ✅ Kokoro    ✅ OpenTTS     | > 12 voices
-| zh |   🇨🇳  Mandarin Chinese   |  🥈 Good support   |    ❌ Supersonic 2    ✅ Kokoro    ✅ OpenTTS     | > 9 voices
-| ja |   🇯🇵  Japanese           |  🥈 Good support   |    ❌ Supersonic 2    ✅ Kokoro    ✅ OpenTTS     | > 6 voices
-| pt |   🇵🇹  Portuguese         |  🥈 Good support   |    ✅ Supersonic 2    ✅ Kokoro    ❌ OpenTTS     | > 13 voices
-| ko |   🇰🇷  Korean             |  🥈 Good support   |    ✅ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 11 voices
-| it |   🇮🇹  Italian            |  🥈 Good support   |    ❌ Supersonic 2    ✅ Kokoro    ✅ OpenTTS     | > 3 voices
-| hi |   🇮🇳  Hindi              |  🥈 Good support   |    ❌ Supersonic 2    ✅ Kokoro    ✅ OpenTTS     | > 4 voices
-| ar |   🇸🇦  Arabic             |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| bn |   🇧🇩  Bengali            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| ca |   🇪🇸  Catalan            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| cs |   🇨🇿  Czech              |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| de |   🇩🇪  German             |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| el |   🇬🇷  Greek              |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| fi |   🇫🇮  Finnish            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| gu |   🇮🇳  Gujarati           |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| hu |   🇭🇺  Hungarian          |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| kn |   🇮🇳  Kannada            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| mr |   🇮🇳  Marathi            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| nl |   🇳🇱  Dutch              |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| pa |   🇮🇳  Punjabi            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| ru |   🇷🇺  Russian            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| sv |   🇸🇪  Swedish            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| sw |   🇰🇪  Swahili            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| ta |   🇮🇳  Tamil              |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| te |   🇮🇳  Telugu             |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| tr |   🇹🇷  Turkish            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| en |   🇬🇧  English            |  🏆 Best support   |    ✅ SS2    ✅ Kokoro    ✅ OpenTTS     | > 38 voices
+| es |   🇪🇸  Spanish            |  🏆 Best support   |    ✅ SS2    ✅ Kokoro    ✅ OpenTTS     | > 14 voices
+| fr |   🇫🇷  French             |  🏆 Best support   |    ✅ SS2    ✅ Kokoro    ✅ OpenTTS     | > 12 voices
+| zh |   🇨🇳  Mandarin Chinese   |  🥈 Good support   |    ❌ SS2    ✅ Kokoro    ✅ OpenTTS     | > 9 voices
+| ja |   🇯🇵  Japanese           |  🥈 Good support   |    ❌ SS2    ✅ Kokoro    ✅ OpenTTS     | > 6 voices
+| pt |   🇵🇹  Portuguese         |  🥈 Good support   |    ✅ SS2    ✅ Kokoro    ❌ OpenTTS     | > 13 voices
+| ko |   🇰🇷  Korean             |  🥈 Good support   |    ✅ SS2    ❌ Kokoro    ✅ OpenTTS     | 11 voices
+| it |   🇮🇹  Italian            |  🥈 Good support   |    ❌ SS2    ✅ Kokoro    ✅ OpenTTS     | > 3 voices
+| hi |   🇮🇳  Hindi              |  🥈 Good support   |    ❌ SS2    ✅ Kokoro    ✅ OpenTTS     | > 4 voices
+| ar |   🇸🇦  Arabic             |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| bn |   🇧🇩  Bengali            |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| ca |   🇪🇸  Catalan            |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| cs |   🇨🇿  Czech              |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| de |   🇩🇪  German             |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| el |   🇬🇷  Greek              |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| fi |   🇫🇮  Finnish            |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| gu |   🇮🇳  Gujarati           |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| hu |   🇭🇺  Hungarian          |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| kn |   🇮🇳  Kannada            |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| mr |   🇮🇳  Marathi            |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| nl |   🇳🇱  Dutch              |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| pa |   🇮🇳  Punjabi            |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| ru |   🇷🇺  Russian            |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| sv |   🇸🇪  Swedish            |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| sw |   🇰🇪  Swahili            |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| ta |   🇮🇳  Tamil              |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| te |   🇮🇳  Telugu             |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| tr |   🇹🇷  Turkish            |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
 
 ## Acceleration support
 
@@ -364,12 +364,13 @@ Windows (arm64)   ❌ CPU    ❌ CUDA     ❌ Vulkan
 ```
 cargo install vtmate
 ```
-
-**Full configurable builds (os, arch and gpu acceleration)**
-
+**From git repository:**
 ```
 git clone https://github.com/DavidValin/vtmate
+cargo build --release
 ```
+
+**Full configurable builds (OS, arch and gpu acceleration)**
 
 see:
 ```
