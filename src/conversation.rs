@@ -92,7 +92,7 @@ pub fn conversation_thread(
   };
 
   //  –––––––––––––––––––––––––––––––––––––
-  //   single run mode
+  //   quiet mode
   //  –––––––––––––––––––––––––––––––––––––
   if quiet {
     crate::log::log("info", "Running in quiet mode");

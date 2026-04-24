@@ -228,7 +228,9 @@ echo "Lets discuss the permissions of this files: \n\n $(ls -la)" | vtmate --deb
 * You can also start/stop a debate from conversation mode by pressing `Control+D` and picking the debate agents.
 * Be able to save the conversation in a wav and text file by adding `-s` option. It will save it in `~/.vtmate/conversations` folder
 
-### Single run
+### Quiet mode
+
+This mode process a text input, responds (text and audio) and exits
 
 Get a single response from prompt
 ```
