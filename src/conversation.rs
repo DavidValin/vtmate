@@ -423,7 +423,7 @@ pub fn conversation_thread(
             &reply,
             &tts_tx,
             &tts_done_rx,
-            settings.voice.clone(),
+            state.voice.lock().unwrap().clone(),
             &interrupt_counter,
             my_interrupt,
           );
@@ -532,7 +532,7 @@ pub fn conversation_thread(
         let ui_thinking_for_closure = ui_thinking_cloned_for_closure.clone();
 
         // called on every chunk received from llm
-        let voice_for_tts = settings.voice.clone();
+        let voice_for_tts = state.voice.lock().unwrap().clone();
         // reply accumulator for single ChatMessage
         let reply_accum = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
         let reply_accum_cloned = reply_accum.clone();
