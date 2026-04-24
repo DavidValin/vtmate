@@ -458,7 +458,7 @@ fn render_bottom_bar<W: Write>(
   let ptt = if state.ptt.load(Ordering::Relaxed) {
     "\x1b[41m\x1b[37m PTT \x1b[0m"
   } else {
-    ""
+    "\x1b[42m\x1b[30m LIVE \x1b[0m"
   };
 
   let lang_guard = state.language.lock().unwrap();
