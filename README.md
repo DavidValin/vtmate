@@ -145,6 +145,24 @@ The first agent defined in `~/vtmate/settings` will always be selected agent whe
 Before running vtmate make sure ollama is running: `ollama serve`.
 Optionally, if you want to use llama.cpp make sure llama-server is running.
 
+All cli options:
+
+```
+  -a <agent_name>        set a specific initial agent
+  -p <prompt>            initialize with a text prompt
+  -i <file.txt>          initialize with a file prompt
+  -i -                   initialize with prompt from STDIN
+  -q                     produce a single response and exit (requires `-p` or `-i`)
+  -s                     save the conversation to text and audio file in ~/.vtmate/conversations
+  -r <file.txt>          read a file with voice, phrase by phrase (no llm involved)
+  -r -                   read text from STDIN with voice, phrase by phrase (no llm involved)
+  -c <settings_file>     use a specific settings file
+  --list-voices          list all voices for all languages and tts systems
+  --ptt <true/false>     override for this session the ptt setting for all agents independently of its settings
+  --verbose              run the program in verbose mode
+  --help                 show help
+```
+
 ### Conversation mode
 
 ![conversation mode](https://github.com/DavidValin/vtmate/raw/main/docs/en/diagrams/conversation-mode.png)
@@ -177,6 +195,8 @@ Start conversation with an initial prompt from stdin
 echo "How to fly without wings?" | vtmate -i -
 ```
 
+* When running in LIVE mode just talk. You can also pause/resume recording by pressing `SPACE` once
+* When running in PTT mode: keep `SPACE` pushed while talking, and then release
 * You can switch agents in realtime by pressing `ARROW_LEFT` / `ARROW_RIGHT` keyword arrows (you need at least 2 agents defined in `~/vtmate/settings`).
 * You can change the voice speed by pressing `ARROW_UP` / `ARROW_DOWN`
 * Be able to save the conversation in a wav and text file by adding `-s` option. It will save it in `~/.vtmate/conversations` folder
@@ -203,6 +223,8 @@ Start a debate with an initial prompt from stdin
 echo "Lets discuss the permissions of this files: \n\n $(ls -la)" | vtmate --debate "Unix administrator" "Security Expert" -i -  --ptt true
 ```
 
+* When running in LIVE mode just talk. You can also pause/resume recording by pressing `SPACE` once
+* When running in PTT mode: keep `SPACE` pushed while talking, and then release
 * You can also start/stop a debate from conversation mode by pressing `Control+D` and picking the debate agents.
 * Be able to save the conversation in a wav and text file by adding `-s` option. It will save it in `~/.vtmate/conversations` folder
 
