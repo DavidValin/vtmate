@@ -62,9 +62,14 @@ Explanation on the fields:
                           `vtmate --list-voices`).
 
                           Voice mixing:
-                            you can mix 2 voices. example of mixing
-                            50% of bm_daniel and 50% of am_puck:
-                            "bm_daniel.5+am_puck.5"
+
+                            when using 'kokoro' tts you can mix
+                            2 voices. example:
+                            
+                               "bm_daniel.5+am_puck.5"
+
+                            (50% of bm_daniel and 50% of am_puck)
+                            
   ------------------------------------------------------------
   * voice_speed:          the voice speed from 1.0 to 9.0
   ------------------------------------------------------------
@@ -387,13 +392,13 @@ pub fn ensure_settings_file() -> Result<(), Error> {
   if settings_path.exists() {
     return Ok(());
   }
-  let content = r#"[agent]
+  let content = r#"
 [agent]
 name = main agent
 language = en
-tts = kokoro
-voice = bm_daniel
-voice_speed = 1.2
+tts = supersonic2
+voice = M1
+voice_speed = 1.1
 provider = ollama
 baseurl = http://127.0.0.1:11434
 model = llama3.2:3b
@@ -404,10 +409,40 @@ ptt = false
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 
 [agent]
+name = explainer
+language = en
+tts = supersonic2
+voice = F1
+voice_speed = 1.1
+provider = ollama
+baseurl = http://127.0.0.1:11434
+model = llama3.2:3b
+system_prompt = "You are a helpful AI assistant. Your only funcion is to explain things as simple as possible in no more than 150 words or 450 words if the user asks for a longer explanation."
+sound_threshold_peak = 0.12
+end_silence_ms = 2500
+ptt = true
+whisper_model_path = ~/.whisper-models/ggml-tiny.bin
+
+[agent]
+name = planner
+language = en
+tts = supersonic2
+voice = F3
+voice_speed = 1.1
+provider = ollama
+baseurl = http://127.0.0.1:11434
+model = llama3.2:3b
+system_prompt = You are an ai assistant which assist the user in the creation of a plan based on user's goal. When defining the plan follow the next format standards:\n 1-The plan is composed by tasks and subtasks.\n 2-Each task has the next format: "[ ] <task name>".\n 3-Subtasks are indented with 2 spaces below the parent task.\n 4-Before defining a plan, make sure you have the relevant information from the user.
+sound_threshold_peak = 0.12
+end_silence_ms = 2000
+ptt = true
+whisper_model_path = ~/.whisper-models/ggml-tiny.bin
+
+[agent]
 name = Ptahhotep
 language = en
-tts = kokoro
-voice = bm_daniel.6+bf_isabella.4
+tts = supersonic2
+voice = M2
 voice_speed = 1.1
 provider = ollama
 baseurl = http://127.0.0.1:11434
@@ -421,8 +456,8 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 [agent]
 name = Aristoteles
 language = en
-tts = kokoro
-voice = bm_daniel.4+am_santa.6
+tts = supersonic2
+voice = M3
 voice_speed = 1.1
 provider = ollama
 baseurl = http://127.0.0.1:11434
@@ -434,25 +469,10 @@ ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 
 [agent]
-name = Seneca
-language = en
-tts = kokoro
-voice = bm_daniel.6+bf_isabella.4
-voice_speed = 1.1
-provider = ollama
-baseurl = http://127.0.0.1:11434
-model = llama3.2:3b
-system_prompt = You are Seneca, a stoic sage. Follow the subject of the conversation with special attention to the user request. Respond with calm, concise wisdom; 30 words or fewer, max 250 words if more detail is essential.
-sound_threshold_peak = 0.12
-end_silence_ms = 2500
-ptt = true
-whisper_model_path = ~/.whisper-models/ggml-tiny.bin
-
-[agent]
 name = Budda
 language = en
-tts = kokoro
-voice = bm_daniel
+tts = supersonic2
+voice = M4
 voice_speed = 1.1
 provider = ollama
 baseurl = http://127.0.0.1:11434
@@ -466,8 +486,8 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 [agent]
 name = Jesus Christ
 language = en
-tts = kokoro
-voice = bm_daniel.2+bm_george.8
+tts = supersonic2
+voice = M5
 voice_speed = 1.1
 provider = ollama
 baseurl = http://127.0.0.1:11434
@@ -478,20 +498,7 @@ end_silence_ms = 2500
 ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 
-[agent]
-name = planner
-language = en
-tts = kokoro
-voice = bm_george
-voice_speed = 1.1
-provider = ollama
-baseurl = http://127.0.0.1:11434
-model = llama3.2:3b
-system_prompt = You are an ai assistant which assist the user in the creation of a plan based on user's goal. When defining the plan follow the next format standards:\n 1-The plan is composed by tasks and subtasks.\n 2-Each task has the next format: "[ ] <task name>".\n 3-Subtasks are indented with 2 spaces below the parent task.\n 4-Before defining a plan, make sure you have the relevant information from the user.
-sound_threshold_peak = 0.12
-end_silence_ms = 2000
-ptt = true
-whisper_model_path = ~/.whisper-models/ggml-tiny.bin
+
 "#;
   let mut file = File::create(&settings_path)?;
   file.write_all(content.as_bytes())?;
@@ -579,17 +586,17 @@ fn validate_language(language: &str, tts: &str) -> Result<(), std::io::Error> {
 fn validate_voice(voice: &str, language: &str, tts: &str) -> Result<(), std::io::Error> {
   // Validate voice format, supports mix of two voices
   let lang_clean = language.trim_matches('"');
-let voices_raw = tts::get_voices_for(tts, lang_clean);
-let voices: Vec<String> = voices_raw.iter().map(|s| s.to_string()).collect();
-if voices.is_empty() {
+  let voices_raw = tts::get_voices_for(tts, lang_clean);
+  let voices: Vec<String> = voices_raw.iter().map(|s| s.to_string()).collect();
+  if voices.is_empty() {
     return Err(std::io::Error::new(
-        std::io::ErrorKind::Other,
-        format!(
-            "No available voices for TTS '{}' and language '{}'",
-            tts, language
-        ),
+      std::io::ErrorKind::Other,
+      format!(
+        "No available voices for TTS '{}' and language '{}'",
+        tts, language
+      ),
     ));
-}
+  }
 
   let voice_clean = voice.trim_matches('"');
   // Call helper for validation
@@ -597,10 +604,13 @@ if voices.is_empty() {
 }
 
 fn validate_tts(tts: &str) -> Result<(), std::io::Error> {
-  if tts != "kokoro" && tts != "opentts" {
+  if tts != "kokoro" && tts != "opentts" && tts != "supersonic2" {
     return Err(std::io::Error::new(
       std::io::ErrorKind::Other,
-      format!("Invalid tts '{}' . Must be 'kokoro' or 'opentts'", tts),
+      format!(
+        "Invalid tts '{}' . Must be 'kokoro', 'opentts', or 'supersonic2'",
+        tts
+      ),
     ));
   }
   Ok(())
@@ -608,11 +618,10 @@ fn validate_tts(tts: &str) -> Result<(), std::io::Error> {
 
 // Voice mix validation helper
 fn validate_voice_value(
-    voice: &str,
-    voices: &Vec<String>,
-    language: &str,
+  voice: &str,
+  voices: &Vec<String>,
+  language: &str,
 ) -> Result<(), std::io::Error> {
-
   // If no mix, validate single voice
   if !voice.contains('+') {
     if voices.iter().any(|v| v.as_str() == voice) {
@@ -718,7 +727,7 @@ fn validate_system_prompt(prompt: &str) -> Result<(), std::io::Error> {
 }
 
 fn validate_sound_threshold_peak(value: f32) -> Result<(), std::io::Error> {
-   // Voice speed is not validated here
+  // Voice speed is not validated here
   if value < 0.0 || value > 1.0 {
     return Err(std::io::Error::new(
       std::io::ErrorKind::Other,
@@ -736,31 +745,31 @@ fn validate_sound_threshold_peak(value: f32) -> Result<(), std::io::Error> {
 }
 
 fn validate_end_silence_ms(value: u64) -> Result<(), std::io::Error> {
-    if value < 1 || value > 20000 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "'end_silence_ms' must be between 1 and 20000",
-        ));
-    }
-    Ok(())
+  if value < 1 || value > 20000 {
+    return Err(std::io::Error::new(
+      std::io::ErrorKind::Other,
+      "'end_silence_ms' must be between 1 and 20000",
+    ));
+  }
+  Ok(())
 }
 
 fn validate_voice_speed(value: f32) -> Result<(), std::io::Error> {
-    if value < 1.0 || value > 9.0 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "'voice_speed' must be between 1.0 and 9.0",
-        ));
-    }
-    // Ensure one decimal place only
-    let scaled = (value * 10.0).round();
-    if (scaled / 10.0 - value).abs() > 1e-6 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "'voice_speed' must have one decimal place",
-        ));
-    }
-    Ok(())
+  if value < 1.0 || value > 9.0 {
+    return Err(std::io::Error::new(
+      std::io::ErrorKind::Other,
+      "'voice_speed' must be between 1.0 and 9.0",
+    ));
+  }
+  // Ensure one decimal place only
+  let scaled = (value * 10.0).round();
+  if (scaled / 10.0 - value).abs() > 1e-6 {
+    return Err(std::io::Error::new(
+      std::io::ErrorKind::Other,
+      "'voice_speed' must have one decimal place",
+    ));
+  }
+  Ok(())
 }
 
 // PRIVATE

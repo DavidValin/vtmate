@@ -1,8 +1,10 @@
 ## The final AI voice conversational system all running in your terminal!
 
-Powerful terminal-based voice ai toolkit with realistic voices and extremely low latency.
+Powerful terminal-based voice ai toolkit with many realistic voices, extremely low latency, 28 languages supported. Allows you to voice conversate with local ai models. [Download](https://github.com/DavidValin/vtmate/releases) (⭐ MacOS ⭐ Linux and ⭐ Windows supported)
 
-Finally the cross platform voice ui you were waiting on now available for MacOS, Windows and Linux, no need for external installations.
+The program self contains (1.2GB) all tts models and voices and necessary files to recognize speech and speak with voice with no external intallations ensuring maximum portability.
+
+⚠️ Currently you can use only ONE TTS system at the time. The default is (see `~/.vtmate/settings` file)
 
 ### Video demonstration
 <details>
@@ -39,43 +41,39 @@ https://github.com/user-attachments/assets/e612feaa-8ab0-4761-9c67-53ec7d40cab7
 - 📌 Read text with voice from stdin, phrase by phrase, with keyboard navigation and pause/resume
 - 📌 Save conversation as audio and text
 - 📌 Load separate settings file with different agents
-- 📌 Integrated `whisper`
-- 📌 Integrated `kokoro TTS` system
-- 📌 Interface with `OpenTTS` system
+- 📌 Integrated `whisper` speech recognition system (no external intallation required)
+- 📌 Integrated `kokoro TTS` and `supersonic 2 TTS` systems (no external intallation required)
+- 📌 Interface with `OpenTTS` system (requires external docker service)
 - 📌 Supports `ollama` or `llama-server`
 - 📌 28 languages supported (`vtmate --list-voices`)
 - 📌 Use any gguf model from huggingface.com or ollama models (small models reply faster)
 
-### Status
-
-✅ Ready to kick in! [Download](https://github.com/DavidValin/vtmate/releases)
-
 ## How it works
 
-`RECORD -> STT -> LLM -> TTS -> PLAYBACK`
-
 ```
-- You start the program and start talking.
-- Once audio is detected (based on sound-threshold-peak option) it will start recording.
-- As soon as there is a time of silence (based on end_silence_ms option), it will transcribe the recorded audio using speech to text (stt). In ptt mode, this option is ignored, the program will wait for SPACE key to be released to submit the audio.
-- The transcribed text will be sent to the ai model (through ollama)
-- The ai model will reply with text.
-- The text converted to audio using text to speech (tts) via OpenTTS.
+- You start the program and start talking
+- Once audio is detected (based on sound-threshold-peak option) it will start recording
+- As soon as there is a time of silence (based on end_silence_ms option), it will transcribe the recorded audio using speech to text system (whisper). In ptt mode, this option is ignored, the program will wait for SPACE key to be released to submit the audio
+- The transcribed text will be sent to the ai model
+- The ai model will reply with text
+- The text converted to audio using text to speech system
 - You can interrupt the ai agent at any moment by start speaking, this will cause the response and audio to stop and you can continue talking.
+- In debate mode, the agents reply to each other automatically, playing the audio in each turn
 ```
 
 ## LLM integration
 
 - ✅ ollama (default)
 - ✅ llama-server
-- ✅ openclaw / clawbot (voice chat with your agent by connecting vtmate to the endpoint)
 
 You can run the models locally (by default) or remotely by configuring the base urls via cli option.
 
 ## TTS engine support
 
-- ✅ Kokoro TTS (default and integrated)
-- ✅ OpenTTS (requires external service)
+- ✅ Kokoro (integrated)
+- ✅ Supersonic 2 (integrated)
+- ✅ OpenTTS (requires external docker service)
+
 
 ## Installation
 
@@ -124,7 +122,7 @@ ptt = false
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 ```
 
-* Voice mixing is supported, you can create a voice by mixing 2 voices by percentage. Example mixing 50% of bm_daniel and 50% of am_puck: set voice name to `bm_daniel.5+am_puck.5`
+* Voice mixing is supported for kokoro tts system only, you can create a voice by mixing 2 kokoro voices by percentage. Example mixing 50% of bm_daniel and 50% of am_puck: set voice name to `bm_daniel.5+am_puck.5`
 
 To see explanation of each field:
 ```
@@ -258,15 +256,46 @@ And then load each as you need:
 vtmate -c philosophers.txt --debate "Aristoteles" "Ptahhotep" "how to achieve harmony?"
 ```
 
-###  Useful to know
+###  Model files
 
-vtmate self contains espeak-ng-data, the whisper tiny & small models and kokoro model and voices which will be autoextracted when running vtmate if they are not found in next locations:
+vtmate self contains (no need for manual installation) espeak-ng-data, the whisper tiny & small models, kokoro model and voices and supersonic2 model and voices which will be autoextracted from the binary when running vtmate if they are not found in next locations:
 
-- `~/.vtmate/espeak-ng-data.tar.gz`
+whisper models:
+```
 - `~/.whisper-models/ggml-tiny.bin`
 - `~/.whisper-models/ggml-small.bin`
-- `~/.cache/k/0.onnx`
-- `~/.cache/k/0.bin`
+```
+
+kokoro model files:
+```
+~/.cache/k/0.onnx
+~/.cache/k/0.bin
+```
+
+espeak phonemes (used by kokoro):
+```
+- `~/.vtmate/espeak-ng-data.tar.gz`
+```
+
+supersonic2 files:
+```
+~/.vtmate/tts/supersonic2-model/onnx/duration_predictor.onnx
+~/.vtmate/tts/supersonic2-model/onnx/text_encoder.onnx
+~/.vtmate/tts/supersonic2-model/onnx/tts.json
+~/.vtmate/tts/supersonic2-model/onnx/unicode_indexer.json
+~/.vtmate/tts/supersonic2-model/onnx/vector_estimator.onnx
+~/.vtmate/tts/supersonic2-model/onnx/vocoder.onnx
+~/.vtmate/tts/supersonic2-model/voice_styles/M1.json
+~/.vtmate/tts/supersonic2-model/voice_styles/M2.json
+~/.vtmate/tts/supersonic2-model/voice_styles/M3.json
+~/.vtmate/tts/supersonic2-model/voice_styles/M4.json
+~/.vtmate/tts/supersonic2-model/voice_styles/M5.json
+~/.vtmate/tts/supersonic2-model/voice_styles/F1.json
+~/.vtmate/tts/supersonic2-model/voice_styles/F2.json
+~/.vtmate/tts/supersonic2-model/voice_styles/F3.json
+~/.vtmate/tts/supersonic2-model/voice_styles/F4.json
+~/.vtmate/tts/supersonic2-model/voice_styles/F5.json
+```
 
 * If you want to avoid sound interruptions you can use `ptt` mode or increase the `sound_threshold_peak` for your microphone levels.
 * If you want to use OpenTTS, start the docker service first: `docker run --rm --platform=linux/amd64 -p 5500:5500 synesthesiam/opentts:all` (it will pull the image the first time). Adjust the platform as needed depending on your hardware.
@@ -279,6 +308,39 @@ If you need help:
 vtmate --help
 ```
 
+## Language support
+
+| ID |           Language       |      Support       |        TTS supported   |   Number of voices  |
+|----|--------------------------|--------------------|---------------------------------------------------|-------------|
+| en |   🇬🇧  English            |  🏆 Best support   |    ✅ Supersonic 2    ✅ Kokoro    ✅ OpenTTS     | > 38 voices
+| es |   🇪🇸  Spanish            |  🏆 Best support   |    ✅ Supersonic 2    ✅ Kokoro    ✅ OpenTTS     | > 14 voices
+| fr |   🇫🇷  French             |  🏆 Best support   |    ✅ Supersonic 2    ✅ Kokoro    ✅ OpenTTS     | > 12 voices
+| zh |   🇨🇳  Mandarin Chinese   |  🥈 Good support   |    ❌ Supersonic 2    ✅ Kokoro    ✅ OpenTTS     | > 9 voices
+| ja |   🇯🇵  Japanese           |  🥈 Good support   |    ❌ Supersonic 2    ✅ Kokoro    ✅ OpenTTS     | > 6 voices
+| pt |   🇵🇹  Portuguese         |  🥈 Good support   |    ✅ Supersonic 2    ✅ Kokoro    ❌ OpenTTS     | > 13 voices
+| ko |   🇰🇷  Korean             |  🥈 Good support   |    ✅ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 11 voices
+| it |   🇮🇹  Italian            |  🥈 Good support   |    ❌ Supersonic 2    ✅ Kokoro    ✅ OpenTTS     | > 3 voices
+| hi |   🇮🇳  Hindi              |  🥈 Good support   |    ❌ Supersonic 2    ✅ Kokoro    ✅ OpenTTS     | > 4 voices
+| ar |   🇸🇦  Arabic             |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| bn |   🇧🇩  Bengali            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| ca |   🇪🇸  Catalan            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| cs |   🇨🇿  Czech              |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| de |   🇩🇪  German             |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| el |   🇬🇷  Greek              |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| fi |   🇫🇮  Finnish            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| gu |   🇮🇳  Gujarati           |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| hu |   🇭🇺  Hungarian          |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| kn |   🇮🇳  Kannada            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| mr |   🇮🇳  Marathi            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| nl |   🇳🇱  Dutch              |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| pa |   🇮🇳  Punjabi            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| ru |   🇷🇺  Russian            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| sv |   🇸🇪  Swedish            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| sw |   🇰🇪  Swahili            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| ta |   🇮🇳  Tamil              |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| te |   🇮🇳  Telugu             |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| tr |   🇹🇷  Turkish            |     Supported      |    ❌ Supersonic 2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+
 ## Acceleration support
 
 Do you have GPU? (nvidia? an apple computer?) Great! then vtmate speed is at lighting speed =)
@@ -287,95 +349,33 @@ Do you have GPU? (nvidia? an apple computer?) Great! then vtmate speed is at lig
 * For CUDA install CUDA Toolkit. For Vulkan install VULKAN SDK
 
 ```
-Platform   Arch    CPU    OpenBLAS   CUDA   Metal   Vulkan
---------   ----    ---    --------   ----   -----   ------
-macOS      ARM64   ✅    optional     n/a     ✅      ⚠️
-Linux      AMD64   ✅       ✅        ✅      n/a     ⚠️
-Linux      ARM64   ✅       ✅        ⚠️      n/a     ⚠️
-Windows    x86     ✅       ✅        ✅      n/a     ⚠️
-Windows    ARM64   ✅       ⚠️        ⚠️      n/a     ⚠️
+macOS:            ✅ CPU    ✅ Metal
+Linux (amd64):    ✅ CPU    ⚠️ CUDA     ❌ Vulkan
+Linux (arm64):    ✅ CPU    ⚠️ CUDA     ❌ Vulkan
+Windows (x86_64)  ✅ CPU    ⚠️ CUDA     ❌ Vulkan
+Windows (arm64)   ❌ CPU    ❌ CUDA     ❌ Vulkan
 ```
 
-⚠️ Currently working on full static builds for all OS. You can download a release or build it yourself
-
-## Language support
-
-| ID |           Language           |      Support       |        TTS supported           |
-|----|------------------------------|--------------------|--------------------------------|
-| en |       🇬🇧  English            |  🏆 Best support   |    ✅ Kokoro    ✅ OpenTTS     |
-| es |       🇪🇸  Spanish            |  🏆 Best support   |    ✅ Kokoro    ✅ OpenTTS     |
-| zh |       🇨🇳  Mandarin Chinese   |  🏆 Best support   |    ✅ Kokoro    ✅ OpenTTS     |
-| ja |       🇯🇵  Japanese           |  🏆 Best support   |    ✅ Kokoro    ✅ OpenTTS     |
-| pt |       🇵🇹  Portuguese         |  🏆 Best support   |    ✅ Kokoro    ❌ OpenTTS     |
-| it |       🇮🇹  Italian            |  🏆 Best support   |    ✅ Kokoro    ✅ OpenTTS     |
-| hi |       🇮🇳  Hindi              |  🏆 Best support   |    ✅ Kokoro    ✅ OpenTTS     |
-| fr |       🇫🇷  French             |  🏆 Best support   |    ✅ Kokoro    ✅ OpenTTS     |
-| ar |       🇸🇦  Arabic             |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| bn |       🇧🇩  Bengali            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| ca |       🇪🇸  Catalan            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| cs |       🇨🇿  Czech              |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| de |       🇩🇪  German             |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| el |       🇬🇷  Greek              |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| fi |       🇫🇮  Finnish            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| gu |       🇮🇳  Gujarati           |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| hu |       🇭🇺  Hungarian          |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| kn |       🇮🇳  Kannada            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| ko |       🇰🇷  Korean             |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| mr |       🇮🇳  Marathi            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| nl |       🇳🇱  Dutch              |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| pa |       🇮🇳  Punjabi            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| ru |       🇷🇺  Russian            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| sv |       🇸🇪  Swedish            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| sw |       🇰🇪  Swahili            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| ta |       🇮🇳  Tamil              |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| te |       🇮🇳  Telugu             |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
-| tr |       🇹🇷  Turkish            |     Supported      |    ❌ Kokoro    ✅ OpenTTS     |
+⚠️ Currently working on full static builds for all OS with Openblas + CUDA + Vulkan support. In the meantime, pick a release available from [Releases list](https://github.com/DavidValin/vtmate/releases) or build one yourself.
 
 ## Build vtmate from source code
 
-Simplest way:
+**Simplest way:**
 ```
 cargo install vtmate
 ```
 
-For custom builds:
-
-- There are 3 script `build_macos.sh`, `build_linux.sh` and `build_windows.bat`
-- The scripts accept --arch flag to build for specific architecture
-- If you are building for specific acceleration, make sure the SDKs are installed
-- During build, TTS and STT models are fetched locally (around 1GB)
-- The built binaries will be placed under `./dist` once built
-
-***MacOS***
-- (require docker for building the image)
-- You can only build the MacOS build from a mac machine
-```
-./build_macos.sh
-```
-
-***Linux***
-- (require docker for building the image)
-- Openblas is always included in all variants by default
-
-Examples:
-```
-WITH_CUDA=0 ./build_linux.sh --arch amd64
-WITH_CUDA=1 ./build_linux.sh --arch amd64
-LINUX_WITH_VULKAN=1 WITH_CUDA=0 ./build_linux.sh --arch amd64
-
-WITH_CUDA=0 ./build_linux.sh --arch arm64
-LINUX_WITH_VULKAN=1 WITH_CUDA=0 ./build_linux.sh --arch arm64
-```
-
-***Windows***
-- You can only build the Windows build from windows
-- You need to install [Visual CPP Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools)
+**Full configurable builds (os, arch and gpu acceleration)**
 
 ```
-build_windows.bat cpu
-build_windows.bat cuda
-build_windows.bat openblas
-build_windows.bat vulkan
+git clone https://github.com/DavidValin/vtmate
+```
+
+see:
+```
+build_linux.sh
+build_macos.sh
+build_windows.sh
 ```
 
 Have fun o:)

@@ -36,6 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   assets::ensure_piper_espeak_env();
   // make sure the user has the whisper + tts models unpacked
   assets::ensure_assets_env();
+  assets::ensure_supersonic2_assets();
 
   // ---------------------------------------------------
   // setup thread communication channels
@@ -68,6 +69,14 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   if args.list_voices {
     tts::print_voices();
     process::exit(0);
+  }
+
+  // ---------------------------------------------------
+  // quiet mode validation
+  // ---------------------------------------------------
+  if args.quiet && args.prompt.is_none() && args.prompt_file.is_none() {
+    println!("❌ Quiet mode requires either one of the next options: -p or -i.\n");
+    process::exit(1);
   }
 
   // ---------------------------------------------------
@@ -133,8 +142,13 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Read the filename or stdin
     let content = util::read_file(filename);
 
-    // Start kokoro engine if needed
-    if settings.tts == "kokoro" {
+    // Initialize TTS engines only if needed
+    let use_supersonic = agents.iter().any(|a| a.tts == "supersonic2");
+    let use_kokoro = agents.iter().any(|a| a.tts == "kokoro");
+    if use_supersonic {
+      tts::start_supersonic_engine()?;
+    }
+    if use_kokoro {
       tts::start_kokoro_engine()?;
     }
 
@@ -631,10 +645,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   log::log("info", &format!("TTS voice: {}", settings.voice));
   log::log("info", &format!("LLM provider: {}", settings.provider));
 
-  if settings.tts == "kokoro" {
-    tts::start_kokoro_engine()?;
-  }
-
   if settings.provider == "ollama" {
     log::log("info", &format!("ollama base url: {}", settings.baseurl));
   } else {
@@ -748,31 +758,36 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let volume_rec_for_rec = volume_rec.clone();
   let recording_paused_for_record_for_rec = recording_paused_for_record.clone();
   let tx_ui_for_record = tx_ui.clone();
-  let rec_handle = ThreadBuilder::new()
-    .name("record_thread".to_string())
-    .stack_size(4 * 1024 * 1024)
-    .spawn({
-      move || {
-        record::record_thread(
-          &START_INSTANT,
-          in_dev.clone(),
-          in_cfg_supported,
-          in_cfg,
-          tx_utt_for_rec.clone(),
-          tx_ui_for_record,
-          settings.sound_threshold_peak,
-          settings.end_silence_ms,
-          playback_active_for_rec.clone(),
-          gate_until_ms_for_rec.clone(),
-          interrupt_counter_for_rec.clone(),
-          stop_all_rx_for_record.clone(),
-          ui_peak_for_rec.clone(),
-          ui_for_rec.clone(),
-          volume_rec_for_rec.clone(),
-          recording_paused_for_record_for_rec.clone(),
-        )
-      }
-    })?;
+  let rec_handle = if !args.quiet {
+    ThreadBuilder::new()
+      .name("record_thread".to_string())
+      .stack_size(4 * 1024 * 1024)
+      .spawn({
+        move || {
+          record::record_thread(
+            &START_INSTANT,
+            in_dev.clone(),
+            in_cfg_supported,
+            in_cfg,
+            tx_utt_for_rec.clone(),
+            tx_ui_for_record,
+            settings.sound_threshold_peak,
+            settings.end_silence_ms,
+            playback_active_for_rec.clone(),
+            gate_until_ms_for_rec.clone(),
+            interrupt_counter_for_rec.clone(),
+            stop_all_rx_for_record.clone(),
+            ui_peak_for_rec.clone(),
+            ui_for_rec.clone(),
+            volume_rec_for_rec.clone(),
+            recording_paused_for_record_for_rec.clone(),
+          )
+        }
+      })?
+  } else {
+    // Dummy thread when quiet mode: do nothing
+    thread::spawn(|| Ok::<(), Box<dyn std::error::Error + Send + Sync>>(()))
+  };
 
   // ---------------------------------------------------
   // Thread: conversation

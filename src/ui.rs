@@ -2,7 +2,7 @@
 //  UI
 // ------------------------------------------------------------------
 
-use crate::state::{GLOBAL_STATE, get_speed, get_voice};
+use crate::state::{GLOBAL_STATE, get_speed};
 use crate::util::get_flag;
 use crossbeam_channel::Receiver;
 use crossterm::{
@@ -183,7 +183,8 @@ pub fn spawn_ui_thread(
 
       let (_cols, term_height) = terminal::size().unwrap_or((80, 24));
       if !skip_next_bottom_bar {
-        bottom_bar = render_bottom_bar(&mut out, &ui_state, &spinner, &status_line, term_height - 1);
+        bottom_bar =
+          render_bottom_bar(&mut out, &ui_state, &spinner, &status_line, term_height - 1);
       } else {
         skip_next_bottom_bar = false;
       }
@@ -225,7 +226,10 @@ fn handle_line_message<W: Write>(
 
     if is_newline_or_wrap {
       buffer.push(String::new());
-
+      // Append the character that caused the wrap so it appears on the new line
+      if ch != '\n' {
+        buffer.last_mut().unwrap().push(ch);
+      }
       let (_view_start, visible) = viewport(buffer.len(), term_height);
 
       if buffer.len() >= visible {
@@ -327,6 +331,10 @@ fn stream_chunk<W: Write>(
         execute!(out, ScrollUp(1)).unwrap();
       }
       buffer.push(String::new());
+      // Append the character that caused the wrap so it appears on the new line
+      if ch != '\n' {
+        buffer.last_mut().unwrap().push(ch);
+      }
 
       execute!(
         out,
@@ -411,14 +419,10 @@ fn render_bottom_bar<W: Write>(
         agent1_name, agent2_name
       )
     } else {
-      format!(
-        "\x1b[44m\x1b[37m CONVERSATION \x1b[0m"
-      )
+      format!("\x1b[44m\x1b[37m CONVERSATION \x1b[0m")
     }
   } else {
-    format!(
-      "\x1b[44m\x1b[37m CONVERSATION \x1b[0m"
-    )
+    format!("\x1b[44m\x1b[37m CONVERSATION \x1b[0m")
   };
 
   let recording_paused_str = if recording_paused {
@@ -463,10 +467,7 @@ fn render_bottom_bar<W: Write>(
   let combined_status = if debate_enabled {
     format!("{} {} {} ", mode, ptt, internal_status)
   } else {
-    format!(
-      "{} {} {} {} ",
-      mode, ptt, agent_display, internal_status
-    )
+    format!("{} {} {} {} ", mode, ptt, agent_display, internal_status)
   };
 
   let cols = crossterm::terminal::size().unwrap_or((80, 24)).0 as usize;
