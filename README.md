@@ -45,9 +45,10 @@ https://github.com/user-attachments/assets/8b9e982c-ba97-4aeb-8e55-1db6a92bc164
 - 📌 Stop playback for the current response via keyboard
 - 📌 Interrupt response altogether via keyboard
 - 📌 Live voice speed change via keyboard (applicable to next response)
+- 📌 Save conversation as audio and text
 - 📌 Read a text file with voice, phrase by phrase, with keyboard navigation and pause/resume
 - 📌 Read text with voice from stdin, phrase by phrase, with keyboard navigation and pause/resume
-- 📌 Save conversation as audio and text
+- 📌 Save audio speech of a text file or stdin content
 - 📌 Load separate settings file with different agents
 - 📌 Integrated `whisper` speech recognition system (no external intallation required)
 - 📌 Integrated `kokoro TTS` and `supersonic 2 TTS` systems (no external intallation required)
@@ -140,7 +141,7 @@ vtmate --help
 
 ## How to use it
 
-The first agent defined in `~/vtmate/settings` will always be selected agent when running vtmate, unless `--a <agent_name>` is used.
+The first agent defined in `~/vtmate/settings` will always be selected agent when running vtmate, unless `-a <agent_name>` is used.
 
 Before running vtmate make sure ollama is running: `ollama serve`.
 Optionally, if you want to use llama.cpp make sure llama-server is running.
@@ -153,7 +154,7 @@ All cli options:
   -i <file.txt>          initialize with a file prompt
   -i -                   initialize with prompt from STDIN
   -q                     produce a single response and exit (requires `-p` or `-i`)
-  -s                     save the conversation to text and audio file in ~/.vtmate/conversations
+  -s                     save the conversation to text and audio file in ~/.vtmate/conversations or ~/.vtmate/read-files
   -r <file.txt>          read a file with voice, phrase by phrase (no llm involved)
   -r -                   read text from STDIN with voice, phrase by phrase (no llm involved)
   -c <settings_file>     use a specific settings file
@@ -177,7 +178,7 @@ vtmate -s
 Start conversation with a specific agent
 (waits for user voice input and respond)
 ```
-vtmate --a "main agent"
+vtmate -a "main agent"
 ```
 
 Start conversation with an initial text prompt
@@ -252,21 +253,21 @@ Get a single response and save it as audio file and text file
 echo "Can you find any suspicious processes in the next list? If so, why?\n\n $(ps aux | head -20)" | vtmate -q -i - -s
 ```
 
-###  File to speech mode
+###  Read mode (file to speech)
 
 ![read file mode](https://github.com/DavidValin/vtmate/raw/main/docs/en/diagrams/reading-mode.png)
 
 Read a text file or stdin text phrase by phrase using an agent voice. Ensure the agent you choose has correct language and voice for your text.
 In this mode, only the next agent settings are used: "tts", "voice" and "language".
 
-from a txt file:
+read from a txt file (and save it in `~/.vtmate/read-files`)
 ```
-vtmate -r myfile.txt --a "main agent"
+vtmate -r myfile.txt -a reader
 ```
 
-from stdin text:
+read from stdin text
 ```
-vtmate -r - --a "main agent"
+echo "First phrase. Second phrase" | vtmate -r -
 ```
 
 In this mode you can:
