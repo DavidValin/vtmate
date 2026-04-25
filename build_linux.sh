@@ -434,7 +434,7 @@ RUN set -eux; \
     git clone -b v3.21.12 https://github.com/protocolbuffers/protobuf.git; \
     cd protobuf; \
     mkdir build && cd build; \
-    cmake . \
+    cmake .. \
       -DBUILD_SHARED_LIBS=OFF \
       -DCMAKE_INSTALL_PREFIX=/usr/local \
       -DCMAKE_EXE_LINKER_FLAGS="-static" \
@@ -442,6 +442,33 @@ RUN set -eux; \
       -Dprotobuf_BUILD_TESTS=OFF; \
     make -j$(nproc); \
     make install
+
+
+# ----------------------------------------------------------
+# musl locale compatibility shim for FlatBuffers (strtoll_l)
+# ----------------------------------------------------------
+RUN printf "%s\n" \
+"#pragma once" \
+"" \
+"#include <stdlib.h>" \
+"#include <locale.h>" \
+"" \
+"// musl compatibility shim for *_l functions used by FlatBuffers" \
+"#if !defined(__GLIBC__)" \
+"" \
+"static inline long long strtoll_l(const char* nptr, char** endptr, int base, locale_t loc) {" \
+"  (void)loc;" \
+"  return strtoll(nptr, endptr, base);" \
+"}" \
+"" \
+"static inline unsigned long long strtoull_l(const char* nptr, char** endptr, int base, locale_t loc) {" \
+"  (void)loc;" \
+"  return strtoull(nptr, endptr, base);" \
+"}" \
+"" \
+"#endif" \
+> /usr/local/include/musl_locale_compat.h
+
 
 # -----------------------------
 # Build ONNX Runtime for this variant (AMD64 musl)
@@ -469,15 +496,16 @@ RUN set -eux; \
       -DCMAKE_SYSTEM_PROCESSOR=AMD64 \
       -DCMAKE_CXX_STANDARD=17 \
       -DCMAKE_CXX_STANDARD_REQUIRED=ON \
-      -DCMAKE_C_FLAGS="-march=x86-64" \
-      -DCMAKE_CXX_FLAGS="-march=x86-64 -std=c++17" \
+      -DCMAKE_C_FLAGS="-march=x86-64 -include /usr/local/include/musl_locale_compat.h" \
+      -DCMAKE_CXX_FLAGS="-march=x86-64 -std=c++17 -include /usr/local/include/musl_locale_compat.h" \
       -DCMAKE_EXE_LINKER_FLAGS="-static" \
       -DBUILD_SHARED_LIBS=OFF \
       -DCMAKE_C_COMPILER=$CC \
       -DCMAKE_CXX_COMPILER=$CXX \
       -DCMAKE_LINKER=$LD \
-      -CMAKE_LDFLAGS="-lgfortran -lm -lpthread -lquadmath -lgomp -lpthread" \
+      -DCMAKE_LDFLAGS="-lgfortran -lm -lpthread -lquadmath -lgomp -lpthread" \
       -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF \
+      -Donnxruntime_BUILD_UNIT_TESTS=OFF \
       -Donnxruntime_ENABLE_EXTERNAL_CUSTOM_OP_SCHEMAS=OFF \
       -Donnxruntime_RUN_ONNX_TESTS=OFF \
       -Donnxruntime_GENERATE_TEST_REPORTS=ON \
@@ -561,10 +589,8 @@ RUN set -eux; \
       -Donnxruntime_CUDA_MINIMAL=OFF \
       -Donnxruntime_USE_CUDA=$WITH_CUDA \
       -Donnxruntime_USE_KLEIDIAI=ON \
-      -Donnxruntime_USE_SVE=ON \
       -DCMAKE_INSTALL_PREFIX=$ONNX_DIR \
-      -DCMAKE_OSX_ARCHITECTURES=x86_64 \
-      -DCMAKE_BUILD_TYPE=Release; \
+      -DCMAKE_BUILD_TYPE=Release \
       -Donnxruntime_USE_SYSTEM_PROTOBUF=ON \
       -DProtobuf_INCLUDE_DIR=/usr/local/include \
       -DProtobuf_LIBRARIES=/usr/local/lib/libprotobuf.a \

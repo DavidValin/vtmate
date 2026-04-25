@@ -25,11 +25,11 @@ fn find_url_for_file(file_name: &str) -> Option<String> {
 
 // Use HOME on Unix, USERPROFILE on Windows
 fn get_home_dir() -> String {
-    // Use KOKORO_CACHE if set, otherwise fallback to HOME or USERPROFILE
-    env::var("KOKORO_CACHE")
-        .or_else(|_| env::var("HOME"))
-        .or_else(|_| env::var("USERPROFILE"))
-        .expect("Neither KOKORO_CACHE, HOME nor USERPROFILE environment variable is set")
+  // Use KOKORO_CACHE if set, otherwise fallback to HOME or USERPROFILE
+  env::var("KOKORO_CACHE")
+    .or_else(|_| env::var("HOME"))
+    .or_else(|_| env::var("USERPROFILE"))
+    .expect("Neither KOKORO_CACHE, HOME nor USERPROFILE environment variable is set")
 }
 
 fn main() {
@@ -37,33 +37,38 @@ fn main() {
   // Optional: Link prebuilt Whisper/GGML/OpenBLAS if available
   // -----------------------------
   if let Ok(lib_dir) = env::var("WHISPER_PREBUILT_LIB") {
-      println!("cargo:rerun-if-env-changed=WHISPER_PREBUILT_LIB");
-      println!("cargo:rustc-link-search=native={}", lib_dir);
-      println!("cargo:rustc-link-lib=static=whisper");
-      println!("cargo:rustc-link-lib=static=ggml");
-      println!("cargo:rustc-link-lib=static=openblas");
-      println!("cargo:rustc-link-lib=pthread");
+    println!("cargo:rerun-if-env-changed=WHISPER_PREBUILT_LIB");
+    println!("cargo:rustc-link-search=native={}", lib_dir);
+    println!("cargo:rustc-link-lib=static=whisper");
+    println!("cargo:rustc-link-lib=static=ggml");
+    println!("cargo:rustc-link-lib=static=openblas");
+    println!("cargo:rustc-link-lib=pthread");
 
-      let include_dir = Path::new(&lib_dir).join("..").join("include");
-      println!("cargo:include={}", include_dir.display());
+    let include_dir = Path::new(&lib_dir).join("..").join("include");
+    println!("cargo:include={}", include_dir.display());
   } else {
-      println!("cargo:warning=WHISPER_PREBUILT_LIB not set, skipping prebuilt Whisper/GGML/OpenBLAS linking");
+    println!(
+      "cargo:warning=WHISPER_PREBUILT_LIB not set, skipping prebuilt Whisper/GGML/OpenBLAS linking"
+    );
   }
 
   // -----------------------------
   // Link built eSpeak NG from PowerShell build
   // -----------------------------
   if let Ok(espeak_dir) = env::var("ESPEAK_NG_DIR") {
-      println!("cargo:rerun-if-env-changed=ESPEAK_NG_DIR");
+    println!("cargo:rerun-if-env-changed=ESPEAK_NG_DIR");
 
-      let espeak_lib_dir = Path::new(&espeak_dir).join("lib");
-      println!("cargo:rustc-link-search=native={}", espeak_lib_dir.display());
-      println!("cargo:rustc-link-lib=static=espeak-ng");
+    let espeak_lib_dir = Path::new(&espeak_dir).join("lib");
+    println!(
+      "cargo:rustc-link-search=native={}",
+      espeak_lib_dir.display()
+    );
+    println!("cargo:rustc-link-lib=static=espeak-ng");
 
-      let espeak_include_dir = Path::new(&espeak_dir).join("include");
-      println!("cargo:include={}", espeak_include_dir.display());
+    let espeak_include_dir = Path::new(&espeak_dir).join("include");
+    println!("cargo:include={}", espeak_include_dir.display());
   } else {
-      println!("cargo:warning=ESPEAK_NG_DIR not set, skipping prebuilt eSpeak NG linking");
+    println!("cargo:warning=ESPEAK_NG_DIR not set, skipping prebuilt eSpeak NG linking");
   }
 
   // -----------------------------
@@ -71,44 +76,44 @@ fn main() {
   // -----------------------------
   // Look for ONNX Runtime library location
   if let Ok(ort_lib_dir) = env::var("ORT_LIB_LOCATION") {
-      let lib_path = Path::new(&ort_lib_dir);
+    let lib_path = Path::new(&ort_lib_dir);
 
-      // Tell Cargo where to search for native libraries
-      println!("cargo:rustc-link-search=native={}", lib_path.display());
+    // Tell Cargo where to search for native libraries
+    println!("cargo:rustc-link-search=native={}", lib_path.display());
 
-      // Iterate over all library files in the directory
-      if cfg!(windows) {
-          // On Windows, link all .lib files statically
-          // for entry in fs::read_dir(lib_path).expect("Failed to read ORT_LIB_LOCATION") {
-          //     let entry = entry.expect("Failed to read entry in ORT_LIB_LOCATION");
-          //     let path = entry.path();
-          //     if let Some(ext) = path.extension() {
-          //         if ext == "lib" {
-          //             let stem = path.file_stem().unwrap().to_string_lossy();
-          //             println!("cargo:rustc-link-lib=static={}", stem);
-          //         }
-          //     }
-          // }
-      } else if cfg!(unix) {
-          // On Unix/macOS, link all .a (static) or .so/.dylib (dynamic) files
-          // for entry in fs::read_dir(lib_path).expect("Failed to read ORT_LIB_LOCATION") {
-          //     let entry = entry.expect("Failed to read entry in ORT_LIB_LOCATION");
-          //     let path = entry.path();
-          //     if let Some(ext) = path.extension() {
-          //         match ext.to_str() {
-          //             Some("a") => {
-          //                 let stem = path.file_stem().unwrap().to_string_lossy();
-          //                 println!("cargo:rustc-link-lib=static={}", stem);
-          //             }
-          //             _ => {}
-          //         }
-          //     }
-          // }
-      }
+    // Iterate over all library files in the directory
+    if cfg!(windows) {
+      // On Windows, link all .lib files statically
+      // for entry in fs::read_dir(lib_path).expect("Failed to read ORT_LIB_LOCATION") {
+      //     let entry = entry.expect("Failed to read entry in ORT_LIB_LOCATION");
+      //     let path = entry.path();
+      //     if let Some(ext) = path.extension() {
+      //         if ext == "lib" {
+      //             let stem = path.file_stem().unwrap().to_string_lossy();
+      //             println!("cargo:rustc-link-lib=static={}", stem);
+      //         }
+      //     }
+      // }
+    } else if cfg!(unix) {
+      // On Unix/macOS, link all .a (static) or .so/.dylib (dynamic) files
+      // for entry in fs::read_dir(lib_path).expect("Failed to read ORT_LIB_LOCATION") {
+      //     let entry = entry.expect("Failed to read entry in ORT_LIB_LOCATION");
+      //     let path = entry.path();
+      //     if let Some(ext) = path.extension() {
+      //         match ext.to_str() {
+      //             Some("a") => {
+      //                 let stem = path.file_stem().unwrap().to_string_lossy();
+      //                 println!("cargo:rustc-link-lib=static={}", stem);
+      //             }
+      //             _ => {}
+      //         }
+      //     }
+      // }
+    }
 
-      // Set include path for ONNX Runtime headers
-      let ort_include_dir = lib_path.join("..").join("include");
-      println!("cargo:include={}", ort_include_dir.display());
+    // Set include path for ONNX Runtime headers
+    let ort_include_dir = lib_path.join("..").join("include");
+    println!("cargo:include={}", ort_include_dir.display());
   }
 
   let out_dir = env::var("OUT_DIR").expect("OUT_DIR not set");
