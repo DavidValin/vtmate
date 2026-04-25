@@ -6,6 +6,7 @@ The program self contains (1.2GB) all TTS models and voices and necessary files 
 
 * [⬇️ Download](https://github.com/DavidValin/vtmate/releases) (⭐ MacOS ⭐ Linux and ⭐ Windows supported)
 * [🤠 Quicksheet (PDF)](https://raw.githubusercontent.com/DavidValin/vtmate/refs/heads/main/docs/en/quicksheet.pdf) (🖨️ print ready for easy access)
+* [🎥 Video Overview](https://www.youtube.com/watch?v=TfNcgVsR3oc)
 
 ### Video demonstration
 <details>
