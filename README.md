@@ -386,9 +386,9 @@ Do you have GPU? (nvidia? an apple computer?) Great! then vtmate speed is at lig
 
 ```
 macOS:            ✅ CPU    ✅ Metal
-Linux (amd64):    ✅ CPU    ⚠️ CUDA     ❌ Vulkan
+Linux (amd64):    ✅ CPU    ✅ CUDA     ⚠️ Vulkan
 Linux (arm64):    ✅ CPU    ⚠️ CUDA     ❌ Vulkan
-Windows (x86_64)  ✅ CPU    ⚠️ CUDA     ❌ Vulkan
+Windows (x86_64)  ✅ CPU    ⚠️ CUDA     ⚠️ Vulkan
 Windows (arm64)   ❌ CPU    ❌ CUDA     ❌ Vulkan
 ```
 
