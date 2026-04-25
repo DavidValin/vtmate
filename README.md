@@ -47,8 +47,8 @@ https://github.com/user-attachments/assets/8b9e982c-ba97-4aeb-8e55-1db6a92bc164
 - 📌 Live voice speed change via keyboard (applicable to next response)
 - 📌 Save conversation as audio and text
 - 📌 Read a text file with voice, phrase by phrase, with keyboard navigation and pause/resume
-- 📌 Read text with voice from stdin, phrase by phrase, with keyboard navigation and pause/resume
-- 📌 Save audio speech of a text file or stdin content
+- 📌 Read text with voice from STDIN, phrase by phrase, with keyboard navigation and pause/resume
+- 📌 Save audio speech of a text file or STDIN content
 - 📌 Load separate settings file with different agents
 - 📌 Integrated `whisper` speech recognition system (no external intallation required)
 - 📌 Integrated `kokoro TTS` and `supersonic 2 TTS` systems (no external intallation required)
@@ -149,19 +149,23 @@ Optionally, if you want to use llama.cpp make sure llama-server is running.
 All cli options:
 
 ```
-  -a <agent_name>        set a specific initial agent
-  -p <prompt>            initialize with a text prompt
-  -i <file.txt>          initialize with a file prompt
-  -i -                   initialize with prompt from STDIN
-  -q                     produce a single response and exit (requires `-p` or `-i`)
-  -s                     save the conversation to text and audio file in ~/.vtmate/conversations or ~/.vtmate/read-files
-  -r <file.txt>          read a file with voice, phrase by phrase (no llm involved)
-  -r -                   read text from STDIN with voice, phrase by phrase (no llm involved)
-  -c <settings_file>     use a specific settings file
-  --list-voices          list all voices for all languages and tts systems
-  --ptt <true/false>     override for this session the ptt setting for all agents independently of its settings
-  --verbose              run the program in verbose mode
-  --help                 show help
+  -a <agent_name>                       set a specific initial agent
+  -p <prompt>                           initialize with a text prompt
+  -i <file.txt>                         initialize with a file prompt
+  -i -                                  initialize with prompt from STDIN
+  -q                                    produce a single response and exit (requires `-p` or `-i`)
+  -s                                    save the conversation to text and audio file in ~/.vtmate/conversations or ~/.vtmate/read-files
+  --debate <AGENT1> <AGENT2> [SUBJECT]  initialize a debate between 2 agents with an initial prompt
+  --debate <AGENT1> <AGENT2> -i <FILE>  initialize a debate between 2 agents with an initial prompt from file
+  --debate <AGENT1> <AGENT2> -i –       initialize a debate between 2 agents with an initial prompt from STDIN
+  -r <file.txt>                         read a file with voice, phrase by phrase (no llm involved)
+  -r -                                  read text from STDIN with voice, phrase by phrase (no llm involved)
+  -c <settings_file>                    use a specific settings file
+  --list-voices                         list all voices for all languages and tts systems
+  --ptt <true/false>                    override for this session the ptt setting for all agents independently of its settings
+  --verbose                             run the program in verbose mode
+  --version                             print the vtmate installed version
+  --help                                show help
 ```
 
 ### Conversation mode
@@ -191,7 +195,7 @@ Start conversation with an initial prompt from file
 vtmate -i myprompt.txt
 ```
 
-Start conversation with an initial prompt from stdin
+Start conversation with an initial prompt from STDIN
 ```
 echo "How to fly without wings?" | vtmate -i -
 ```
@@ -219,7 +223,7 @@ Start a debate with an initial prompt from file
 vtmate --debate "God" "Devil" -i myprompt.txt  --ptt false
 ```
 
-Start a debate with an initial prompt from stdin
+Start a debate with an initial prompt from STDIN
 ```
 echo "Lets discuss the permissions of this files: \n\n $(ls -la)" | vtmate --debate "Unix administrator" "Security Expert" -i -  --ptt true
 ```
@@ -243,7 +247,7 @@ Get a single response from prompt from file
 vtmate -q -i myprompt.txt
 ```
 
-Get a single response from prompt from stdin
+Get a single response from prompt from STDIN
 ```
 echo "Is $(date) a national holiday day in Spain?" | vtmate -q -i -
 ```
@@ -257,7 +261,7 @@ echo "Can you find any suspicious processes in the next list? If so, why?\n\n $(
 
 ![read file mode](https://github.com/DavidValin/vtmate/raw/main/docs/en/diagrams/reading-mode.png)
 
-Read a text file or stdin text phrase by phrase using an agent voice. Ensure the agent you choose has correct language and voice for your text.
+Read a text file or STDIN text phrase by phrase using an agent voice. Ensure the agent you choose has correct language and voice for your text.
 In this mode, only the next agent settings are used: "tts", "voice" and "language".
 
 read from a txt file (and save it in `~/.vtmate/read-files`)
@@ -265,7 +269,7 @@ read from a txt file (and save it in `~/.vtmate/read-files`)
 vtmate -r myfile.txt -a reader
 ```
 
-read from stdin text
+read from STDIN text
 ```
 echo "First phrase. Second phrase" | vtmate -r -
 ```
