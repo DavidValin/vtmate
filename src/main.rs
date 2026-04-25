@@ -3,7 +3,7 @@ use clap::Parser;
 use cpal::traits::DeviceTrait;
 use crossbeam_channel::{bounded, unbounded};
 use crossterm::terminal::{self};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::{Arc, OnceLock, atomic::Ordering};
 use std::thread::{self, Builder as ThreadBuilder};
@@ -217,6 +217,20 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       spinner_index: 0,
       quiet: args.quiet,
     };
+
+    // Setup WAV writer and txt export for read mode
+    let home_dir = get_user_home_path().unwrap();
+    let read_dir = home_dir.join(".vtmate").join("read-files");
+    std::fs::create_dir_all(&read_dir).ok();
+    let base_name = Path::new(filename)
+      .file_stem()
+      .unwrap_or_else(|| std::ffi::OsStr::new("output"))
+      .to_string_lossy();
+    let wav_path = read_dir.join(format!("{}.wav", base_name));
+    let txt_path = read_dir.join(format!("{}.txt", base_name));
+    let wav_tx = audio::init_wav_writer(&wav_path);
+    playback::set_wav_tx(wav_tx.clone());
+    // Write txt after loop
 
     let play_handle = thread::spawn({
       let playback_active = playback_active.clone();
@@ -487,6 +501,10 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     print!("\r✅ All phrases completed\n\r");
+    // Export txt content
+    if let Err(e) = audio::write_txt(&txt_path, &content) {
+      eprintln!("Failed to write txt: {}", e);
+    }
 
     execute!(out, cursor::Show).unwrap();
     let _ = terminal::disable_raw_mode();

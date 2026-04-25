@@ -3,6 +3,7 @@
 // ------------------------------------------------------------------
 
 use cpal::traits::{DeviceTrait, HostTrait};
+use std::path::{Path, PathBuf};
 
 // API
 // ------------------------------------------------------------------
@@ -128,9 +129,8 @@ pub fn resample_to(input: &[f32], channels: u16, in_sr: u32, out_sr: u32) -> Vec
   // mono
   if channels == 1 {
     resample_linear(input, in_sr, out_sr)
-  }
-  // interleaved
-  else {
+  } else {
+    // interleaved
     resample_interleaved_linear(input, channels, in_sr, out_sr)
   }
 }
@@ -150,4 +150,59 @@ pub fn convert_to_mono(utt: &crate::audio::AudioChunk) -> Vec<f32> {
     }
     mono
   }
+}
+
+/// Initialise a WAV writer thread that writes incoming audio chunks to a wav file.
+/// Returns a channel sender that can be used to forward audio chunks.
+pub fn init_wav_writer(path: &Path) -> crossbeam_channel::Sender<AudioChunk> {
+  let (tx, rx) = crossbeam_channel::bounded::<AudioChunk>(1);
+  let out_path = path.to_path_buf();
+  std::thread::spawn(move || {
+    use std::fs::File;
+    let mut writer_opt: Option<hound::WavWriter<File>> = None;
+    for chunk in rx.iter() {
+      if writer_opt.is_none() {
+        let spec = hound::WavSpec {
+          channels: chunk.channels,
+          sample_rate: chunk.sample_rate,
+          bits_per_sample: 16,
+          sample_format: hound::SampleFormat::Int,
+        };
+        let f = match File::create(&out_path) {
+          Ok(f) => f,
+          Err(e) => {
+            eprintln!("Failed to create wav file {:?}: {}", out_path, e);
+            return;
+          }
+        };
+        writer_opt = match hound::WavWriter::new(f, spec) {
+          Ok(w) => Some(w),
+          Err(e) => {
+            eprintln!("Failed to create wav writer: {}", e);
+            return;
+          }
+        };
+      }
+      if let Some(writer) = &mut writer_opt {
+        let samples = f32_to_i16(&chunk.data);
+        for s in samples {
+          if writer.write_sample(s).is_err() {
+            eprintln!("Failed to write sample to wav file");
+            break;
+          }
+        }
+      }
+    }
+    if let Some(mut writer) = writer_opt {
+      if writer.flush().is_err() {
+        eprintln!("Failed to flush wav writer");
+      }
+    }
+  });
+  tx
+}
+
+/// Write plain text to a file.
+pub fn write_txt(path: &Path, text: &str) -> Result<(), std::io::Error> {
+  std::fs::write(path, text)
 }
