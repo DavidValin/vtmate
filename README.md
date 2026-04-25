@@ -4,8 +4,8 @@ The final AI voice conversational system all running in your terminal! vtmate is
 
 The program self contains (1.2GB) all TTS models and voices and necessary files to recognize speech and speak with voice with no external intallations ensuring maximum portability.
 
-[⬇️ Download](https://github.com/DavidValin/vtmate/releases) (⭐ MacOS ⭐ Linux and ⭐ Windows supported)
-[🤠 Quicksheet (PDF)](https://raw.githubusercontent.com/DavidValin/vtmate/refs/heads/main/docs/en/quicksheet.pdf) (🖨️ print ready for easy access)
+* [⬇️ Download](https://github.com/DavidValin/vtmate/releases) (⭐ MacOS ⭐ Linux and ⭐ Windows supported)
+* [🤠 Quicksheet (PDF)](https://raw.githubusercontent.com/DavidValin/vtmate/refs/heads/main/docs/en/quicksheet.pdf) (🖨️ print ready for easy access)
 
 ### Video demonstration
 <details>
@@ -130,6 +130,7 @@ ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 ```
 
+* ⚠️ Currently you cannot mix kokoro and supersonic tts systems (pick one).
 * Voice mixing is supported for kokoro TTS system only, you can create a voice by mixing 2 kokoro voices by percentage. Example mixing 50% of bm_daniel and 50% of am_puck: set voice name to `bm_daniel.5+am_puck.5`
 
 To see explanation of each field:
