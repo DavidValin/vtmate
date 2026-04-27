@@ -28,8 +28,8 @@ pub fn record_thread(
   playback_active: Arc<AtomicBool>,
   gate_until_ms: Arc<AtomicU64>,
   interrupt_counter: Arc<AtomicU64>,
-  stop_all_rx: Receiver<()>,
   peak: Arc<Mutex<f32>>,
+
   ui: crate::state::UiState,
   volume: Arc<Mutex<f32>>,
   recording_paused: Arc<AtomicBool>,
@@ -73,7 +73,6 @@ pub fn record_thread(
       user_speaking.clone(),
       last_voice_ms.clone(),
       stop_sent.clone(),
-      stop_all_rx.clone(),
       peak.clone(),
       ui,
       volume.clone(),
@@ -100,7 +99,6 @@ pub fn record_thread(
       user_speaking.clone(),
       last_voice_ms.clone(),
       stop_sent.clone(),
-      stop_all_rx.clone(),
       peak.clone(),
       ui,
       volume.clone(),
@@ -127,7 +125,6 @@ pub fn record_thread(
       user_speaking.clone(),
       last_voice_ms.clone(),
       stop_sent.clone(),
-      stop_all_rx.clone(),
       peak.clone(),
       ui,
       volume.clone(),
@@ -141,8 +138,9 @@ pub fn record_thread(
 
   stream.play()?;
 
-  while stop_all_rx.try_recv().is_err() {
-    thread::sleep(Duration::from_millis(20));
+  // Keep the stream alive until the program exits
+  loop {
+    std::thread::sleep(std::time::Duration::from_millis(10));
   }
 
   drop(stream);
@@ -170,7 +168,6 @@ fn build_input_f32(
   user_speaking: Arc<AtomicBool>,
   last_voice_ms: Arc<AtomicU64>,
   stop_sent: Arc<AtomicBool>,
-  stop_all_rx: Receiver<()>,
   peak: Arc<Mutex<f32>>,
   ui: crate::state::UiState,
   volume: Arc<Mutex<f32>>,
@@ -181,9 +178,6 @@ fn build_input_f32(
   device.build_input_stream(
     config,
     move |data: &[f32], _| {
-      if stop_all_rx.try_recv().is_ok() {
-        return;
-      }
       let local_peak = peak_abs(data);
 
       if let Ok(mut p) = peak.lock() {
@@ -242,7 +236,7 @@ fn build_input_f32(
           let mut vol = volume.lock().unwrap();
           *vol = 0.0;
           interrupt_counter.fetch_add(1, Ordering::SeqCst);
-          let _ = tx_ui.send("stop_ui|".to_string());
+          let _ = tx_ui.send("user_interrupt_show|".to_string());
           stop_sent.store(true, Ordering::Relaxed);
           gate_until_ms.store(
             crate::util::now_ms(start_instant).saturating_add(hangover_ms),
@@ -336,7 +330,6 @@ fn build_input_i16(
   user_speaking: Arc<AtomicBool>,
   last_voice_ms: Arc<AtomicU64>,
   stop_sent: Arc<AtomicBool>,
-  stop_all_rx: Receiver<()>,
   peak: Arc<Mutex<f32>>,
   ui: crate::state::UiState,
   volume: Arc<Mutex<f32>>,
@@ -347,9 +340,6 @@ fn build_input_i16(
   device.build_input_stream(
     config,
     move |data: &[f32], _| {
-      if stop_all_rx.try_recv().is_ok() {
-        return;
-      }
       if recording_paused.load(Ordering::Relaxed) {
         // Flush buffer if not empty
         let mut b = utt_buf.lock().unwrap();
@@ -412,7 +402,7 @@ fn build_input_i16(
           let mut vol = volume.lock().unwrap();
           *vol = 0.0;
           interrupt_counter.fetch_add(1, Ordering::SeqCst);
-          let _ = tx_ui.send("stop_ui|".to_string());
+          let _ = tx_ui.send("user_interrupt_show|".to_string());
           stop_sent.store(true, Ordering::Relaxed);
           gate_until_ms.store(
             crate::util::now_ms(start_instant).saturating_add(hangover_ms),
@@ -503,7 +493,6 @@ fn build_input_u16(
   user_speaking: Arc<AtomicBool>,
   last_voice_ms: Arc<AtomicU64>,
   stop_sent: Arc<AtomicBool>,
-  stop_all_rx: Receiver<()>,
   peak: Arc<Mutex<f32>>,
   ui: crate::state::UiState,
   volume: Arc<Mutex<f32>>,
@@ -514,10 +503,6 @@ fn build_input_u16(
   device.build_input_stream(
     config,
     move |data: &[u16], _| {
-      if stop_all_rx.try_recv().is_ok() {
-        return;
-      }
-
       // Convert once (preserve existing behavior), and reuse for peak + utt_buf + resample
       let mut tmp = Vec::with_capacity(data.len());
       for &s in data {
@@ -580,7 +565,7 @@ fn build_input_u16(
           let mut vol = volume.lock().unwrap();
           *vol = 0.0;
           interrupt_counter.fetch_add(1, Ordering::SeqCst);
-          let _ = tx_ui.send("stop_ui|".to_string());
+          let _ = tx_ui.send("user_interrupt_show|".to_string());
           stop_sent.store(true, Ordering::Relaxed);
           gate_until_ms.store(
             crate::util::now_ms(start_instant).saturating_add(hangover_ms),

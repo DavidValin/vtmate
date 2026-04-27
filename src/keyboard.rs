@@ -3,15 +3,18 @@
 // ------------------------------------------------------------------
 
 use crate::state::{GLOBAL_STATE, decrease_voice_speed, increase_voice_speed};
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::Sender;
 use crossterm::{
   event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
   terminal,
 };
+
+use crate::util::terminate;
 use std::sync::{
   Arc,
   atomic::{AtomicBool, AtomicU64, Ordering},
 };
+use std::thread;
 use std::time::{Duration, Instant};
 
 // API
@@ -27,8 +30,6 @@ pub struct ReadFileMode {
 
 pub fn keyboard_thread(
   tx_ui: Sender<String>,
-  stop_all_tx: Sender<()>,
-  stop_all_rx: Receiver<()>,
   recording_paused: Arc<AtomicBool>,
   stop_play_tx: Sender<()>,
   interrupt_counter: Arc<AtomicU64>,
@@ -49,11 +50,6 @@ pub fn keyboard_thread(
       }
     }
 
-    if stop_all_rx.try_recv().is_ok() {
-      break;
-    }
-
-    // Poll so we can also respond to stop_all.
     if event::poll(Duration::from_millis(50)).unwrap_or(false) {
       if let Ok(Event::Key(k)) = event::read() {
         // Handle read-file mode separately
@@ -105,8 +101,11 @@ pub fn keyboard_thread(
                 // Resume TTS playback - move index back one element if possible
                 let curr = rfm.current_phrase.load(Ordering::SeqCst);
                 if curr > 0 {
-                  let _ = stop_play_tx.try_send(());
+                  // Immediately abort any ongoing TTS/LLM by incrementing interrupt counter
                   interrupt_counter.fetch_add(1, Ordering::SeqCst);
+                  thread::sleep(Duration::from_millis(10));
+                  // Stop playback first
+                  let _ = stop_play_tx.try_send(());
                   rfm.current_phrase.store(curr - 1, Ordering::SeqCst);
                   let _ = rfm.display_update_tx.send(());
                 }
@@ -129,9 +128,8 @@ pub fn keyboard_thread(
         // Ctrl+C should exit immediately
         if k.modifiers.contains(KeyModifiers::CONTROL) {
           if let KeyCode::Char('c') | KeyCode::Char('C') = k.code {
-            let _ = stop_all_tx.try_send(());
-            let _ = tx_ui.try_send("stop_ui|".to_string());
-            break;
+            thread::sleep(Duration::from_millis(20));
+            terminate(0);
           }
           // Ctrl+D toggles debate mode or shows modal
           if let KeyCode::Char('d') | KeyCode::Char('D') = k.code {
@@ -159,6 +157,7 @@ pub fn keyboard_thread(
               } else {
                 // Exiting debate mode
                 state.debate_enabled.store(false, Ordering::SeqCst);
+                state.reset_conversation();
                 state.debate_agents.lock().unwrap().clear();
                 state.debate_turn.store(0, Ordering::SeqCst);
                 *state.debate_subject.lock().unwrap() = String::new();
@@ -200,6 +199,7 @@ pub fn keyboard_thread(
                 *state.debate_subject.lock().unwrap() =
                   "Let's debate. What should we discuss?".to_string();
                 state.debate_enabled.store(true, Ordering::SeqCst);
+                state.reset_conversation();
                 state.debate_modal_visible.store(false, Ordering::SeqCst);
 
                 let _ = tx_ui.send("modal_hide|".to_string());
@@ -296,12 +296,25 @@ pub fn keyboard_thread(
             }
           }
           KeyCode::Esc => {
+            // Immediately abort any ongoing TTS/LLM by incrementing interrupt counter
+            interrupt_counter.fetch_add(1, Ordering::SeqCst);
+            // pause debate if active
+            let state = GLOBAL_STATE.get().expect("AppState not initialized");
+            if state.debate_enabled.load(Ordering::SeqCst) {
+              // only send the message once when we transition from running to paused
+              if !state.debate_paused.load(Ordering::SeqCst) {
+                state.debate_paused.store(true, Ordering::SeqCst);
+                let _ = tx_ui.send(
+                  "line|\n\x1b[32m🚩 Debate paused, speak again to continue \x1b[0m\n".to_string(),
+                );
+              }
+            }
+            thread::sleep(Duration::from_millis(10));
             let _ = stop_play_tx.try_send(());
             let now = Instant::now();
             if let Some(prev) = last_esc {
+              // double ESC stops playback and resets conversation
               if now.duration_since(prev) <= Duration::from_millis(1000) {
-                // double ESC stops playback and interrupts conversation
-                interrupt_counter.fetch_add(1, Ordering::SeqCst);
                 // flag that we are waiting for next LLM response
                 GLOBAL_STATE
                   .get()

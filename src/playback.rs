@@ -33,7 +33,6 @@ pub fn playback_thread(
   config: cpal::StreamConfig,
   rx_audio: Receiver<crate::audio::AudioChunk>,
   stop_play_rx: Receiver<()>,
-  stop_all_rx: Receiver<()>,
   playback_active: Arc<AtomicBool>,
   gate_until_ms: Arc<AtomicU64>,
   paused: Arc<AtomicBool>,
@@ -265,9 +264,8 @@ pub fn playback_thread(
   };
 
   // Outer loop to recreate stream on interrupt
-  let stop_all_triggered = false;
   let mut interrupted = false;
-  while !stop_all_triggered {
+  loop {
     stream.play()?;
     // Reset state before each stream
     *volume.lock().unwrap() = 1.0;
@@ -277,19 +275,13 @@ pub fn playback_thread(
     ui.playing.store(false, Ordering::Relaxed);
     loop {
       select! {
-        recv(stop_all_rx) -> _ => {
-          // Interrupt: pause and clear, reset flag to allow new audio
-          stream.pause()?;
-          queue.lock().unwrap().clear();
-          interrupted = true;
-        }
         recv(stop_play_rx) -> _ => {
-          // Stop current stream, drop it, and let outer loop recreate
-          stream.pause()?;
-          // Clear queue immediately before pausing
-          queue.lock().unwrap().clear();
           // Drain any pending audio chunks from rx_audio
           while let Ok(_) = rx_audio.try_recv() {}
+          // Clear queue immediately before pausing
+          queue.lock().unwrap().clear();
+          // Stop current stream, drop it, and let outer loop recreate
+          stream.pause()?;
           // Allow CPAL buffer to flush
           std::thread::sleep(std::time::Duration::from_millis(10));
           break;

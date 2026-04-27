@@ -1,10 +1,12 @@
-use crate::util::get_user_home_path;
+use crate::util::{get_user_home_path, terminate};
 use clap::Parser;
 use cpal::traits::DeviceTrait;
 use crossbeam_channel::{bounded, unbounded};
 use crossterm::terminal::{self};
 use std::path::{Path, PathBuf};
-use std::process;
+
+use ctrlc;
+use std::io::IsTerminal;
 use std::sync::{Arc, OnceLock, atomic::Ordering};
 use std::thread::{self, Builder as ThreadBuilder};
 use std::time::Duration;
@@ -28,9 +30,26 @@ mod util;
 static START_INSTANT: OnceLock<Instant> = OnceLock::new();
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-  let args: config::Args = crate::config::Args::parse();
+  let mut args = crate::config::Args::parse();
+
+  // Force quiet mode if stdin is not a terminal and input is read from pipe
+  let stdin_is_tty = std::io::stdin().is_terminal();
+  if (args.read_file.as_deref() == Some("-") || args.prompt_file.as_deref() == Some("-")) {
+    if !stdin_is_tty {
+      // in stdin mode keyword poll doesn't work, therefore force quiet mode
+      args.quiet = true;
+    }
+  }
   crate::log::set_verbose(args.verbose || false);
   let _ = START_INSTANT.get_or_init(Instant::now);
+
+  // Ctrl-C handler to set should_exit flag
+  let should_exit = Arc::new(std::sync::atomic::AtomicBool::new(false));
+  let should_exit_clone = should_exit.clone();
+  ctrlc::set_handler(move || {
+    crate::util::terminate(0);
+  })
+  .expect("Error setting Ctrl-C handler");
 
   // make sure piper phonemes are unpacked
   assets::ensure_piper_espeak_env();
@@ -41,8 +60,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   // ---------------------------------------------------
   // setup thread communication channels
   // ---------------------------------------------------
-  // broadcast stop signal to all threads
-  let (stop_all_tx, stop_all_rx) = unbounded::<()>();
   // channel for utterance audio chunks
   let (tx_utt, rx_utt) = bounded::<audio::AudioChunk>(1);
   // channel for tts phrases
@@ -68,15 +85,19 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   // ---------------------------------------------------
   if args.list_voices {
     tts::print_voices();
-    process::exit(0);
+    util::terminate(0);
   }
 
   // ---------------------------------------------------
   // quiet mode validation
   // ---------------------------------------------------
-  if args.quiet && args.prompt.is_none() && args.prompt_file.is_none() {
+  if args.quiet
+    && args.prompt.is_none()
+    && args.prompt_file.is_none()
+    && !(args.read_file.as_deref() == Some("-"))
+  {
     println!("❌ Quiet mode requires either one of the next options: -p or -i.\n");
-    process::exit(1);
+    util::terminate(1);
   }
 
   // ---------------------------------------------------
@@ -109,7 +130,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       Ok(v) => v,
       Err(e) => {
         crate::log::log("error", &format!("Failed to load settings: {}", e));
-        process::exit(1);
+        util::terminate(1);
       }
     };
 
@@ -130,7 +151,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 .join(", ")
             ),
           );
-          process::exit(1);
+          util::terminate(1);
         }
       },
       None => {
@@ -164,7 +185,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let host = cpal::default_host();
     let (out_dev, _out_stream) = audio::pick_output_stream(&host).unwrap_or_else(|msg| {
       crate::log::log("error", &format!("{}", msg));
-      process::exit(1)
+      util::terminate(1)
     });
 
     let out_cfg_supported = out_dev.default_output_config()?;
@@ -176,7 +197,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (tx_play, rx_play) = bounded::<audio::AudioChunk>(1);
     let (tx_tts, rx_tts) = unbounded::<(String, u64, String)>();
     let (tts_done_tx, tts_done_rx) = crossbeam_channel::unbounded();
-    let (stop_all_tx, stop_all_rx) = unbounded::<()>();
     let (stop_play_tx, stop_play_rx) = unbounded::<()>();
 
     let interrupt_counter = app_state.interrupt_counter.clone();
@@ -185,7 +205,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let _tts_handle = thread::spawn({
       let out_sample_rate = out_sample_rate.clone();
       let tx_play = tx_play.clone();
-      let stop_all_rx = stop_all_rx.clone();
       let interrupt_counter = interrupt_counter.clone();
       let stop_play_tx = stop_play_tx.clone();
 
@@ -193,7 +212,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         tts::tts_thread(
           out_sample_rate,
           tx_play,
-          stop_all_rx,
           interrupt_counter,
           rx_tts,
           stop_play_tx,
@@ -237,7 +255,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       let gate_until_ms = gate_until_ms.clone();
       let paused = paused.clone();
       let volume = volume.clone();
-      let stop_all_rx = stop_all_rx.clone();
 
       move || {
         playback::playback_thread(
@@ -247,7 +264,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
           out_cfg.clone(),
           rx_play,
           stop_play_rx,
-          stop_all_rx,
           playback_active,
           gate_until_ms,
           paused,
@@ -301,7 +317,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // State for phrase navigation
     let current_phrase = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let tts_paused = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let should_exit = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
     // Channel for triggering display updates
     let (display_update_tx, display_update_rx) = unbounded::<()>();
@@ -313,8 +328,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       let should_exit = should_exit.clone();
       let interrupt_counter = interrupt_counter.clone();
       let stop_play_tx = stop_play_tx.clone();
-      let stop_all_tx = stop_all_tx.clone();
-      let stop_all_rx = stop_all_rx.clone();
       let display_update_tx = display_update_tx.clone();
       let phrases_len = phrases.len();
       let (tx_ui_dummy, _rx_ui_dummy) = bounded::<String>(1); // Dummy channel for read-file mode
@@ -330,8 +343,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         keyboard::keyboard_thread(
           tx_ui_dummy,
-          stop_all_tx,
-          stop_all_rx,
           Arc::new(std::sync::atomic::AtomicBool::new(false)), // dummy recording_paused
           stop_play_tx,
           interrupt_counter,
@@ -380,7 +391,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Main TTS loop
     loop {
       if should_exit.load(Ordering::SeqCst) {
-        break;
+        terminate(0)
       }
 
       let idx = current_phrase.load(Ordering::SeqCst);
@@ -508,7 +519,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     execute!(out, cursor::Show).unwrap();
     let _ = terminal::disable_raw_mode();
-    process::exit(0);
+    util::terminate(0);
   }
 
   let _ = terminal::enable_raw_mode();
@@ -543,7 +554,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     Err(e) => {
       print!("❌ Failed to load settings: {}", e);
       thread::sleep(Duration::from_millis(300));
-      process::exit(1);
+      util::terminate(1);
     }
   };
   let settings = match &args.agent {
@@ -560,7 +571,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             .join(", ")
         );
         thread::sleep(Duration::from_millis(300));
-        process::exit(1);
+        util::terminate(1);
       }
     },
     None => {
@@ -594,8 +605,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
   // Clones for threads
   let tx_ui_for_keyboard = tx_ui.clone();
-  let stop_all_rx_for_keyboard = stop_all_rx.clone();
-  let stop_all_rx_for_playback = stop_all_rx.clone();
   let (stop_play_tx, stop_play_rx) = unbounded::<()>(); // stop playback signal
 
   // Resolve Whisper model path and log it
@@ -605,11 +614,11 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let host = cpal::default_host();
   let (in_dev, _in_stream) = audio::pick_input_stream(&host).unwrap_or_else(|msg| {
     log::log("error", &format!("{}", msg));
-    process::exit(1)
+    util::terminate(1)
   });
   let (out_dev, _out_stream) = audio::pick_output_stream(&host).unwrap_or_else(|msg| {
     log::log("error", &format!("{}", msg));
-    process::exit(1)
+    util::terminate(1)
   });
   log::log(
     "info",
@@ -716,14 +725,12 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // voice_state not needed; voice passed per message
     let out_sample_rate = out_sample_rate.clone();
     let tx_play = tx_play.clone();
-    let stop_all_rx = stop_all_rx.clone();
     let interrupt_counter = interrupt_counter.clone();
 
     move || {
       tts::tts_thread(
         out_sample_rate,
         tx_play,
-        stop_all_rx,
         interrupt_counter,
         rx_tts,
         stop_play_tx_for_tts,
@@ -752,7 +759,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         out_cfg.clone(),
         rx_play_for_playback,
         stop_play_rx,
-        stop_all_rx_for_playback.clone(),
         playback_active_for_play.clone(),
         gate_until_ms_for_play.clone(),
         paused_for_play.clone(),
@@ -770,7 +776,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let playback_active_for_rec = playback_active.clone();
   let gate_until_ms_for_rec = gate_until_ms.clone();
   let interrupt_counter_for_rec = interrupt_counter.clone();
-  let stop_all_rx_for_record = stop_all_rx.clone();
   let ui_peak_for_rec = ui.peak.clone();
   let ui_for_rec = ui.clone();
   let volume_rec_for_rec = volume_rec.clone();
@@ -794,7 +799,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             playback_active_for_rec.clone(),
             gate_until_ms_for_rec.clone(),
             interrupt_counter_for_rec.clone(),
-            stop_all_rx_for_record.clone(),
             ui_peak_for_rec.clone(),
             ui_for_rec.clone(),
             volume_rec_for_rec.clone(),
@@ -811,8 +815,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   // Thread: conversation
   // ---------------------------------------------------
   let rx_utt_for_conv = rx_utt.clone();
-  let stop_all_rx_for_conv = stop_all_rx.clone();
-  let stop_all_tx_for_conv = stop_all_tx.clone();
   let interrupt_counter_for_conv = interrupt_counter.clone();
   let whisper_path_for_conv = whisper_path.clone();
   let settings_for_conv = settings.clone();
@@ -823,11 +825,10 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let tts_done_rx_for_conv = tts_done_rx.clone();
 
   let init_prompt_for_conv = initial_prompt.clone();
+  let stop_play_tx_conv = stop_play_tx.clone();
   let conv_handle = thread::spawn(move || {
     conversation::conversation_thread(
       rx_utt_for_conv,
-      stop_all_rx_for_conv.clone(),
-      stop_all_tx_for_conv.clone(),
       interrupt_counter_for_conv.clone(),
       whisper_path_for_conv.clone(),
       settings_for_conv.clone(),
@@ -836,6 +837,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       tx_ui_for_conv.clone(),
       tx_tts_for_conv.clone(),
       tts_done_rx_for_conv.clone(),
+      stop_play_tx_conv,
       init_prompt_for_conv,
       args.quiet,
       args.save,
@@ -846,27 +848,22 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   // Thread: keyboard
   // ---------------------------------------------------
   let recording_paused_for_key = recording_paused.clone();
-  let stop_all_tx_for_key = stop_all_tx.clone();
   let stop_play_tx_for_key = stop_play_tx.clone();
-  let key_handle = thread::spawn({
-    move || {
-      keyboard::keyboard_thread(
-        tx_ui_for_keyboard.clone(),
-        stop_all_tx_for_key.clone(),
-        stop_all_rx_for_keyboard.clone(),
-        recording_paused_for_key.clone(),
-        stop_play_tx_for_key.clone(),
-        interrupt_counter.clone(),
-        None, // No read-file mode
-      )
-    }
+  let key_handle = thread::spawn(move || {
+    keyboard::keyboard_thread(
+      tx_ui_for_keyboard.clone(),
+      recording_paused_for_key.clone(),
+      stop_play_tx_for_key.clone(),
+      interrupt_counter.clone(),
+      None, // No read-file mode
+    );
   });
 
   // Enable debate mode if requested
   if let Some(ref debate_args) = args.debate {
     if debate_args.len() < 2 {
       crate::log::log("error", "--debate requires at least two agent names");
-      process::exit(1);
+      util::terminate(1);
     }
     let agent1_name = &debate_args[0];
     let agent2_name = &debate_args[1];
@@ -879,7 +876,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "error",
         "--debate requires a subject when no prompt is provided",
       );
-      process::exit(1);
+      util::terminate(1);
     };
     let agent1 = agents.iter().find(|a| a.name == *agent1_name).cloned();
     let agent2 = agents.iter().find(|a| a.name == *agent2_name).cloned();
@@ -899,7 +896,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
               .join(", ")
           ),
         );
-        process::exit(1);
+        util::terminate(1);
       }
     };
     state.debate_enabled.store(true, Ordering::SeqCst);
@@ -909,9 +906,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   }
 
   // If running in interactive terminal, block until keyboard thread exits.
-  if util::terminal_supported() {
-    let _ = key_handle.join();
-  }
+  let _ = key_handle.join();
 
   // Join threads after debate flags set
   let _ = rec_handle.join().unwrap();
