@@ -48,7 +48,6 @@ pub fn speak(
   voice: &str,
   out_sample_rate: u32, // MUST match CPAL playback SR
   tx: Sender<crate::audio::AudioChunk>,
-  stop_all_rx: &Receiver<()>,
   interrupt_counter: Arc<AtomicU64>,
   expected_interrupt: u64,
 ) -> Result<SpeakOutcome, Box<dyn std::error::Error + Send + Sync>> {
@@ -60,7 +59,6 @@ pub fn speak(
       voice,
       out_sample_rate,
       tx,
-      stop_all_rx.clone(),
       interrupt_counter,
       expected_interrupt,
     )
@@ -74,21 +72,12 @@ pub fn speak(
       gain,
       language,
       tx,
-      stop_all_rx.clone(),
       interrupt_counter,
       expected_interrupt,
     )
   } else {
     let lang = if language == "zh" { "cmn" } else { language };
-    kokoro_tts::speak_via_kokoro(
-      text,
-      lang,
-      voice,
-      tx,
-      stop_all_rx.clone(),
-      interrupt_counter,
-      expected_interrupt,
-    )
+    kokoro_tts::speak_via_kokoro(text, lang, voice, tx, interrupt_counter, expected_interrupt)
   }?;
   Ok(outcome)
 }
@@ -97,7 +86,6 @@ pub fn speak(
 pub fn tts_thread(
   out_sample_rate: u32,
   tx_play: Sender<crate::audio::AudioChunk>,
-  stop_all_rx: Receiver<()>,
   interrupt_counter: Arc<AtomicU64>,
   rx_tts: Receiver<(String, u64, String)>,
   stop_play_tx: Sender<()>,
@@ -133,7 +121,6 @@ pub fn tts_thread(
           &voice,
           out_sample_rate,
           tx_play.clone(),
-          &stop_all_rx,
           interrupt_counter.clone(),
           expected_interrupt,
         );
@@ -166,11 +153,6 @@ pub fn tts_thread(
             break;
           }
         }
-      },
-      recv(stop_all_rx) -> _ => {
-        crate::log::log("info", "🛑 TTS thread received stop_all signal, exiting");
-        // Gracefully exit on stop signal
-        break;
       }
     }
   }

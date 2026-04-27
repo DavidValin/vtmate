@@ -38,22 +38,22 @@ https://github.com/user-attachments/assets/8b9e982c-ba97-4aeb-8e55-1db6a92bc164
 
 ## Features
 
-- 📌 Continuous Voice chat (live conversation) with voice interruption
-- 📌 Realtime agent swap
-- 📌 Push to Talk mode (PTT)
-- 📌 Recording Pause / Resume via keyboard
-- 🚀 AI agents debate (2 agents talking to each other; use can also participate in between)
-- 📌 Stop playback for the current response via keyboard
-- 📌 Interrupt response altogether via keyboard
-- 📌 Live voice speed change via keyboard (applicable to next response)
-- 📌 Save conversation as audio and text
-- 📌 Read a text file with voice, phrase by phrase, with keyboard navigation and pause/resume
-- 📌 Read text with voice from STDIN, phrase by phrase, with keyboard navigation and pause/resume
-- 📌 Save audio speech of a text file or STDIN content
-- 📌 Load separate settings file with different agents
-- 📌 Integrated `whisper` speech recognition system (no external intallation required)
-- 📌 Integrated `kokoro TTS` and `supersonic 2 TTS` systems (no external intallation required)
-- 📌 Interface with `OpenTTS` system (requires external docker service)
+- 📌 Continuous Voice chat (live conversation): `records user continuously and stops on silence, submitting the request to the agent`
+- 📌 Push to Talk mode (PTT): `keep &lt;SPACE&gt; pressed while talking and release to stop recording`
+- 🚀 AI agents debate (2 agents talking to each other): `give an initial input and let the agents talk to each other. You can interrupt in the middle of the debate changing the subject`
+- 📌 Realtime agent swap: `change the agent by pressing &lt;ARROW_LEFT&gt; / &lt;ARROW_RIGHT&gt; (applicable to next response)`
+- 📌 Voice interrupt: `the agent stops talking if you interrupt via voice`
+- 📌 Recording Pause / Resume: `toggle "&lt;SPACE&gt;" key to pause / resume voice recording only`
+- 📌 Stop PlayBack: `press "&lt;ESCAPE&gt;" ONCE to stop the playback for the current response`
+- 📌 Interrupt: `press "&lt;ESCAPE&gt;" TWICE to interrupt the current response alltogether`
+- 📌 Voice speed change: `change the agent voice speed by pressing &lt;ARROW_UP&gt; / &lt;ARROW_DOWN&gt; (applicable to next response)`
+- 📌 Voice read a txt file: `vtmate -r myfile.txt`
+- 📌 Voice read text from stdin phrase by phrase: `echo "Hello. How are you?" | vtmate -r -`
+- 📌 Save conversation as audio and text: `vtmate -s`
+- 📌 Load separate settings file with different agents: `vtmate -c philosophers-settings.txt`
+- 📌 Integrated `whisper`
+- 📌 Integrated `kokoro TTS` system
+- 📌 Interface with `OpenTTS` system
 - 📌 Supports `ollama` or `llama-server`
 - 📌 28 languages supported (`vtmate --list-voices`)
 - 📌 Use any gguf model from huggingface.com or ollama models (small models reply faster)
@@ -132,6 +132,7 @@ ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 ```
 
+* By default all agents are set in `PTT` mode, you have to keep `SPACE` pressed to talk. If you want to use `LIVE` mode, make sure you adjust your microphone levels correctly and adjust `sound_threshold_peak` and `end_silence_ms` settings to your need
 * ⚠️ Currently you cannot mix kokoro and supersonic tts systems (pick one).
 * Voice mixing is supported for kokoro TTS system only, you can create a voice by mixing 2 kokoro voices by percentage. Example mixing 50% of bm_daniel and 50% of am_puck: set voice name to `bm_daniel.5+am_puck.5`
 
@@ -152,15 +153,15 @@ All cli options:
 ```
   -a <agent_name>                       set a specific initial agent
   -p <prompt>                           initialize with a text prompt
+  -q                                    quiet mode: produces a single response and exit (requires `-p` or `-i`)
   -i <file.txt>                         initialize with a file prompt
-  -i -                                  initialize with prompt from STDIN
-  -q                                    produce a single response and exit (requires `-p` or `-i`)
+  -i -                                  initialize with prompt from STDIN (runs in quiet mode)
   -s                                    save the conversation to text and audio file in ~/.vtmate/conversations or ~/.vtmate/read-files
   --debate <AGENT1> <AGENT2> [SUBJECT]  initialize a debate between 2 agents with an initial prompt
   --debate <AGENT1> <AGENT2> -i <FILE>  initialize a debate between 2 agents with an initial prompt from file
   --debate <AGENT1> <AGENT2> -i –       initialize a debate between 2 agents with an initial prompt from STDIN
   -r <file.txt>                         read a file with voice, phrase by phrase (no llm involved)
-  -r -                                  read text from STDIN with voice, phrase by phrase (no llm involved)
+  -r -                                  read text from STDIN with voice, phrase by phrase (no llm involved). Use - for STDIN (runs in quiet mode)
   -c <settings_file>                    use a specific settings file
   --list-voices                         list all voices for all languages and tts systems
   --ptt <true/false>                    override for this session the ptt setting for all agents independently of its settings
@@ -196,7 +197,7 @@ Start conversation with an initial prompt from file
 vtmate -i myprompt.txt
 ```
 
-Start conversation with an initial prompt from STDIN
+Get a single response from STDIN text and exit
 ```
 echo "How to fly without wings?" | vtmate -i -
 ```
@@ -214,19 +215,20 @@ echo "How to fly without wings?" | vtmate -i -
 Initialize a debate between two agents and be able to participate in the debate by speaking at any time. To create a good debate adjust the system prompts of each agent and give a detailed initial input.
 In debate mode is good idea to set `--ptt <true/false>` option so that the ptt value is not switched on each agent turn.
 
-Start a debate with an initial subject
+Start a debate with an initial subject (with forced ptt mode)
 ```
 vtmate --debate "God" "Devil" "How to succeed in life?" --ptt true
 ```
 
-Start a debate with an initial prompt from file
+Start a debate with an initial prompt from file (with forced live mode)
 ```
 vtmate --debate "God" "Devil" -i myprompt.txt  --ptt false
 ```
 
-Start a debate with an initial prompt from STDIN
+Start a debate with an initial file prompt (with forced ptt mode)
 ```
-echo "Lets discuss the permissions of this files: \n\n $(ls -la)" | vtmate --debate "Unix administrator" "Security Expert" -i -  --ptt true
+cat "Lets discuss the permissions of this files: \n\n $(ls -la)" > prompt.txt
+vtmate --debate "Unix administrator" "Security Expert" -i prompt.txt --ptt true
 ```
 
 * When running in LIVE mode just talk. You can also pause/resume recording by pressing `SPACE` once
@@ -248,7 +250,7 @@ Get a single response from prompt from file
 vtmate -q -i myprompt.txt
 ```
 
-Get a single response from prompt from STDIN
+Get a single response from prompt from STDIN and exit
 ```
 echo "Is $(date) a national holiday day in Spain?" | vtmate -q -i -
 ```
@@ -270,7 +272,7 @@ read from a txt file (and save it in `~/.vtmate/read-files`)
 vtmate -r myfile.txt -a reader
 ```
 
-read from STDIN text
+read from STDIN text, get a response and exit
 ```
 echo "First phrase. Second phrase" | vtmate -r -
 ```

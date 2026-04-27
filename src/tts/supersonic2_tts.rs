@@ -53,7 +53,6 @@ pub fn speak_via_supersonic2(
   _gain: f32,
   language: &str,
   tx: Sender<crate::audio::AudioChunk>,
-  stop_all_rx: Receiver<()>,
   interrupt_counter: Arc<AtomicU64>,
   expected_interrupt: u64,
 ) -> Result<SpeakOutcome, Box<dyn std::error::Error + Send + Sync>> {
@@ -72,27 +71,18 @@ pub fn speak_via_supersonic2(
   });
 
   // Check early interrupt
-  if stop_all_rx.try_recv().is_ok()
-    || interrupt_counter.load(Ordering::SeqCst) != expected_interrupt
-  {
-    return Ok(SpeakOutcome::Interrupted);
-  }
 
   let mut streaming = StreamingTts::new(engine.clone());
   streaming.set_voice(voice);
 
   // interrupt monitoring
   let interrupt_flag = streaming.interrupt_flag.clone();
-  let stop_rx = stop_all_rx.clone();
   let int_counter = interrupt_counter.clone();
   let expected = expected_interrupt;
 
-  let stop_rx_clone = stop_rx.clone();
-  let int_counter_clone = int_counter.clone();
-
   thread::spawn(move || {
     loop {
-      if stop_rx_clone.try_recv().is_ok() || int_counter_clone.load(Ordering::SeqCst) != expected {
+      if int_counter.load(Ordering::SeqCst) != expected {
         interrupt_flag.store(true, Ordering::Relaxed);
         break;
       }

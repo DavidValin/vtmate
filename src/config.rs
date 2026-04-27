@@ -4,6 +4,7 @@
 
 use crate::tts;
 use crate::util::get_user_home_path;
+use crate::util::terminate;
 use anyhow::Error;
 use clap::Parser;
 use cpal::Device;
@@ -13,7 +14,6 @@ use serde_ini::from_str;
 use std::fs::{File, create_dir_all, read_to_string};
 use std::io::Write;
 use std::panic;
-use std::process;
 use std::thread::{self};
 use std::time::Duration;
 use url::Url;
@@ -128,7 +128,7 @@ pub struct Args {
     long = "prompt-file",
     value_name = "FILE",
     default_missing_value = "-",
-    help = "initialize with a file prompt (use '-' for STDIN)"
+    help = "initialize with a file prompt (use '-' for STDIN (runs in quiet mode))"
   )]
   pub prompt_file: Option<String>,
 
@@ -163,7 +163,7 @@ pub struct Args {
     long = "read-file",
     value_name = "FILENAME",
     default_missing_value = "-",
-    help = "read a file with voice, phrase by phrase (no llm involved)"
+    help = "read a file with voice, phrase by phrase (no llm involved). Use '-' for STDIN (runs in quiet mode))"
   )]
   pub read_file: Option<String>,
 
@@ -366,7 +366,7 @@ pub fn load_settings(
   if !errors.is_empty() {
     print!("❌ {}", &errors.join("\n").to_string());
     thread::sleep(Duration::from_millis(30));
-    process::exit(1);
+    terminate(1);
   }
 
   if agents.is_empty() {
@@ -420,7 +420,7 @@ model = llama3.2:3b
 system_prompt = "You are a neutral, helpful AI assistant. Follow the subject of the conversation with special attention to the user request. Provide accurate, concise answers. Keep replies ≤30 words; if a longer answer is required, limit it to 250 words. Assume no prior context unless the user supplies it, and do not mention yourself."
 sound_threshold_peak = 0.12
 end_silence_ms = 2500
-ptt = false
+ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 
 [agent]

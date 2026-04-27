@@ -24,8 +24,8 @@ pub fn speak_via_opentts(
   voice: &str,
   out_sample_rate: u32,
   tx: Sender<AudioChunk>,
-  stop_all_rx: Receiver<()>,
   interrupt_counter: Arc<AtomicU64>,
+
   expected_interrupt: u64,
 ) -> Result<crate::tts::SpeakOutcome, Box<dyn std::error::Error + Send + Sync>> {
   if text.is_empty() {
@@ -44,7 +44,6 @@ pub fn speak_via_opentts(
   stream_wav16le_over_http(
     &url,
     tx,
-    stop_all_rx.clone(),
     out_sample_rate,
     interrupt_counter,
     expected_interrupt,
@@ -87,19 +86,14 @@ pub const DEFAULT_OPENTTS_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
 fn read_exact_in_chunks<R: Read>(
   reader: &mut R,
   total: usize,
-  stop_all_rx: &Receiver<()>,
   interrupt_counter: &Arc<AtomicU64>,
+
   expected_interrupt: u64,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
   let mut remaining = total;
   let mut buf = vec![0u8; 8192];
   let mut out = Vec::with_capacity(total);
   while remaining > 0 {
-    if stop_all_rx.try_recv().is_ok()
-      || interrupt_counter.load(Ordering::SeqCst) != expected_interrupt
-    {
-      return Err("Interrupted while reading wav data".into());
-    }
     let to_read = std::cmp::min(remaining, buf.len());
     let n = reader.read(&mut buf[..to_read])?;
     if n == 0 {
@@ -114,17 +108,13 @@ fn read_exact_in_chunks<R: Read>(
 fn stream_wav16le_over_http(
   url: &str,
   tx: Sender<AudioChunk>,
-  stop_all_rx: Receiver<()>,
   target_sr: u32,
+
   interrupt_counter: Arc<AtomicU64>,
   expected_interrupt: u64,
 ) -> Result<crate::tts::SpeakOutcome, Box<dyn std::error::Error + Send + Sync>> {
   let resp = reqwest::blocking::get(url)?;
-  if stop_all_rx.try_recv().is_ok()
-    || interrupt_counter.load(Ordering::SeqCst) != expected_interrupt
-  {
-    return Ok(crate::tts::SpeakOutcome::Interrupted);
-  }
+
   if !resp.status().is_success() {
     return Err(format!("HTTP {} from {}", resp.status(), url).into());
   }
@@ -144,10 +134,6 @@ fn stream_wav16le_over_http(
 
   // Parse chunks until fmt + data
   loop {
-    if stop_all_rx.try_recv().is_ok() {
-      return Ok(crate::tts::SpeakOutcome::Interrupted);
-    }
-
     if interrupt_counter.load(Ordering::SeqCst) != expected_interrupt {
       return Ok(crate::tts::SpeakOutcome::Interrupted);
     }
@@ -210,9 +196,6 @@ fn stream_wav16le_over_http(
     let mut buf = vec![0u8; 8192];
 
     while remaining > 0 {
-      if stop_all_rx.try_recv().is_ok() {
-        return Ok(crate::tts::SpeakOutcome::Interrupted);
-      }
       if interrupt_counter.load(Ordering::SeqCst) != expected_interrupt {
         return Ok(crate::tts::SpeakOutcome::Interrupted);
       }
@@ -241,7 +224,6 @@ fn stream_wav16le_over_http(
       let pcm = match read_exact_in_chunks(
         &mut reader,
         remaining,
-        &stop_all_rx,
         &interrupt_counter,
         expected_interrupt,
       ) {
@@ -250,12 +232,7 @@ fn stream_wav16le_over_http(
       };
       // After reading the rest, no bytes left
       remaining = 0;
-      if stop_all_rx.try_recv().is_ok() {
-        return Ok(crate::tts::SpeakOutcome::Interrupted);
-      }
-      if interrupt_counter.load(Ordering::SeqCst) != expected_interrupt {
-        return Ok(crate::tts::SpeakOutcome::Interrupted);
-      }
+
       // Decode PCM16LE -> f32
       let mut decoded: Vec<f32> = Vec::with_capacity(pcm.len() / 2);
       for i in (0..pcm.len()).step_by(2) {
@@ -270,9 +247,6 @@ fn stream_wav16le_over_http(
       let resampled: Vec<f32> = resampled.into_iter().map(|v| v * factor).collect();
       let mut offset = 0usize;
       while offset < resampled.len() {
-        if stop_all_rx.try_recv().is_ok() {
-          return Ok(crate::tts::SpeakOutcome::Interrupted);
-        }
         if interrupt_counter.load(Ordering::SeqCst) != expected_interrupt {
           return Ok(crate::tts::SpeakOutcome::Interrupted);
         }
@@ -295,12 +269,6 @@ fn stream_wav16le_over_http(
     let aligned = pending.len() - (pending.len() % channels as usize);
     pending.truncate(aligned);
     if !pending.is_empty() {
-      if stop_all_rx.try_recv().is_ok() {
-        return Ok(crate::tts::SpeakOutcome::Interrupted);
-      }
-      if interrupt_counter.load(Ordering::SeqCst) != expected_interrupt {
-        return Ok(crate::tts::SpeakOutcome::Interrupted);
-      }
       tx.send(AudioChunk {
         data: pending,
         channels,
@@ -326,12 +294,6 @@ fn stream_wav16le_over_http(
         )
         .into(),
       );
-    }
-    if stop_all_rx.try_recv().is_ok() {
-      return Ok(crate::tts::SpeakOutcome::Interrupted);
-    }
-    if interrupt_counter.load(Ordering::SeqCst) != expected_interrupt {
-      return Ok(crate::tts::SpeakOutcome::Interrupted);
     }
 
     let mut decoded: Vec<f32> = Vec::with_capacity(pcm.len() / 2);

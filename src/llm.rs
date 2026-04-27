@@ -15,7 +15,7 @@ pub async fn llama_server_stream_response_into(
   llama_host: &str,
   llama_model: &str,
   server_type: &str,
-  stop_all_rx: &Receiver<()>,
+
   interrupt_counter: Arc<AtomicU64>,
   expected_interrupt: u64,
   on_piece: &mut dyn FnMut(&str),
@@ -75,9 +75,7 @@ pub async fn llama_server_stream_response_into(
   let mut last_err: Option<String> = None;
 
   for (url, kind) in tries {
-    if stop_all_rx.try_recv().is_ok()
-      || interrupt_counter.load(std::sync::atomic::Ordering::SeqCst) != expected_interrupt
-    {
+    if interrupt_counter.load(std::sync::atomic::Ordering::SeqCst) != expected_interrupt {
       return Ok(());
     }
 
@@ -150,9 +148,7 @@ pub async fn llama_server_stream_response_into(
 
     while let Some(chunk_result) = stream.next().await {
       // check stop signal mid-stream
-      if stop_all_rx.try_recv().is_ok()
-        || interrupt_counter.load(std::sync::atomic::Ordering::SeqCst) != expected_interrupt
-      {
+      if interrupt_counter.load(std::sync::atomic::Ordering::SeqCst) != expected_interrupt {
         return Ok(());
       }
 

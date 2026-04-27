@@ -23,7 +23,7 @@ flowchart LR
     %% Record -> Conversation
     Rec -->|tx_utt - microphone audio| Conv
     Rec -->|tx_utt - recognized utterance audio| Conv
-    Rec -->|tx_ui - stop_ui| UI
+    Rec -->|tx_ui - user_interrupt_show| UI
 
     %% Conversation -> others
     Conv -->|tx_tts - TTS sentence| TTS

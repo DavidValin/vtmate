@@ -2,8 +2,20 @@
 //  Util
 // ------------------------------------------------------------------
 
+use crossterm::cursor::Show;
+use crossterm::{
+  cursor::MoveTo,
+  execute,
+  terminal::{Clear, ClearType},
+};
+use directories::UserDirs;
+use encoding_rs::*;
 use std::cell::Cell;
+use std::fs;
 use std::io::IsTerminal;
+use std::io::{self, Read, Write};
+use std::path::PathBuf;
+use std::process;
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicU64;
 use std::time::Instant;
@@ -24,7 +36,7 @@ pub fn read_file(path: &str) -> String {
       .read_to_end(&mut stdin_bytes)
       .unwrap_or_else(|e| {
         crate::log::log("error", &format!("Failed to read stdin: {}", e));
-        process::exit(1);
+        terminate(1);
       });
     match std::str::from_utf8(&stdin_bytes) {
       Ok(s) => s.to_string(),
@@ -62,21 +74,14 @@ pub fn read_file(path: &str) -> String {
             "error",
             &format!("Failed to read file '{}' with error: {}", path, e),
           );
-          process::exit(1);
+          terminate(1);
         }
       },
     }
   }
 }
 
-use encoding_rs::*;
-use std::fs;
-use std::io::{self, Read};
-use std::process;
 // ------------------------------------------------------------------
-
-use directories::UserDirs;
-use std::path::PathBuf;
 
 pub fn now_ms(start_instant: &OnceLock<Instant>) -> u64 {
   let start = start_instant.get_or_init(Instant::now);
@@ -200,4 +205,18 @@ pub fn _strip_ansi(s: &str) -> String {
     result.push(c);
   }
   result
+}
+
+pub fn terminate(code: i32) -> ! {
+  // show cursor and clear bottom line before exiting
+  let mut stdout = std::io::stdout();
+  let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
+  let _ = execute!(
+    stdout,
+    MoveTo(0, rows.saturating_sub(1)),
+    Clear(ClearType::CurrentLine),
+    Show
+  );
+  stdout.flush().ok();
+  process::exit(code);
 }

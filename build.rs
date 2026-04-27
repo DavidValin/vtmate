@@ -257,18 +257,20 @@ fn main() {
       let path = dest.join("supersonic2-model").join(rel);
       // Use the file name component for lookup in EXPECTED_HASHES
       let name = Path::new(rel).file_name().unwrap().to_str().unwrap();
-            if let Err(e) = verify_file(&path, name) {
-                panic!("Checksum mismatch for {}: {}", name, e);
-            } else {
-                println!("cargo:warning=File {} exists and checksum OK", name);
-            }
-        }
+      if let Err(e) = verify_file(&path, name) {
+        panic!("Checksum mismatch for {}: {}", name, e);
+      } else {
+        println!("cargo:warning=File {} exists and checksum OK", name);
+      }
     }
+  }
 
-    for &(src_rel, name) in &needed_files {
-        if name == tarball_name { continue; } // skip tarball entry if present
-        let src = Path::new(&home).join(src_rel);
-        let exists = src.exists();
+  for &(src_rel, name) in &needed_files {
+    if name == tarball_name {
+      continue;
+    } // skip tarball entry if present
+    let src = Path::new(&home).join(src_rel);
+    let exists = src.exists();
     if !exists {
       if let Some(url) = find_url_for_file(name) {
         println!("cargo:warning=Downloading {} from {}", name, url);
