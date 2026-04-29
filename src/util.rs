@@ -210,7 +210,7 @@ pub fn _strip_ansi(s: &str) -> String {
 pub fn terminate(code: i32) -> ! {
   // show cursor and clear bottom line before exiting
   let mut stdout = std::io::stdout();
-  let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
+  let (_cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
   let _ = execute!(
     stdout,
     MoveTo(0, rows.saturating_sub(1)),

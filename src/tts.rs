@@ -129,13 +129,9 @@ pub fn tts_thread(
           Ok(o) => {
             if o == crate::tts::SpeakOutcome::Interrupted {
               // Drain any remaining phrases that might be queued
-              let mut drained = 0;
               loop {
                 match rx_tts.try_recv() {
-                  Ok(_) => {
-                    drained += 1;
-                    continue;
-                  },
+                  Ok(_) => { continue; },
                   Err(_) => break,
                 }
               }

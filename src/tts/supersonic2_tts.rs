@@ -4,7 +4,7 @@
 
 use crate::audio::AudioChunk;
 
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::{Sender};
 use std::sync::{
   Arc, Mutex,
   atomic::{AtomicBool, AtomicU64, Ordering},

@@ -41,8 +41,10 @@ pub fn spawn_ui_thread(
   ui_state: crate::state::UiState,
   status_line: Arc<Mutex<String>>,
   rx_ui: Receiver<String>,
+  conversation_history: crate::conversation::ConversationHistory,
 ) -> thread::JoinHandle<()> {
   thread::spawn(move || {
+    let conversation_history = conversation_history;
     let mut ui_state = ui_state;
     let mut out = io::stdout();
     execute!(out, Hide).unwrap();
@@ -163,6 +165,64 @@ pub fn spawn_ui_thread(
           "modal_update" => {
             if modal_visible {
               render_debate_modal(&mut out, &mut buffer);
+            }
+          }
+
+          "redraw_full_history" => {
+            // Clear screen and buffer
+            execute!(out, Clear(ClearType::All), MoveTo(0, 0)).unwrap();
+            buffer.clear();
+            // Redraw buffer (now empty)
+            redraw_buffer(&mut out, &buffer);
+            // Render bottom bar
+            let (_cols, term_height) = terminal::size().unwrap_or((80, 24));
+            bottom_bar =
+              render_bottom_bar(&mut out, &ui_state, &spinner, &status_line, term_height - 1);
+            out.flush().unwrap();
+
+            // Re-send history lines
+            for msg in conversation_history.lock().unwrap().iter() {
+              let role_label = if msg.role == "assistant" {
+                "\x1b[48;5;22;37mASSISTANT:\x1b[0m"
+              } else {
+                "\x1b[47;30mUSER:\x1b[0m"
+              };
+              handle_line_message(
+                &mut out,
+                "\n",
+                &mut buffer,
+                &mut ui_state,
+                &spinner,
+                &status_line,
+                &mut bottom_bar,
+              );
+              handle_line_message(
+                &mut out,
+                role_label,
+                &mut buffer,
+                &mut ui_state,
+                &spinner,
+                &status_line,
+                &mut bottom_bar,
+              );
+              handle_line_message(
+                &mut out,
+                msg.content.as_str(),
+                &mut buffer,
+                &mut ui_state,
+                &spinner,
+                &status_line,
+                &mut bottom_bar,
+              );
+              handle_line_message(
+                &mut out,
+                "\n",
+                &mut buffer,
+                &mut ui_state,
+                &spinner,
+                &status_line,
+                &mut bottom_bar,
+              );
             }
           }
 

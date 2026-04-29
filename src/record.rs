@@ -4,14 +4,13 @@
 
 use crate::START_INSTANT;
 use cpal::traits::{DeviceTrait, StreamTrait};
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::{Sender};
 use std::sync::OnceLock;
 use std::sync::{
   Arc, Mutex,
   atomic::{AtomicBool, AtomicU64, Ordering},
 };
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Instant};
 
 // API
 // ------------------------------------------------------------------
@@ -142,9 +141,6 @@ pub fn record_thread(
   loop {
     std::thread::sleep(std::time::Duration::from_millis(10));
   }
-
-  drop(stream);
-  Ok(())
 }
 
 // PRIVATE

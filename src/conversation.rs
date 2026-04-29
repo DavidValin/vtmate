@@ -36,6 +36,11 @@ pub struct ChatMessage {
 
 pub type ConversationHistory = std::sync::Arc<std::sync::Mutex<Vec<ChatMessage>>>;
 
+/// Commands sent from keyboard to conversation thread
+pub enum Command {
+  Undo,
+}
+
 /// Initialise the Whisper context once, performing a warm‑up.
 pub fn init_whisper_context(model_path: &str) -> &'static whisper_rs::WhisperContext {
   WHISPER_CTX.get_or_init(|| {
@@ -58,7 +63,8 @@ pub fn conversation_thread(
   tts_tx: Sender<(String, u64, String)>,
   tts_done_rx: Receiver<()>,
   stop_play_tx: Sender<()>,
-  initial_prompt: Option<String>,
+  rx_cmd: Receiver<Command>,
+  init_prompt: Option<String>,
   quiet: bool,
   save: bool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -93,13 +99,13 @@ pub fn conversation_thread(
       .build()
       .unwrap();
 
-    if let Some(prompt) = initial_prompt {
+    if let Some(prompt) = &init_prompt {
       // Show user message in UI
       send_user_message_ui(&tx_ui, &prompt, false);
       push_user_message(&conversation_history, &prompt);
       perform_save(&conversation_history, &settings_clone);
       let system_prompt = settings.system_prompt.replace("\\n", "\n");
-      let messages = create_basic_messages(system_prompt, prompt);
+      let messages = create_basic_messages(system_prompt, prompt.clone());
 
       let my_interrupt = interrupt_counter.load(Ordering::SeqCst);
       let messages_clone = messages.clone();
@@ -150,7 +156,7 @@ pub fn conversation_thread(
   // Track interruptions for debate mode
   let mut last_interrupt = interrupt_counter.load(Ordering::SeqCst);
   let mut debate_interrupted = false;
-  let mut pending_user_msg: Option<String> = initial_prompt;
+  let mut pending_user_msg: Option<String> = init_prompt;
   let mut prev_debate_enabled = false;
 
   let state = GLOBAL_STATE.get().expect("AppState not initialized");
@@ -338,7 +344,7 @@ pub fn conversation_thread(
             &interrupt_counter,
             user_msg.clone(),
           );
-
+          state.processing_response.store(false, Ordering::Relaxed);
           // important: next agent will reply to this response using history
 
           // Increment turn only if not interrupted
@@ -377,14 +383,23 @@ pub fn conversation_thread(
     }
 
     select! {
+       recv(rx_cmd) -> cmd => {
+         if let Ok(command) = cmd {
+           match command {
+             Command::Undo => {
+                handle_undo(state, &tx_ui, &conversation_history, &interrupt_counter, &stop_play_tx, &settings);
+              }
+           }
+         }
+       }
       recv(rx_utt) -> msg => {
         //  –––––––––––––––––––––––––––––––––––––
         //   user audio input handler
         //  –––––––––––––––––––––––––––––––––––––
         let Ok(utt) = msg else { break };
-          if let Some(ref wav_tx) = wav_tx_opt {
-            wav_tx.send(utt.clone()).unwrap_or(());
-          }
+        if let Some(ref wav_tx) = wav_tx_opt {
+          wav_tx.send(utt.clone()).unwrap_or(());
+        }
 
         let state = GLOBAL_STATE.get().expect("AppState not initialized");
         state.conversation_paused.store(false, Ordering::Relaxed);
@@ -460,8 +475,6 @@ pub fn conversation_thread(
         let _ = tx_ui.send("line|".to_string());
         let _ = tx_ui.send(format!("line|{}", crate::ui::ASSIST_LABEL));
 
-        let mut interrupted = false;
-
         // clones for the on_piece closure
         let speaker_arc_cloned_for_closure = speaker_arc.clone();
         let tx_ui_cloned_for_closure = tx_ui.clone();
@@ -479,9 +492,6 @@ pub fn conversation_thread(
         let reply_accum = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
         let reply_accum_cloned = reply_accum.clone();
         let on_piece = move |piece: &str| {
-          if interrupted {
-            return;
-          }
           if piece.is_empty() {
             return;
           }
@@ -617,7 +627,6 @@ async fn get_response(
   messages: Vec<ChatMessage>,
   agent: &crate::config::AgentSettings,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-  let (_stop_tx, stop_rx) = crossbeam_channel::unbounded::<()>();
   let interrupt_counter = Arc::new(AtomicU64::new(0));
   let mut result = String::new();
   let mut on_piece = |piece: &str| {
@@ -766,7 +775,71 @@ fn handle_interruption(interrupt_counter: &Arc<AtomicU64>, current: u64) -> bool
   }
 }
 
+fn handle_undo(
+  state: &AppState,
+  tx_ui: &Sender<String>,
+  conversation_history: &ConversationHistory,
+  interrupt_counter: &Arc<AtomicU64>,
+  stop_play_tx: &Sender<()>,
+  settings: &crate::config::AgentSettings,
+) {
+  // Check if this undo was triggered during an ongoing response
+  // (keyboard thread sets this flag and increments the interrupt counter)
+  let was_interrupted = state.undo_pending.swap(false, Ordering::SeqCst);
+
+  // If a response was in progress, interrupt it (same as Esc)
+  if was_interrupted {
+    // Remove partial assistant message if present
+    let mut h = conversation_history.lock().unwrap();
+    if let Some(last) = h.last() {
+      if last.role == "assistant" {
+        h.pop();
+      }
+    }
+    drop(h);
+    // Reset processing flag after interrupt
+    state.processing_response.store(false, Ordering::Relaxed);
+    interrupt_counter.fetch_add(1, Ordering::SeqCst);
+    let _ = stop_play_tx.try_send(());
+    let _ = tx_ui.send("user_interrupt_show|".to_string());
+    // The interrupted response was NOT saved to history (interrupt check in streaming code),
+    // so we do NOT pop — the user message that triggered it stays.
+  } else {
+    // No ongoing response: remove the last message from history
+    let mut h = conversation_history.lock().unwrap();
+    h.pop();
+    drop(h);
+  }
+
+  // Clear and re-render history
+  let _ = tx_ui.send("redraw_full_history|".to_string());
+  let _ = tx_ui.send("line|\n\x1b[32m✨ Last message reverted \x1b[0m\n".to_string());
+
+  // Persist conversation after undo
+  perform_save(&conversation_history, settings);
+}
+
 /// Handle a single conversation reply when debate mode is disabled
+// Helper to push or update last assistant message
+fn push_or_update_last_assistant(
+  conversation_history: &ConversationHistory,
+  new_piece: &str,
+  agent_name: &str,
+) {
+  let mut hist = conversation_history.lock().unwrap();
+  if let Some(last) = hist.last_mut() {
+    if last.role == "assistant" {
+      last.content.push_str(new_piece);
+      return;
+    }
+  }
+  hist.push(ChatMessage {
+    role: "assistant".to_string(),
+    content: new_piece.to_string(),
+    agent_name: Some(agent_name.to_string()),
+  });
+}
+
 fn handle_reply(
   state: &AppState,
   settings: &crate::config::AgentSettings,
@@ -789,12 +862,17 @@ fn handle_reply(
   let reply_accum = Arc::new(Mutex::new(String::new()));
   let originals = apply_agent_settings(state, settings);
   let mut first_phrase_sent = false;
+  let assistant_name = settings.name.clone();
+  let assistant_name_for_closure = assistant_name.clone();
+  let interrupt_counter_clone = interrupt_counter.clone();
+  let my_interrupt_clone = my_interrupt;
   let mut on_piece = {
     let speaker_arc = speaker_arc.clone();
     let reply_accum = reply_accum.clone();
     let tts_tx = tts_tx.clone();
     let tx_ui = tx_ui.clone();
     let voice = settings.voice.clone();
+    let conversation_history = conversation_history.clone();
     move |piece: &str| {
       if piece.is_empty() {
         return;
@@ -803,12 +881,17 @@ fn handle_reply(
       if let Ok(mut acc) = reply_accum.lock() {
         acc.push_str(piece);
       }
-      // Buffer via speaker
-      let mut speaker = speaker_arc.lock().unwrap();
-      if let Some(phrase) = speaker.push_text(piece) {
+      // Buffer via speaker and get phrase (if delimiter reached)
+      let phrase = {
+        let mut speaker = speaker_arc.lock().unwrap();
+        speaker.push_text(piece)
+      };
+      if let Some(ref phrase) = phrase {
+        // First phrase: push new assistant message to history
+        push_or_update_last_assistant(&conversation_history, piece, &assistant_name);
         // UI
         if !first_phrase_sent {
-          let label = format!("\x1b[48;5;22;37m{}:\x1b[0m", settings.name);
+          let label = format!("\x1b[48;5;22;37m{}:\x1b[0m", assistant_name);
           let _ = tx_ui.send("line|".to_string());
           let _ = tx_ui.send(format!("line|{}", label));
           first_phrase_sent = true;
@@ -818,6 +901,12 @@ fn handle_reply(
         // TTS
         let _ = tts_tx.send((phrase.clone(), my_interrupt, voice.clone()));
         let _ = tts_done_rx.recv();
+      }
+      // If interrupted, flush any remaining buffered text into history
+      if interrupt_counter_clone.load(Ordering::SeqCst) != my_interrupt_clone {
+        if let Some(rem) = speaker_arc.lock().unwrap().flush() {
+          push_or_update_last_assistant(&conversation_history, &rem, &assistant_name);
+        }
       }
     }
   };
@@ -842,6 +931,12 @@ fn handle_reply(
     let _ = tts_tx.send((last_phrase.clone(), my_interrupt, settings.voice.clone()));
     let _ = tx_ui.send(format!("stream|{}", last_phrase));
     let _ = tx_ui.send("line|".to_string());
+    // Append any remaining buffered text to history
+    push_or_update_last_assistant(
+      &conversation_history,
+      &last_phrase,
+      &assistant_name_for_closure,
+    );
   }
 
   // Final reply string
@@ -851,15 +946,16 @@ fn handle_reply(
     acc.clear();
     cloned
   };
-
-  if !reply.is_empty() {
-    conversation_history.lock().unwrap().push(ChatMessage {
-      role: "assistant".to_string(),
-      content: reply.clone(),
-      agent_name: Some(settings.name.clone()),
-    });
-    perform_save(&conversation_history, settings);
+  // If interrupted, flush any remaining buffered text to history
+  if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
+    if let Some(rem) = speaker_arc.lock().unwrap().flush() {
+      push_or_update_last_assistant(&conversation_history, &rem, &assistant_name_for_closure);
+    }
   }
+
+  // Persist conversation after streaming
+  perform_save(&conversation_history, settings);
+
   // Restore settings and wait playback
   restore_agent_settings(state, originals);
   wait_for_playback(state, &interrupt_counter, my_interrupt);

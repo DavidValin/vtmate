@@ -26,6 +26,7 @@ mod stt;
 mod tts;
 mod ui;
 mod util;
+use crate::conversation::Command;
 
 static START_INSTANT: OnceLock<Instant> = OnceLock::new();
 
@@ -34,7 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
   // Force quiet mode if stdin is not a terminal and input is read from pipe
   let stdin_is_tty = std::io::stdin().is_terminal();
-  if (args.read_file.as_deref() == Some("-") || args.prompt_file.as_deref() == Some("-")) {
+  if args.read_file.as_deref() == Some("-") || args.prompt_file.as_deref() == Some("-") {
     if !stdin_is_tty {
       // in stdin mode keyword poll doesn't work, therefore force quiet mode
       args.quiet = true;
@@ -45,7 +46,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
   // Ctrl-C handler to set should_exit flag
   let should_exit = Arc::new(std::sync::atomic::AtomicBool::new(false));
-  let should_exit_clone = should_exit.clone();
   ctrlc::set_handler(move || {
     crate::util::terminate(0);
   })
@@ -198,6 +198,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (tx_tts, rx_tts) = unbounded::<(String, u64, String)>();
     let (tts_done_tx, tts_done_rx) = crossbeam_channel::unbounded();
     let (stop_play_tx, stop_play_rx) = unbounded::<()>();
+    // Command channel for undo
+    let (tx_cmd_conv, _rx_cmd_conv) = unbounded::<Command>();
 
     let interrupt_counter = app_state.interrupt_counter.clone();
 
@@ -248,9 +250,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let txt_path = read_dir.join(format!("{}.txt", base_name));
     let wav_tx = audio::init_wav_writer(&wav_path);
     playback::set_wav_tx(wav_tx.clone());
-    // Write txt after loop
 
-    let play_handle = thread::spawn({
+    let _play_handle = thread::spawn({
       let playback_active = playback_active.clone();
       let gate_until_ms = gate_until_ms.clone();
       let paused = paused.clone();
@@ -347,6 +348,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
           stop_play_tx,
           interrupt_counter,
           Some(read_file_mode),
+          tx_cmd_conv,
         )
       }
     });
@@ -594,9 +596,15 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let ui = state.ui.clone();
   let mut initial_prompt: Option<String> = None;
   let status_line = state.status_line.clone();
+  let conversation_history = state.conversation_history.clone();
 
   // Start UI thread
-  let ui_handle = ui::spawn_ui_thread(ui.clone(), status_line.clone(), rx_ui);
+  let ui_handle = ui::spawn_ui_thread(
+    ui.clone(),
+    status_line.clone(),
+    rx_ui,
+    conversation_history.clone(),
+  );
 
   // interrupt counter
   let _interrupt_counter = state.interrupt_counter.clone();
@@ -606,6 +614,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   // Clones for threads
   let tx_ui_for_keyboard = tx_ui.clone();
   let (stop_play_tx, stop_play_rx) = unbounded::<()>(); // stop playback signal
+  let (tx_cmd_conv, rx_cmd_conv) = unbounded::<Command>(); // command channel for undo
 
   // Resolve Whisper model path and log it
   let whisper_path = config::resolved_whisper_model_path(&settings.whisper_model_path);
@@ -711,8 +720,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let paused = state.playback.paused.clone();
   let playback_active = state.playback.playback_active.clone();
   let gate_until_ms = state.playback.gate_until_ms.clone();
-  let volume = state.playback.volume.clone();
   let conversation_history = state.conversation_history.clone();
+  let volume = state.playback.volume.clone();
   let volume_play = volume.clone();
   let volume_rec = volume.clone();
 
@@ -838,6 +847,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       tx_tts_for_conv.clone(),
       tts_done_rx_for_conv.clone(),
       stop_play_tx_conv,
+      rx_cmd_conv,
       init_prompt_for_conv,
       args.quiet,
       args.save,
@@ -856,6 +866,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       stop_play_tx_for_key.clone(),
       interrupt_counter.clone(),
       None, // No read-file mode
+      tx_cmd_conv,
     );
   });
 

@@ -2,7 +2,7 @@
 //  OpenTTS tts
 // ------------------------------------------------------------------
 
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::{Sender};
 use reqwest;
 use std::io::{BufReader, Read};
 use std::sync::{
@@ -85,10 +85,7 @@ pub const DEFAULT_OPENTTS_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
 
 fn read_exact_in_chunks<R: Read>(
   reader: &mut R,
-  total: usize,
-  interrupt_counter: &Arc<AtomicU64>,
-
-  expected_interrupt: u64,
+  total: usize
 ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
   let mut remaining = total;
   let mut buf = vec![0u8; 8192];
@@ -223,9 +220,7 @@ fn stream_wav16le_over_http(
       // Read all PCM data first
       let pcm = match read_exact_in_chunks(
         &mut reader,
-        remaining,
-        &interrupt_counter,
-        expected_interrupt,
+        remaining
       ) {
         Ok(v) => v,
         Err(e) => return Err(e),

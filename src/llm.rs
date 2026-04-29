@@ -3,7 +3,6 @@
 // ------------------------------------------------------------------
 
 use bytes::Bytes;
-use crossbeam_channel::Receiver;
 use futures_util::StreamExt;
 use reqwest::StatusCode;
 use serde_json::json;
@@ -117,7 +116,7 @@ pub async fn llama_server_stream_response_into(
       }
     };
 
-    let resp = match tokio::time::timeout(std::time::Duration::from_secs(10), req.send()).await {
+    let resp = match tokio::time::timeout(std::time::Duration::from_secs(120), req.send()).await {
       Ok(Ok(r)) => r,
       Ok(Err(e)) => {
         last_err = Some(format!("Request to {} failed: {}", url, e));
