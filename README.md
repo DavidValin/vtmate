@@ -235,7 +235,7 @@ vtmate --debate "Unix administrator" "Security Expert" -i prompt.txt --ptt true
 * When running in PTT mode: keep `SPACE` pushed while talking, and then release
 * You can also start/stop a debate from conversation mode by pressing `Control+D` and picking the debate agents.
 * Be able to save the conversation in a wav and text file by adding `-s` option. It will save it in `~/.vtmate/conversations` folder
-* [Here is an example](https://gist.github.com/DavidValin/3a69fed9d1b6493b302a076c38135d45) on how to create automated audio debates from youtube videos using vtmate in combination with other tools
+* [Here is an example](https://gist.github.com/DavidValin/58cf130c4f7b2ea9a6a033bf37bc1cda) on how to create automated audio debates from youtube videos using vtmate in combination with other tools
 
 ### Quiet mode
 
