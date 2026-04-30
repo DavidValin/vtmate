@@ -4,7 +4,7 @@
 
 use super::{KOKORO_ENGINE, SpeakOutcome};
 use crate::audio::AudioChunk;
-use crossbeam_channel::{Sender};
+use crossbeam_channel::Sender;
 use kokoro_micro::TtsEngine;
 use std::sync::{
   Arc, Mutex,

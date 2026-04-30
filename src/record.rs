@@ -4,13 +4,13 @@
 
 use crate::START_INSTANT;
 use cpal::traits::{DeviceTrait, StreamTrait};
-use crossbeam_channel::{Sender};
+use crossbeam_channel::Sender;
 use std::sync::OnceLock;
 use std::sync::{
   Arc, Mutex,
   atomic::{AtomicBool, AtomicU64, Ordering},
 };
-use std::time::{Instant};
+use std::time::Instant;
 
 // API
 // ------------------------------------------------------------------

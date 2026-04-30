@@ -189,15 +189,6 @@ pub fn spawn_ui_thread(
               };
               handle_line_message(
                 &mut out,
-                "\n",
-                &mut buffer,
-                &mut ui_state,
-                &spinner,
-                &status_line,
-                &mut bottom_bar,
-              );
-              handle_line_message(
-                &mut out,
                 role_label,
                 &mut buffer,
                 &mut ui_state,

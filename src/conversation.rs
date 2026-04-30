@@ -234,50 +234,64 @@ pub fn conversation_thread(
           crate::log::log("debug", "Debate interrupted, waiting for user input");
         }
 
-        // Check for user input with short timeout
-        let user_input_result = rx_utt.recv_timeout(std::time::Duration::from_millis(100));
+        // Check for user input or undo command with short timeout
+        let mut got_undo = false;
+        select! {
+          recv(rx_utt) -> utt_result => {
+            if let Ok(utt) = utt_result {
+              // User provided input - process it
+              let state = GLOBAL_STATE.get().expect("AppState not initialized");
+              state.conversation_paused.store(false, Ordering::Relaxed);
+              // Resume debate if it was paused
+              state.debate_paused.store(false, Ordering::SeqCst);
+              state.processing_response.store(true, Ordering::Relaxed);
 
-        if let Ok(utt) = user_input_result {
-          // User provided input - process it
-          let state = GLOBAL_STATE.get().expect("AppState not initialized");
-          state.conversation_paused.store(false, Ordering::Relaxed);
-          // Resume debate if it was paused
-          state.debate_paused.store(false, Ordering::SeqCst);
-          state.processing_response.store(true, Ordering::Relaxed);
+              // Apply settings of the agent that will respond next
+              let debate_agents = state.debate_agents.lock().unwrap().clone();
+              let turn = state.debate_turn.load(Ordering::SeqCst) as usize;
+              let agent_count = debate_agents.len();
+              let next_agent = &debate_agents[turn % agent_count];
+              let _ = apply_agent_settings(state, next_agent);
 
-          // Apply settings of the agent that will respond next
-          let debate_agents = state.debate_agents.lock().unwrap().clone();
-          let turn = state.debate_turn.load(Ordering::SeqCst) as usize;
-          let agent_count = debate_agents.len();
-          let next_agent = &debate_agents[turn % agent_count];
-          let _ = apply_agent_settings(state, next_agent);
+              let _pcm_f32: Vec<f32> = utt.data.clone();
+              let mono_f32 = crate::audio::convert_to_mono(&utt);
 
-          let _pcm_f32: Vec<f32> = utt.data.clone();
-          let mono_f32 = crate::audio::convert_to_mono(&utt);
+              let user_text = crate::stt::whisper_transcribe_with_ctx(
+                &ctx,
+                &mono_f32,
+                utt.sample_rate,
+                &state.language.lock().unwrap(),
+              )?;
+              let user_text = user_text.trim().to_string();
 
-          let user_text = crate::stt::whisper_transcribe_with_ctx(
-            &ctx,
-            &mono_f32,
-            utt.sample_rate,
-            &state.language.lock().unwrap(),
-          )?;
-          let user_text = user_text.trim().to_string();
+              if !user_text.is_empty() {
+                // Clear STOP_STREAM flag to ensure user text displays fully
+                crate::ui::STOP_STREAM.store(false, Ordering::Relaxed);
+                send_user_message_ui(&tx_ui, &user_text, true);
+                push_user_message(&conversation_history, &user_text);
+                perform_save(&conversation_history, &settings_clone);
 
-          if !user_text.is_empty() {
-            // Clear STOP_STREAM flag to ensure user text displays fully
-            crate::ui::STOP_STREAM.store(false, Ordering::Relaxed);
-            send_user_message_ui(&tx_ui, &user_text, true);
-            push_user_message(&conversation_history, &user_text);
-            perform_save(&conversation_history, &settings_clone);
-
-            // Store user message for next agent to respond to
-            pending_user_msg = Some(user_text.clone());
-            debate_interrupted = false;
-            state
-              .playback
-              .playback_active
-              .store(false, Ordering::Relaxed);
+                // Store user message for next agent to respond to
+                pending_user_msg = Some(user_text.clone());
+                debate_interrupted = false;
+                state
+                  .playback
+                  .playback_active
+                  .store(false, Ordering::Relaxed);
+              }
+              continue;
+            }
           }
+          recv(rx_cmd) -> cmd_result => {
+            if let Ok(Command::Undo) = cmd_result {
+              handle_undo(state, &tx_ui, &conversation_history, &interrupt_counter, &stop_play_tx, &settings);
+              got_undo = true;
+            }
+          }
+          default(std::time::Duration::from_millis(100)) => {}
+        }
+
+        if got_undo {
           continue;
         }
 
@@ -383,15 +397,15 @@ pub fn conversation_thread(
     }
 
     select! {
-       recv(rx_cmd) -> cmd => {
-         if let Ok(command) = cmd {
-           match command {
-             Command::Undo => {
-                handle_undo(state, &tx_ui, &conversation_history, &interrupt_counter, &stop_play_tx, &settings);
-              }
-           }
-         }
-       }
+      recv(rx_cmd) -> cmd => {
+        if let Ok(command) = cmd {
+          match command {
+            Command::Undo => {
+              handle_undo(state, &tx_ui, &conversation_history, &interrupt_counter, &stop_play_tx, &settings);
+            }
+          }
+        }
+      }
       recv(rx_utt) -> msg => {
         //  –––––––––––––––––––––––––––––––––––––
         //   user audio input handler
@@ -482,6 +496,9 @@ pub fn conversation_thread(
         let ui_thinking_cloned_for_closure = ui.thinking.clone();
         // clones for closure
         let ui_thinking_for_closure = ui_thinking_cloned_for_closure.clone();
+        // Capture conversation history and assistant name for history updates
+        let conv_hist_for_closure = conversation_history.clone();
+        let assistant_name_for_closure = settings_clone.name.clone();
 
         // called on every chunk received from llm
         let voice_for_tts = state.voice.lock().unwrap().clone();
@@ -523,6 +540,9 @@ pub fn conversation_thread(
             ui_piece.push(' ');
           }
           let _ = tx_ui_cloned_for_closure.send(format!("stream|{}", ui_piece));
+
+          // Update conversation history with this piece (same as handle_reply does)
+          push_or_update_last_assistant(&conv_hist_for_closure, piece, &assistant_name_for_closure);
         };
 
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
@@ -595,24 +615,13 @@ pub fn conversation_thread(
             acc.push_str(&last_phrase);
             acc.push(' ');
           }
-          // send to TTS
+        // send to TTS
           let mut cleaned = crate::util::strip_special_chars(&last_phrase);
           cleaned.push(' ');
           let _ = tts_tx_for_after.send((cleaned, my_interrupt, voice_for_tts_for_after.clone()));
         }
-        {
-          // Retrieve and clear the accumulated reply
-          let acc_clone = {
-            let mut acc = reply_accum.lock().unwrap();
-            let cloned = acc.clone();
-            acc.clear();
-            cloned
-          };
-          if !acc_clone.is_empty() {
-            conversation_history.lock().unwrap().push(ChatMessage{role:"assistant".to_string(), content:acc_clone, agent_name:Some(settings.name.clone())});
-            perform_save(&conversation_history, &settings_clone);
-          }
-        }
+        // Persist conversation after streaming (same as handle_reply does at line 970)
+        perform_save(&conversation_history, &settings_clone);
       }
     }
   }
@@ -860,12 +869,23 @@ fn handle_reply(
   // Speaker for incremental buffering
   let speaker_arc = Arc::new(Mutex::new(PhraseSpeaker::new()));
   let reply_accum = Arc::new(Mutex::new(String::new()));
+  // Pre-add assistant placeholder to history for label display
+  conversation_history.lock().unwrap().push(ChatMessage {
+    role: "assistant".to_string(),
+    content: "".to_string(),
+    agent_name: Some(settings.name.clone()),
+  });
   let originals = apply_agent_settings(state, settings);
-  let mut first_phrase_sent = false;
   let assistant_name = settings.name.clone();
   let assistant_name_for_closure = assistant_name.clone();
   let interrupt_counter_clone = interrupt_counter.clone();
   let my_interrupt_clone = my_interrupt;
+
+  // render assistant label
+  let label = format!("\x1b[48;5;22;37m{}:\x1b[0m", assistant_name);
+  let _ = tx_ui.send("line|".to_string());
+  let _ = tx_ui.send(format!("line|{}", label));
+
   let mut on_piece = {
     let speaker_arc = speaker_arc.clone();
     let reply_accum = reply_accum.clone();
@@ -877,6 +897,9 @@ fn handle_reply(
       if piece.is_empty() {
         return;
       }
+      // Keep the partial reply in history while streaming, so the history can be
+      // rendered in real‑time
+      push_or_update_last_assistant(&conversation_history, piece, &assistant_name);
       // Accumulate reply
       if let Ok(mut acc) = reply_accum.lock() {
         acc.push_str(piece);
@@ -887,24 +910,15 @@ fn handle_reply(
         speaker.push_text(piece)
       };
       if let Some(ref phrase) = phrase {
-        // First phrase: push new assistant message to history
-        push_or_update_last_assistant(&conversation_history, piece, &assistant_name);
-        // UI
-        if !first_phrase_sent {
-          let label = format!("\x1b[48;5;22;37m{}:\x1b[0m", assistant_name);
-          let _ = tx_ui.send("line|".to_string());
-          let _ = tx_ui.send(format!("line|{}", label));
-          first_phrase_sent = true;
-        }
         let _ = tx_ui.send(format!("stream|{}", phrase));
         let _ = tx_ui.send("line|".to_string());
         // TTS
         let _ = tts_tx.send((phrase.clone(), my_interrupt, voice.clone()));
         let _ = tts_done_rx.recv();
       }
-      // If interrupted, flush any remaining buffered text into history
       if interrupt_counter_clone.load(Ordering::SeqCst) != my_interrupt_clone {
         if let Some(rem) = speaker_arc.lock().unwrap().flush() {
+          // Prevents the partially‑generated text from being lost when the user interrupts
           push_or_update_last_assistant(&conversation_history, &rem, &assistant_name);
         }
       }
@@ -923,6 +937,8 @@ fn handle_reply(
   if let Err(e) = stream_result {
     crate::log::log("error", &format!("Streaming error: {}", e));
     restore_agent_settings(state, originals);
+    // Persist conversation on interruption
+    perform_save(&conversation_history, settings);
     return None;
   }
 
@@ -931,7 +947,8 @@ fn handle_reply(
     let _ = tts_tx.send((last_phrase.clone(), my_interrupt, settings.voice.clone()));
     let _ = tx_ui.send(format!("stream|{}", last_phrase));
     let _ = tx_ui.send("line|".to_string());
-    // Append any remaining buffered text to history
+    // Add the final, un‑puncuated fragment to the history
+    // (handles replies that end without a punctuation mark or newline)
     push_or_update_last_assistant(
       &conversation_history,
       &last_phrase,
@@ -949,6 +966,10 @@ fn handle_reply(
   // If interrupted, flush any remaining buffered text to history
   if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
     if let Some(rem) = speaker_arc.lock().unwrap().flush() {
+      // Flushes any remaining buffered text if the user interrupted
+      // after streaming but before the conversation was saved
+      // (covers the edge‑case where the user hits Esc right after the stream ends
+      // but before the conversation file is written )
       push_or_update_last_assistant(&conversation_history, &rem, &assistant_name_for_closure);
     }
   }
@@ -1218,42 +1239,43 @@ pub fn save_conversation(
   }
 
   if let Some(meta) = metadata {
-    content.push_str("\n\n___________________________________________________________________\n");
+    content.push_str("\n\n##########################################\n");
     content.push_str("\n");
     if meta.is_debate {
-      content.push_str(" This was a conversation between ai agents\n\n");
+      content.push_str(" This was a conversation between:\n");
       if meta.agents.len() >= 2 {
         let a1 = &meta.agents[0];
         let a2 = &meta.agents[1];
-        content.push_str(&format!(
-          " Participants:\t\t'{}' and '{}'\n\n",
-          a1.name, a2.name
-        ));
-        content.push_str(" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n");
-        content.push_str(&format!("  Agent name:\t\t{}\n", a1.name));
-        content.push_str(&format!("  Agent TTS:\t\t{}\n\n", a1.tts));
-        content.push_str(&format!("  Agent model:\t\t{}\n", a1.model));
-        content.push_str(&format!("  Agent voice:\t\t{}\n", a1.voice));
-        content.push_str(&format!("  Agent system prompt:\t{}\n", a1.system_prompt));
-        content.push_str(" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n");
-        content.push_str(&format!("  Agent name:\t\t{}\n", a2.name));
-        content.push_str(&format!("  Agent TTS:\t\t{}\n", a2.tts));
-        content.push_str(&format!("  Agent model:\t\t{}\n", a2.model));
-        content.push_str(&format!("  Agent voice:\t\t{}\n", a2.voice));
-        content.push_str(&format!("  Agent system prompt:\t{}\n", a2.system_prompt));
+        content.push_str(&format!(" user, '{}' and '{}'\n\n", a1.name, a2.name));
+        content.push_str("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
+        content.push_str(&format!("  Agent name:          {}\n", a1.name));
+        content.push_str(&format!("  Agent TTS:           {}\n", a1.tts));
+        content.push_str(&format!("  Agent model:         {}\n", a1.model));
+        content.push_str(&format!("  Agent voice:         {}\n", a1.voice));
+        content.push_str(&format!("  Agent system prompt: {}\n", a1.system_prompt));
+        content.push_str("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
+        content.push_str(&format!("  Agent name:          {}\n", a2.name));
+        content.push_str(&format!("  Agent TTS:           {}\n", a2.tts));
+        content.push_str(&format!("  Agent model:         {}\n", a2.model));
+        content.push_str(&format!("  Agent voice:         {}\n", a2.voice));
+        content.push_str(&format!("  Agent system prompt: {}\n", a2.system_prompt));
       }
     } else if let Some(agent) = meta.agents.first() {
       content.push_str(" This conversation was a conversation between a user and an ai agent\n\n");
-      content.push_str(" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n");
-      content.push_str(&format!("  Agent name:\t\t{}\n", agent.name));
-      content.push_str(&format!("  Agent TTS:\t\t{}\n", agent.tts));
-      content.push_str(&format!("  Agent model:\t\t{}\n", agent.model));
-      content.push_str(&format!("  Agent voice:\t\t{}\n", meta.voice));
-      content.push_str(&format!("  Agent system prompt:\t{}\n", meta.system_prompt));
+      content.push_str("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
+      content.push_str(&format!("  Agent name:            {}\n", agent.name));
+      content.push_str(&format!("  Agent TTS:             {}\n", agent.tts));
+      content.push_str(&format!("  Agent model:           {}\n", agent.model));
+      content.push_str(&format!("  Agent voice:           {}\n", meta.voice));
+      content.push_str(&format!(
+        "  Agent system prompt:   {}\n",
+        meta.system_prompt
+      ));
     }
-    content.push_str("\n ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n");
-    content.push_str(&format!("  * Date: {}\n", meta.start_date));
-    content.push_str("  * Created with vtmate - www.github.com/DavidValin/vtmate\n");
+    content.push_str("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\n");
+    content.push_str(&format!("  - Date: {}\n", meta.start_date));
+    content.push_str("  - Created with vtmate - www.github.com/DavidValin/vtmate\n\n");
+    content.push_str("##########################################\n");
   }
 
   fs::write(filepath, content)?;

@@ -18,7 +18,8 @@ use std::path::PathBuf;
 use std::process;
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicU64;
-use std::time::Instant;
+use std::thread;
+use std::time::{Duration, Instant};
 
 /// Global timestamp of last speech end (in ms since program start).
 pub static SPEECH_END_AT: AtomicU64 = AtomicU64::new(0);
@@ -218,5 +219,6 @@ pub fn terminate(code: i32) -> ! {
     Show
   );
   stdout.flush().ok();
+  thread::sleep(Duration::from_millis(100));
   process::exit(code);
 }
