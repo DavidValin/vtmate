@@ -209,6 +209,8 @@ pub fn _strip_ansi(s: &str) -> String {
 }
 
 pub fn terminate(code: i32) -> ! {
+   // Disable raw mode if enabled, to restore terminal state
+   let _ = crossterm::terminal::disable_raw_mode();
   // show cursor and clear bottom line before exiting
   let mut stdout = std::io::stdout();
   let (_cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
