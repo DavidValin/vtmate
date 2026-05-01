@@ -2,6 +2,7 @@
 //  Keyboard handling
 // ------------------------------------------------------------------
 
+use crate::conversation::Command;
 use crate::state::{GLOBAL_STATE, decrease_voice_speed, increase_voice_speed};
 use crossbeam_channel::Sender;
 use crossterm::{
@@ -35,6 +36,7 @@ pub fn keyboard_thread(
   interrupt_counter: Arc<AtomicU64>,
   // Optional parameters for read-file mode
   read_file_mode: Option<ReadFileMode>,
+  tx_cmd: Sender<Command>,
 ) {
   // Raw mode lets us capture single key presses (space to pause/resume).
   let mut last_esc: Option<Instant> = None;
@@ -173,6 +175,42 @@ pub fn keyboard_thread(
           }
         }
 
+        // Undo key handling ('u' to undo last response)
+        if k.code == KeyCode::Char('u')
+          && !state.debate_modal_visible.load(Ordering::SeqCst)
+          && k.kind == KeyEventKind::Press
+        {
+          // If a response is currently being processed, cancel undo
+          if state.processing_response.load(Ordering::Relaxed) {
+            continue;
+          }
+          // Interrupt TTS
+          interrupt_counter.fetch_add(1, Ordering::SeqCst);
+          thread::sleep(Duration::from_millis(10));
+          // Ensure we also stop any ongoing playback first
+          let _ = stop_play_tx.try_send(());
+          // If a response is in progress, interrupt it first
+          if state.processing_response.load(Ordering::Relaxed) {
+            if !state.undo_pending.load(Ordering::SeqCst) {
+              state.undo_pending.store(true, Ordering::SeqCst);
+              // If debate is active, pause it
+              if state.debate_enabled.load(Ordering::SeqCst) {
+                if !state.debate_paused.load(Ordering::SeqCst) {
+                  state.debate_paused.store(true, Ordering::SeqCst);
+                  // send UI
+                  let _ = tx_ui.send(
+                    "line|\n\x1b[32m🚩 Debate paused, speak again to continue \x1b[0m\n"
+                      .to_string(),
+                  );
+                }
+              }
+            }
+          }
+          // Send undo command
+          let _ = tx_cmd.send(Command::Undo);
+          continue;
+        }
+
         // Handle modal keyboard navigation
         let modal_visible = state.debate_modal_visible.load(Ordering::SeqCst);
         if modal_visible {
@@ -296,10 +334,14 @@ pub fn keyboard_thread(
             }
           }
           KeyCode::Esc => {
-            // Immediately abort any ongoing TTS/LLM by incrementing interrupt counter
-            interrupt_counter.fetch_add(1, Ordering::SeqCst);
-            // pause debate if active
             let state = GLOBAL_STATE.get().expect("AppState not initialized");
+            // Interrupt LLM/TTS
+            interrupt_counter.fetch_add(1, Ordering::SeqCst);
+            thread::sleep(Duration::from_millis(10));
+            // Ensure we also stop any ongoing playback first
+            let _ = stop_play_tx.try_send(());
+            thread::sleep(Duration::from_millis(10));
+            state.processing_response.store(false, Ordering::Relaxed);
             if state.debate_enabled.load(Ordering::SeqCst) {
               // only send the message once when we transition from running to paused
               if !state.debate_paused.load(Ordering::SeqCst) {
@@ -309,18 +351,10 @@ pub fn keyboard_thread(
                 );
               }
             }
-            thread::sleep(Duration::from_millis(10));
-            let _ = stop_play_tx.try_send(());
             let now = Instant::now();
             if let Some(prev) = last_esc {
               // double ESC stops playback and resets conversation
               if now.duration_since(prev) <= Duration::from_millis(1000) {
-                // flag that we are waiting for next LLM response
-                GLOBAL_STATE
-                  .get()
-                  .unwrap()
-                  .processing_response
-                  .store(true, Ordering::Relaxed);
                 last_esc = None;
                 state.reset_conversation();
                 let _ = tx_ui.send("line|".to_string());

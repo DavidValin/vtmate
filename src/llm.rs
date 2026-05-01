@@ -3,7 +3,6 @@
 // ------------------------------------------------------------------
 
 use bytes::Bytes;
-use crossbeam_channel::Receiver;
 use futures_util::StreamExt;
 use reqwest::StatusCode;
 use serde_json::json;

@@ -263,8 +263,6 @@ pub fn playback_thread(
     other => return Err(format!("unsupported output format: {other:?}").into()),
   };
 
-  // Outer loop to recreate stream on interrupt
-  let mut interrupted = false;
   loop {
     stream.play()?;
     // Reset state before each stream
@@ -278,12 +276,9 @@ pub fn playback_thread(
         recv(stop_play_rx) -> _ => {
           // Drain any pending audio chunks from rx_audio
           while let Ok(_) = rx_audio.try_recv() {}
-          // Clear queue immediately before pausing
+          // Clear queue immediately before stopping
           queue.lock().unwrap().clear();
-          // Stop current stream, drop it, and let outer loop recreate
-          stream.pause()?;
-          // Allow CPAL buffer to flush
-          std::thread::sleep(std::time::Duration::from_millis(10));
+          // Stop current stream immediately by dropping it; let outer loop recreate
           break;
         }
         recv(rx_audio) -> msg => {
@@ -306,10 +301,6 @@ pub fn playback_thread(
               sample_rate: config.sample_rate.0,
             };
             tx.send(writer_chunk).unwrap_or(());
-          }
-          if interrupted {
-            // Drop any audio received during interrupt
-            continue;
           }
           let channels = out_channels as usize;
           let max_samples = crate::tts::QUEUE_CAP_FRAMES * channels;
@@ -346,7 +337,6 @@ pub fn playback_thread(
       }
     }
   }
-  Ok(())
 }
 
 // PRIVATE

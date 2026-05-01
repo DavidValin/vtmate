@@ -63,6 +63,7 @@ pub struct AppState {
   pub debate_modal_focus: Arc<Mutex<u8>>, // 0 = agent1, 1 = agent2, 2 = confirm
   pub save_path: Arc<Mutex<Option<std::path::PathBuf>>>,
   pub start_date: Arc<Mutex<String>>,
+  pub undo_pending: Arc<AtomicBool>,
 }
 
 impl AppState {
@@ -113,6 +114,7 @@ impl AppState {
       debate_modal_focus: Arc::new(Mutex::new(0)),
       save_path: Arc::new(Mutex::new(None)),
       start_date: Arc::new(Mutex::new(String::new())),
+      undo_pending: Arc::new(AtomicBool::new(false)),
     }
   }
 
@@ -152,11 +154,6 @@ impl AppState {
 pub fn get_speed() -> f32 {
   let state = GLOBAL_STATE.get().expect("AppState not initialized");
   state.speed.load(Ordering::Relaxed) as f32 / 10.0
-}
-
-pub fn get_voice() -> String {
-  let state = GLOBAL_STATE.get().expect("AppState not initialized");
-  state.voice.lock().unwrap().clone()
 }
 
 pub fn increase_voice_speed() {

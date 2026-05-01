@@ -18,7 +18,8 @@ use std::path::PathBuf;
 use std::process;
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicU64;
-use std::time::Instant;
+use std::thread;
+use std::time::{Duration, Instant};
 
 /// Global timestamp of last speech end (in ms since program start).
 pub static SPEECH_END_AT: AtomicU64 = AtomicU64::new(0);
@@ -208,9 +209,11 @@ pub fn _strip_ansi(s: &str) -> String {
 }
 
 pub fn terminate(code: i32) -> ! {
+   // Disable raw mode if enabled, to restore terminal state
+   let _ = crossterm::terminal::disable_raw_mode();
   // show cursor and clear bottom line before exiting
   let mut stdout = std::io::stdout();
-  let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
+  let (_cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
   let _ = execute!(
     stdout,
     MoveTo(0, rows.saturating_sub(1)),
@@ -218,5 +221,6 @@ pub fn terminate(code: i32) -> ! {
     Show
   );
   stdout.flush().ok();
+  thread::sleep(Duration::from_millis(100));
   process::exit(code);
 }
