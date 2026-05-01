@@ -353,6 +353,7 @@ end_silence_ms = "2000"
 ptt = "false"
 whisper_model_path = "~/.whisper-models/ggml-tiny.bin"
 voice_speed = 1.1
+tools = web_fetch
 "#;
 
   let mut file = File::create(&path).expect("Failed to create temp config file");
@@ -406,6 +407,7 @@ voice_speed = 1.1
   assert_eq!(agent.end_silence_ms, 2000);
   assert_eq!(agent.voice_speed, 1.1);
   assert_eq!(agent.whisper_model_path, "~/.whisper-models/ggml-tiny.bin");
+  assert_eq!(agent.tools, vec!["web_fetch".to_string()]);
 }
 
 #[test]
@@ -435,6 +437,7 @@ end_silence_ms = 2000
 ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 voice_speed = 1.1
+tools = web_fetch
 "#;
 
   let mut file = File::create(&path).expect("Failed to create temp config file");
@@ -488,6 +491,7 @@ voice_speed = 1.1
   assert_eq!(agent.end_silence_ms, 2000);
   assert_eq!(agent.voice_speed, 1.1);
   assert_eq!(agent.whisper_model_path, "~/.whisper-models/ggml-tiny.bin");
+  assert_eq!(agent.tools, vec!["web_fetch".to_string()]);
 }
 
 #[test]
