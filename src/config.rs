@@ -1496,6 +1496,12 @@ pub fn try_load_settings(
       errors.push(format!("Agent {}: {}", agent.name, e));
     }
 
+    if let Err(e) =
+      validate_tools(&agent.tools).map_err(|e: std::io::Error| -> Error { Error::new(e) })
+    {
+      errors.push(format!("Agent {}: {}", agent.name, e));
+    }
+
     agents.push(agent);
   }
 
@@ -1619,7 +1625,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 tools = web_fetch
 
 [agent]
-name = planner
+name = explainer
 language = en
 tts = supertonic3
 voice = F3
