@@ -169,6 +169,8 @@ All cli options:
   --help                                show help
 ```
 
+For quick reference get the printable [Quicksheet (PDF)](https://raw.githubusercontent.com/DavidValin/vtmate/refs/heads/main/docs/en/quicksheet.pdf)
+
 ### Conversation mode
 
 ![conversation mode](https://github.com/DavidValin/vtmate/raw/main/docs/en/diagrams/conversation-mode.png)
@@ -209,6 +211,8 @@ echo "How to fly without wings?" | vtmate -i -
 * You can switch agents in realtime by pressing `ARROW_LEFT` / `ARROW_RIGHT` keyword arrows (you need at least 2 agents defined in `~/vtmate/settings`).
 * You can change the voice speed by pressing `ARROW_UP` / `ARROW_DOWN`
 * Be able to save the conversation in a wav and text file by adding `-s` option. It will save it in `~/.vtmate/conversations` folder
+* For quick reference get the printable [Quicksheet (PDF)](https://raw.githubusercontent.com/DavidValin/vtmate/refs/heads/main/docs/en/quicksheet.pdf)
+
 
 ### Debate mode
 
@@ -240,6 +244,8 @@ vtmate --debate "Unix administrator" "Security Expert" -i prompt.txt --ptt true
 * Press double `u` to undo last response
 * You can also start/stop a debate from conversation mode by pressing `Control+D` and picking the debate agents.
 * Be able to save the conversation in a wav and text file by adding `-s` option. It will save it in `~/.vtmate/conversations` folder
+* For quick reference get the printable [Quicksheet (PDF)](https://raw.githubusercontent.com/DavidValin/vtmate/refs/heads/main/docs/en/quicksheet.pdf)
+
 
 ### Quiet mode
 
@@ -287,6 +293,7 @@ In this mode you can:
 * Move to previous phrase by pressing `ARROW_UP`
 * Move to next phrase by pressing `ARROW_DOWN`
 * Stop / Resume playback by pressing `SPACE`
+* For quick reference get the printable [Quicksheet (PDF)](https://raw.githubusercontent.com/DavidValin/vtmate/refs/heads/main/docs/en/quicksheet.pdf)
 
 ###  Separate agents
 
