@@ -311,6 +311,48 @@ And then load each as you need:
 vtmate -c philosophers.txt --debate "Aristoteles" "Ptahhotep" "how to achieve harmony?"
 ```
 
+###  Tools
+
+vtmate supports **dynamic HTTP request tools** — custom API call definitions loaded from JSON files. Each definition registers a new tool that the LLM can call.
+
+Create a JSON file in `~/.vtmate/tools/http_requests/` with this structure:
+
+```json
+{
+  "tool_definition": {
+    "name": "get_weather",
+    "description": "Get current weather for a city",
+    "parameters": {
+      "city": {
+        "type": "string",
+        "description": "City name"
+      },
+      "units": {
+        "type": "string",
+        "description": "Metric or imperial",
+        "default": "metric"
+      }
+    }
+  },
+  "tool_http_handler": {
+    "method": "GET",
+    "url": "https://api.weather.com/v1/forecast?city=PICK_FROM['city']&units=PICK_FROM['units']",
+    "headers": {
+      "Authorization": "Bearer your_api_key"
+    },
+    "body": {}
+  }
+}
+```
+
+The `tool_definition` provides the JSON schema for the LLM tool call. The `tool_http_handler` translates the LLM's call into an actual HTTP request — values can reference call arguments with `PICK_FROM['key']` template syntax. Parameters with a `default` are optional; all others are required.
+
+To enable a tool for an agent, add its name to the `tools` setting in `~/.vtmate/settings`:
+
+```ini
+tools = web_fetch, bash_command, search, get_weather
+```
+
 ###  Model files
 
 vtmate self contains (no need for manual installation) espeak-ng-data, the whisper tiny & small models, kokoro model and voices and supersonic2 model and voices which will be autoextracted from the binary when running vtmate if they are not found in next locations:

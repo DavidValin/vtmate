@@ -816,19 +816,27 @@ fn validate_voice_speed(value: f32) -> Result<(), std::io::Error> {
 }
 
 fn validate_tools(tools: &[String]) -> Result<(), std::io::Error> {
+  // Collect valid static tool names
+  let mut valid_tools: Vec<String> = vec![
+    "web_fetch".to_string(),
+    "bash_command".to_string(),
+    "search".to_string(),
+  ];
+  // Add dynamically loaded HTTP request tool names
+  for def in crate::tools::http_request::load_http_request_definitions() {
+    valid_tools.push(def.tool_definition.name);
+  }
+
   for tool in tools {
-    match tool.as_str() {
-      "web_fetch" => {}
-      "bash_command" => {}
-      _ => {
-        return Err(std::io::Error::new(
-          std::io::ErrorKind::Other,
-          format!(
-            "Unknown tool '{}'. Valid tools: web_fetch, bash_command",
-            tool
-          ),
-        ));
-      }
+    if !valid_tools.iter().any(|t| t == tool) {
+      return Err(std::io::Error::new(
+        std::io::ErrorKind::Other,
+        format!(
+          "Unknown tool '{}'. Valid tools: {}",
+          tool,
+          valid_tools.join(", ")
+        ),
+      ));
     }
   }
   Ok(())

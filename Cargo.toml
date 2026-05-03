@@ -44,6 +44,7 @@ encoding_rs = "0.8"
 encoding_rs_io = "0.1"
 chrono = "0.4.44"
 uuid = { version = "1.23.1", features = ["v4"] }
+regex = "1"
 
 [build-dependencies]
 sha2 = "0.10"
@@ -71,3 +72,5 @@ panic = "abort"
 strip = "symbols"
 incremental = false
 
+[dev-dependencies]
+httpmock = "0.6"
