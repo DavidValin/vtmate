@@ -74,7 +74,7 @@ impl Tool for BashCommandTool {
     }
   }
 
-  fn json_schema() -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+  fn json_schema(&self) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
     let cwd = std::env::current_dir()
       .map(|d| d.to_string_lossy().to_string())
       .unwrap_or_else(|_| "?".to_string());

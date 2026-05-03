@@ -504,6 +504,48 @@ Cloning does not train a model on the speaker: it searches for the `supertonic3`
 * **Accent** transfers only partly. `supertonic3` reads raw text with no phoneme layer, so pronunciation (vowel quality, `r`, `th`, ...) comes from the model's own rendering of each language and cannot be changed by the style. The speaker's melody and pacing carry over; their individual sounds do not. Clone from a recording in the language you will mostly synthesize, and the prosody will fit that language best.
 * **Expressive range** comes from coverage, not length: one clip pins down one delivery. Use `--refine-voice` with a different sentence (a question, an emphatic line) to widen it.
 
+###  Tools
+
+vtmate supports **dynamic HTTP request tools** — custom API call definitions loaded from JSON files. Each definition registers a new tool that the LLM can call.
+
+Create a JSON file in `~/.vtmate/tools/http_requests/` with this structure:
+
+```json
+{
+  "tool_definition": {
+    "name": "get_weather",
+    "description": "Get current weather for a city",
+    "parameters": {
+      "city": {
+        "type": "string",
+        "description": "City name"
+      },
+      "units": {
+        "type": "string",
+        "description": "Metric or imperial",
+        "default": "metric"
+      }
+    }
+  },
+  "tool_http_handler": {
+    "method": "GET",
+    "url": "https://api.weather.com/v1/forecast?city=PICK_FROM['city']&units=PICK_FROM['units']",
+    "headers": {
+      "Authorization": "Bearer your_api_key"
+    },
+    "body": {}
+  }
+}
+```
+
+The `tool_definition` provides the JSON schema for the LLM tool call. The `tool_http_handler` translates the LLM's call into an actual HTTP request — values can reference call arguments with `PICK_FROM['key']` template syntax. Parameters with a `default` are optional; all others are required.
+
+To enable a tool for an agent, add its name to the `tools` setting in `~/.vtmate/settings`:
+
+```ini
+tools = web_fetch, bash_command, search, get_weather
+```
+
 ###  Model files
 
 vtmate self contains (no need for manual installation) the whisper tiny & small models, kokoro model and voices, supertonic2 model and voices and supertonic3 (Supertonic 3) model and voices which will be autoextracted from the binary when running vtmate if they are not found in next locations:

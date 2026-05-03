@@ -1052,6 +1052,317 @@ fn push_or_update_last_assistant(
   });
 }
 
+fn remove_empty_placeholder(conversation_history: &ConversationHistory) {
+  let mut hist = conversation_history.lock().unwrap();
+  if let Some(last) = hist.last() {
+    if last.role == "assistant" && last.content.is_empty() {
+      hist.pop();
+    }
+  }
+}
+
+/// ReAct loop: sends messages to LLM with tools, executes tool calls, loops until final answer.
+/// If no tools are available, it streams directly with per-phrase TTS (simple reply).
+#[allow(dead_code)]
+fn react_loop(
+  state: &AppState,
+  settings: &crate::config::AgentSettings,
+  conversation_history: &ConversationHistory,
+  tx_ui: &Sender<String>,
+  tts_tx: &Sender<(String, u64, String)>,
+  tts_done_rx: &Receiver<()>,
+  rt: &tokio::runtime::Runtime,
+  interrupt_counter: &Arc<AtomicU64>,
+  mut user_msg: String,
+  available_tools: &[String],
+) -> Option<String> {
+  let system_prompt = settings.system_prompt.replace("\\n", "\n");
+  let assistant_name = settings.name.clone();
+  let assistant_name_for_closure = assistant_name.clone();
+  let my_interrupt = interrupt_counter.load(Ordering::SeqCst);
+  let has_tools = !available_tools.is_empty();
+
+  // Pre-add assistant placeholder for label
+  conversation_history.lock().unwrap().push(ChatMessage {
+    role: "assistant".to_string(),
+    content: "".to_string(),
+    agent_name: Some(assistant_name.clone()),
+  });
+
+  // Render assistant label once
+  let label = format!("\x1b[48;5;22;37m{}:\x1b[0m", assistant_name);
+  let _ = tx_ui.send("line|".to_string());
+  let _ = tx_ui.send(format!("line|{}", label));
+
+  let originals = apply_agent_settings(state, settings);
+
+  let system_prompt_clone = system_prompt.clone();
+  let mut messages =
+    create_full_context_messages(system_prompt_clone, user_msg.clone(), conversation_history);
+
+  let max_react_loop_iters = 20;
+  let mut react_loop_count = 0;
+
+  loop {
+    react_loop_count += 1;
+    if react_loop_count > max_react_loop_iters {
+      crate::log::log(
+        "error",
+        "react loop exceeded max iterations, forcing final response",
+      );
+      // Remove empty assistant placeholder if still empty
+      remove_empty_placeholder(&conversation_history);
+      restore_agent_settings(state, originals);
+      perform_save(&conversation_history, settings);
+      return Some("Lo siento, no pude completar la solicitud tras varios intentos. Por favor intenta de nuevo.".to_string());
+    }
+    if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
+      // Remove empty assistant placeholder if still empty
+      remove_empty_placeholder(&conversation_history);
+      restore_agent_settings(state, originals);
+      perform_save(&conversation_history, settings);
+      return Some("User interrupted the request.".to_string());
+    }
+
+    let mut tool_calls: Vec<serde_json::Value> = Vec::new();
+    let tool_calls_count = tool_calls.len();
+    crate::log::log(
+      "debug",
+      &format!(
+        "react_loop: starting iteration with {} existing tool calls",
+        tool_calls_count
+      ),
+    );
+    let speaker_arc = Arc::new(Mutex::new(PhraseSpeaker::new()));
+    let reply_accum = Arc::new(Mutex::new(String::new()));
+
+    let mut on_piece = {
+      let speaker_arc = speaker_arc.clone();
+      let reply_accum = reply_accum.clone();
+      let tx_ui = tx_ui.clone();
+      let tts_tx = tts_tx.clone();
+      let tts_done_rx = tts_done_rx.clone();
+      let voice = settings.voice.clone();
+      let conversation_history = conversation_history.clone();
+      let assistant_name = assistant_name.clone();
+      let my_interrupt = my_interrupt;
+      let has_tools = has_tools;
+      move |piece: &str| {
+        if piece.is_empty() {
+          return;
+        }
+        // Always accumulate reply text
+        if let Ok(mut acc) = reply_accum.lock() {
+          acc.push_str(piece);
+        }
+        let phrase = {
+          let mut speaker = speaker_arc.lock().unwrap();
+          speaker.push_text(piece)
+        };
+        if let Some(phrase) = phrase {
+          let _ = tx_ui.send(format!("stream|{}", phrase.text));
+          let _ = tx_ui.send("line|".to_string());
+          // When no tools, stream is the final answer — speak per phrase
+          if !has_tools {
+            if !phrase.tts.is_empty() {
+              let _ = tts_tx.send((phrase.tts.clone(), my_interrupt, voice.clone()));
+              let _ = tts_done_rx.recv();
+            }
+            push_or_update_last_assistant(&conversation_history, &phrase.text, &assistant_name);
+          }
+        }
+      }
+    };
+
+    let mut on_tool_call = |tc: &serde_json::Value| {
+      tool_calls.push(tc.clone());
+    };
+
+    let stream_result = rt.block_on(crate::llm::llama_server_stream_response_into(
+      &messages,
+      &settings.baseurl,
+      &settings.model,
+      &settings.provider,
+      interrupt_counter.clone(),
+      my_interrupt,
+      &mut on_piece,
+      has_tools,
+      available_tools,
+      Some(&mut on_tool_call),
+    ));
+
+    if let Err(e) = stream_result {
+      crate::log::log("error", &format!("Streaming error: {}", e));
+      // Remove empty assistant placeholder if still empty
+      remove_empty_placeholder(&conversation_history);
+      restore_agent_settings(state, originals);
+      perform_save(&conversation_history, settings);
+      return Some(format!("Error getting response: {}", e));
+    }
+
+    // Flush remaining phrase (text already in reply_accum from raw pieces)
+    if let Some(last_phrase) = speaker_arc.lock().unwrap().flush() {
+      let _ = tx_ui.send(format!("stream|{}", last_phrase.text));
+      let _ = tx_ui.send("line|".to_string());
+      // When no tools, stream is the final answer — speak and save
+      if !has_tools {
+        if !last_phrase.tts.is_empty() {
+          let _ = tts_tx.send((last_phrase.tts.clone(), my_interrupt, settings.voice.clone()));
+          let _ = tts_done_rx.recv();
+        }
+        push_or_update_last_assistant(&conversation_history, &last_phrase.text, &assistant_name_for_closure);
+      }
+    }
+
+    // Final reply text
+    let reply = {
+      let mut acc = reply_accum.lock().unwrap();
+      let cloned = acc.clone();
+      acc.clear();
+      cloned
+    };
+
+    crate::log::log(
+      "debug",
+      &format!(
+        "react_loop: after stream - reply.len={}, tool_calls.len={}",
+        reply.len(),
+        tool_calls.len()
+      ),
+    );
+
+    // If no tool calls, this is the final answer
+    if tool_calls.is_empty() {
+      if reply.is_empty() {
+        // LLM produced nothing - force it to give a final text response
+        messages.push(ChatMessage {
+          role: "user".to_string(),
+          content: "Please provide your final response.".to_string(),
+          agent_name: None,
+        });
+        continue;
+      }
+      // When tools are active, push final answer to history (no-tools case already pushed during streaming)
+      if has_tools {
+        push_or_update_last_assistant(
+          &conversation_history,
+          &reply,
+          &assistant_name_for_closure,
+        );
+      }
+      perform_save(&conversation_history, settings);
+      restore_agent_settings(state, originals);
+      return Some(reply);
+    }
+
+    crate::log::log(
+      "debug",
+      &format!("react_loop: executing {} tool calls", tool_calls.len()),
+    );
+    // Execute tool calls and collect results to feed back to LLM
+    let mut tool_outputs: Vec<String> = Vec::new();
+    for tc in &tool_calls {
+      if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
+        crate::log::log("debug", "Interrupted during tool execution");
+        remove_empty_placeholder(&conversation_history);
+        restore_agent_settings(state, originals);
+        perform_save(&conversation_history, settings);
+        return Some("User interrupted the request.".to_string());
+      }
+      if let Some(func_obj) = tc.get("function") {
+        let tool_name = func_obj
+          .get("name")
+          .and_then(|n| n.as_str())
+          .unwrap_or("unknown");
+        let tool_id = tc.get("id").and_then(|id| id.as_str()).unwrap_or("");
+        // Ollama returns arguments as a JSON string, not an object.
+        // Parse it to get the actual object, then re-serialize for embedding.
+        let args_value = func_obj
+          .get("arguments")
+          .or_else(|| func_obj.get("parameters"))
+          .unwrap_or(&serde_json::Value::Null);
+        let args_parsed = match args_value {
+          serde_json::Value::String(s) => {
+            serde_json::from_str::<serde_json::Value>(s).unwrap_or(serde_json::Value::Null)
+          }
+          serde_json::Value::Object(obj) => serde_json::Value::Object(obj.clone()),
+          _ => serde_json::Value::Null,
+        };
+        let args_str = serde_json::to_string(&args_parsed).unwrap_or("{}".to_string());
+        let payload = format!(r#"{{"name":"{}","arguments":{}}}"#, tool_name, args_str);
+        // Log tool execution to UI
+        let _ = tx_ui.send(format!(
+          "line|\n\x1b[42m\x1b[30m {} \x1b[0m {}",
+          tool_name, args_str
+        ));
+        let result = crate::tools::handle_tool_call(&payload);
+        // handle_tool_call always returns Ok, wrapping errors in a JSON failure payload
+        let output = result.unwrap_or_else(|e: Box<dyn std::error::Error + Send + Sync>| e.to_string());
+        let parsed: Option<serde_json::Value> = serde_json::from_str(&output).ok();
+        let is_failure = parsed
+          .as_ref()
+          .and_then(|v| v.get("status").and_then(|s| s.as_str()))
+          .map(|s| s == "failed")
+          .unwrap_or(false);
+        if is_failure {
+          let reasons = parsed
+            .as_ref()
+            .and_then(|v| v.get("reasons"))
+            .and_then(|r| r.as_array())
+            .map(|arr| {
+              arr
+                .iter()
+                .filter_map(|r| r.as_str().map(|s| s.to_string()))
+                .collect::<Vec<_>>()
+                .join(", ")
+            })
+            .unwrap_or_default();
+          // Record failure output
+          tool_outputs.push(format!(
+            "Tool error [{}#{}]: {}. Try a different approach.",
+            tool_name, tool_id, reasons
+          ));
+          // Display the tool failure in the UI
+          let _ = tx_ui.send(format!("line|The tool `{}` failed: {}", tool_name, reasons));
+          let _ = tx_ui.send("line|".to_string());
+        } else {
+          // Record success output
+          tool_outputs.push(format!(
+            "Tool result [{}#{}]: {}. If this contains what you need, provide a full response for the user, otherwise feel free to make a different tool call.",
+            tool_name, tool_id, output
+          ));
+          // Display the tool result in the UI
+          let _ = tx_ui.send(format!("line|{}", output.trim()));
+          let _ = tx_ui.send("line|".to_string());
+        }
+        // Notify UI of tool call
+        let _ = tx_ui.send("line|\n\x1b[32m".to_string());
+      }
+    }
+    // Build next iteration messages: system + history + tool output (do NOT push to persistent history)
+    let output_text = tool_outputs.join("\n");
+    let mut new_messages = create_full_context_messages(
+        system_prompt.clone(),
+        String::new(),
+        conversation_history,
+    );
+    if !output_text.is_empty() {
+        new_messages.push(ChatMessage {
+            role: "assistant".to_string(),
+            content: output_text.clone(),
+            agent_name: Some(settings.name.clone()),
+        });
+    }
+    // No user message for next iteration; just use the tool output
+    user_msg.clear();
+    // Set messages for next LLM call
+    messages = new_messages;
+
+    // Loop: send updated messages back to LLM
+    thread::sleep(Duration::from_millis(100));
+  }
+}
+
 fn handle_reply(
   state: &AppState,
   settings: &crate::config::AgentSettings,
