@@ -533,6 +533,11 @@ pub fn conversation_thread(
           continue;
         }
 
+        if user_text.is_empty() {
+          crate::log::log("debug", "Transcription returned empty string");
+          continue;
+        }
+
         let speech_end_ms = crate::util::SPEECH_END_AT.load(std::sync::atomic::Ordering::SeqCst);
         let mut first_phrase_logged = false;
         if user_text.is_empty() {
@@ -1244,11 +1249,7 @@ fn react_loop(
       }
       // When tools are active, push final answer to history (no-tools case already pushed during streaming)
       if has_tools {
-        push_or_update_last_assistant(
-          &conversation_history,
-          &reply,
-          &assistant_name_for_closure,
-        );
+        push_or_update_last_assistant(&conversation_history, &reply, &assistant_name_for_closure);
       }
       perform_save(&conversation_history, settings);
       restore_agent_settings(state, originals);
@@ -1297,7 +1298,8 @@ fn react_loop(
         ));
         let result = crate::tools::handle_tool_call(&payload);
         // handle_tool_call always returns Ok, wrapping errors in a JSON failure payload
-        let output = result.unwrap_or_else(|e: Box<dyn std::error::Error + Send + Sync>| e.to_string());
+        let output =
+          result.unwrap_or_else(|e: Box<dyn std::error::Error + Send + Sync>| e.to_string());
         let parsed: Option<serde_json::Value> = serde_json::from_str(&output).ok();
         let is_failure = parsed
           .as_ref()
@@ -1341,17 +1343,14 @@ fn react_loop(
     }
     // Build next iteration messages: system + history + tool output (do NOT push to persistent history)
     let output_text = tool_outputs.join("\n");
-    let mut new_messages = create_full_context_messages(
-        system_prompt.clone(),
-        String::new(),
-        conversation_history,
-    );
+    let mut new_messages =
+      create_full_context_messages(system_prompt.clone(), String::new(), conversation_history);
     if !output_text.is_empty() {
-        new_messages.push(ChatMessage {
-            role: "assistant".to_string(),
-            content: output_text.clone(),
-            agent_name: Some(settings.name.clone()),
-        });
+      new_messages.push(ChatMessage {
+        role: "assistant".to_string(),
+        content: output_text.clone(),
+        agent_name: Some(settings.name.clone()),
+      });
     }
     // No user message for next iteration; just use the tool output
     user_msg.clear();

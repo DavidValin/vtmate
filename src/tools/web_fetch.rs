@@ -32,15 +32,11 @@ fn extract_paragraphs(body: &str) -> Vec<String> {
   para_re
     .captures_iter(body)
     .map(|cap| {
-      let raw = cap
-        .get(1)
-        .map_or("", |m| m.as_str())
-        .to_string();
+      let raw = cap.get(1).map_or("", |m| m.as_str()).to_string();
       strip_html(&raw)
     })
     .collect()
 }
-
 
 // API
 // ------------------------------------------------------------------
@@ -87,15 +83,18 @@ impl Tool for WebFetchTool {
     match response {
       Ok(resp) => {
         if !resp.status().is_success() {
-          return Ok(serde_json::json!({
-            "status": "failed",
-            "reasons": [format!(
-              "HTTP {} - URL '{}' returned status {}",
-              resp.status(),
-              url,
-              resp.status()
-            )]
-          }).to_string());
+          return Ok(
+            serde_json::json!({
+              "status": "failed",
+              "reasons": [format!(
+                "HTTP {} - URL '{}' returned status {}",
+                resp.status(),
+                url,
+                resp.status()
+              )]
+            })
+            .to_string(),
+          );
         }
         let body = resp.text()?;
         // Extract title
@@ -137,14 +136,14 @@ impl Tool for WebFetchTool {
             .get(1)
             .map_or("".to_string(), |m| m.as_str().to_string());
           let link_text_raw = cap
-          .get(2)
-          .map_or("".to_string(), |m| m.as_str().to_string());
+            .get(2)
+            .map_or("".to_string(), |m| m.as_str().to_string());
           let link_text = strip_html(&link_text_raw);
-          
+
           if href.is_empty() {
             continue;
           }
-          
+
           links.push(serde_json::json!({"href": href, "text": link_text.clone()}));
         }
         let paragraphs = extract_paragraphs(&body);
