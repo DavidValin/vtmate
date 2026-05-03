@@ -2,7 +2,6 @@
 //  Conversation
 // ------------------------------------------------------------------
 
-
 use crate::playback::set_wav_tx;
 use crate::state::AppState;
 use crate::state::GLOBAL_STATE;
@@ -401,7 +400,7 @@ pub fn conversation_thread(
         let user_text = crate::stt::whisper_transcribe_with_ctx(&ctx, &mono_f32, utt.sample_rate, &state.language.lock().unwrap())?;
         crate::log::log("info", &format!("Transcribed: '{}'", user_text));
         let user_text = user_text.trim().to_string();
- 
+
         if user_text.is_empty() {
           crate::log::log("debug", "Transcription returned empty string");
           continue;
@@ -816,7 +815,11 @@ fn react_loop(
       if !has_tools {
         let _ = tts_tx.send((last_phrase.clone(), my_interrupt, settings.voice.clone()));
         let _ = tts_done_rx.recv();
-        push_or_update_last_assistant(&conversation_history, &last_phrase, &assistant_name_for_closure);
+        push_or_update_last_assistant(
+          &conversation_history,
+          &last_phrase,
+          &assistant_name_for_closure,
+        );
       }
     }
 
@@ -850,11 +853,7 @@ fn react_loop(
       }
       // When tools are active, push final answer to history (no-tools case already pushed during streaming)
       if has_tools {
-        push_or_update_last_assistant(
-          &conversation_history,
-          &reply,
-          &assistant_name_for_closure,
-        );
+        push_or_update_last_assistant(&conversation_history, &reply, &assistant_name_for_closure);
       }
       perform_save(&conversation_history, settings);
       restore_agent_settings(state, originals);
@@ -903,7 +902,8 @@ fn react_loop(
         ));
         let result = crate::tools::handle_tool_call(&payload);
         // handle_tool_call always returns Ok, wrapping errors in a JSON failure payload
-        let output = result.unwrap_or_else(|e: Box<dyn std::error::Error + Send + Sync>| e.to_string());
+        let output =
+          result.unwrap_or_else(|e: Box<dyn std::error::Error + Send + Sync>| e.to_string());
         let parsed: Option<serde_json::Value> = serde_json::from_str(&output).ok();
         let is_failure = parsed
           .as_ref()
@@ -947,23 +947,19 @@ fn react_loop(
     }
     // Build next iteration messages: system + history + tool output (do NOT push to persistent history)
     let output_text = tool_outputs.join("\n");
-    let mut new_messages = create_full_context_messages(
-        system_prompt.clone(),
-        String::new(),
-        conversation_history,
-    );
+    let mut new_messages =
+      create_full_context_messages(system_prompt.clone(), String::new(), conversation_history);
     if !output_text.is_empty() {
-        new_messages.push(ChatMessage {
-            role: "assistant".to_string(),
-            content: output_text.clone(),
-            agent_name: Some(settings.name.clone()),
-        });
+      new_messages.push(ChatMessage {
+        role: "assistant".to_string(),
+        content: output_text.clone(),
+        agent_name: Some(settings.name.clone()),
+      });
     }
     // No user message for next iteration; just use the tool output
     user_msg.clear();
     // Set messages for next LLM call
     messages = new_messages;
-
 
     // Loop: send updated messages back to LLM
     thread::sleep(Duration::from_millis(100));

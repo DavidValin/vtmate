@@ -50,18 +50,12 @@ impl Tool for SearchTool {
           let mut count = 0;
           let mut seen = std::collections::HashSet::new();
           for link in links {
-            let href = link
-              .get("href")
-              .and_then(|v| v.as_str())
-              .unwrap_or("");
+            let href = link.get("href").and_then(|v| v.as_str()).unwrap_or("");
             // Skip links without a base URL (relative paths only)
             if !href.starts_with("http://") && !href.starts_with("https://") {
               continue;
             }
-            let text = link
-              .get("text")
-              .and_then(|v| v.as_str())
-              .unwrap_or("");
+            let text = link.get("text").and_then(|v| v.as_str()).unwrap_or("");
             // Skip links with no anchor text or duplicate href
             if text.is_empty() || !seen.insert(href) {
               continue;

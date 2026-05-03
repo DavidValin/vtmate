@@ -56,8 +56,10 @@ pub fn tools_schemas(
   let mut schemas = Vec::new();
   // Build a lookup map for dynamic HTTP request tools
   let http_tools = load_http_tools();
-  let http_tool_map: HashMap<&str, &HttpRequestTool> =
-    http_tools.iter().map(|t: &HttpRequestTool| (t.name(), t)).collect();
+  let http_tool_map: HashMap<&str, &HttpRequestTool> = http_tools
+    .iter()
+    .map(|t: &HttpRequestTool| (t.name(), t))
+    .collect();
 
   for name in tool_names {
     match name.as_str() {

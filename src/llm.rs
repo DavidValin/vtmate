@@ -90,7 +90,7 @@ pub async fn llama_server_stream_response_into(
         } else {
           None
         };
-       let payload = json!({
+        let payload = json!({
           "model": llama_model,
           "messages": messages.iter().map(|m| json!({ "role": m.role, "content": m.content })).collect::<Vec<_>>(),
           "think": false,
@@ -101,10 +101,7 @@ pub async fn llama_server_stream_response_into(
         });
         crate::log::log(
           "debug",
-          &format!(
-            "OAI payload has tools: {:?}",
-            tools_payload.is_some()
-          ),
+          &format!("OAI payload has tools: {:?}", tools_payload.is_some()),
         );
         client.post(&url).json(&payload)
       }
