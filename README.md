@@ -38,25 +38,24 @@ https://github.com/user-attachments/assets/8b9e982c-ba97-4aeb-8e55-1db6a92bc164
 
 ## Features
 
-- 📌 Continuous Voice chat (live conversation): `records user continuously and stops on silence, submitting the request to the agent`
-- 📌 Push to Talk mode (PTT): `keep &lt;SPACE&gt; pressed while talking and release to stop recording`
-- 🚀 AI agents debate (2 agents talking to each other): `give an initial input and let the agents talk to each other. You can interrupt in the middle of the debate changing the subject`
-- 📌 Realtime agent swap: `change the agent by pressing &lt;ARROW_LEFT&gt; / &lt;ARROW_RIGHT&gt; (applicable to next response)`
-- 📌 Voice interrupt: `the agent stops talking if you interrupt via voice`
-- 📌 Recording Pause / Resume: `toggle "&lt;SPACE&gt;" key to pause / resume voice recording only`
-- 📌 Stop PlayBack: `press "&lt;ESCAPE&gt;" ONCE to stop the playback for the current response`
-- 📌 Interrupt: `press "&lt;ESCAPE&gt;" TWICE to interrupt the current response alltogether`
-- 📌 Voice speed change: `change the agent voice speed by pressing &lt;ARROW_UP&gt; / &lt;ARROW_DOWN&gt; (applicable to next response)`
-- 📌 Voice read a txt file: `vtmate -r myfile.txt`
-- 📌 Voice read text from stdin phrase by phrase: `echo "Hello. How are you?" | vtmate -r -`
-- 📌 Save conversation as audio and text: `vtmate -s`
-- 📌 Load separate settings file with different agents: `vtmate -c philosophers-settings.txt`
-- 📌 Integrated `whisper`
-- 📌 Integrated `kokoro TTS` system
-- 📌 Interface with `OpenTTS` system
-- 📌 Supports `ollama` or `llama-server`
-- 📌 28 languages supported (`vtmate --list-voices`)
-- 📌 Use any gguf model from huggingface.com or ollama models (small models reply faster)
+- 📌 Continuous Voice chat (LIVE conversation) with voice interruption
+- 🚀 AI agents debates (2 agents talking to each other; use can also participate in between)
+- 📌 Realtime agent swap
+- 📌 Mid interrupt response via keyboard
+- 📌 Mid interrupt response via voice
+- 📌 Reset session (fresh history)
+- 📌 "Undo" last response (remove last response from history)
+- 📌 Recording Pause / Resume via keyboard in LIVE conversation mode
+- 📌 Push to Talk mode (PTT)
+- 📌 Save conversation as audio and text
+- 📌 Read a text file with voice, phrase by phrase, with keyboard navigation and pause/resume
+- 📌 Read text with voice from STDIN, phrase by phrase, with keyboard navigation and pause/resume
+- 📌 Save audio speech of a text file or STDIN content
+- 📌 Load separate settings file with different agents
+- 📌 Integrated `whisper` speech recognition system (no external intallation required)
+- 📌 Integrated `kokoro TTS` and `supersonic 2 TTS` systems (no external intallation required)
+- 📌 Interface with `OpenTTS` system (requires external docker service)
+- 📌 Use any gguf model from huggingface.com (using llama-server) or any ollama model
 
 ## How it works
 
@@ -170,6 +169,8 @@ All cli options:
   --help                                show help
 ```
 
+For quick reference get the printable [Quicksheet (PDF)](https://raw.githubusercontent.com/DavidValin/vtmate/refs/heads/main/docs/en/quicksheet.pdf)
+
 ### Conversation mode
 
 ![conversation mode](https://github.com/DavidValin/vtmate/raw/main/docs/en/diagrams/conversation-mode.png)
@@ -204,9 +205,13 @@ echo "How to fly without wings?" | vtmate -i -
 
 * When running in LIVE mode just talk. You can also pause/resume recording by pressing `SPACE` once
 * When running in PTT mode: keep `SPACE` pushed while talking, and then release
+* Press `SCAPE` **once** during a mid response to cancel it
+* Press `SCAPE` **twice** for resetting the session
+* Press double `u` to undo last response
 * You can switch agents in realtime by pressing `ARROW_LEFT` / `ARROW_RIGHT` keyword arrows (you need at least 2 agents defined in `~/vtmate/settings`).
 * You can change the voice speed by pressing `ARROW_UP` / `ARROW_DOWN`
 * Be able to save the conversation in a wav and text file by adding `-s` option. It will save it in `~/.vtmate/conversations` folder
+* For quick reference get the printable [Quicksheet (PDF)](https://raw.githubusercontent.com/DavidValin/vtmate/refs/heads/main/docs/en/quicksheet.pdf)
 
 ### Debate mode
 
@@ -233,8 +238,14 @@ vtmate --debate "Unix administrator" "Security Expert" -i prompt.txt --ptt true
 
 * When running in LIVE mode just talk. You can also pause/resume recording by pressing `SPACE` once
 * When running in PTT mode: keep `SPACE` pushed while talking, and then release
+* Press `SCAPE` **once** during a mid response to cancel it and stop the debate
+* Press `SCAPE` **twice** for resetting the session
+* Press double `u` to undo last response
 * You can also start/stop a debate from conversation mode by pressing `Control+D` and picking the debate agents.
 * Be able to save the conversation in a wav and text file by adding `-s` option. It will save it in `~/.vtmate/conversations` folder
+* [Here is an example](https://gist.github.com/DavidValin/58cf130c4f7b2ea9a6a033bf37bc1cda) on how to create automated audio debates from youtube videos using vtmate in combination with other tools
+* For quick reference get the printable [Quicksheet (PDF)](https://raw.githubusercontent.com/DavidValin/vtmate/refs/heads/main/docs/en/quicksheet.pdf)
+
 
 ### Quiet mode
 
@@ -282,6 +293,7 @@ In this mode you can:
 * Move to previous phrase by pressing `ARROW_UP`
 * Move to next phrase by pressing `ARROW_DOWN`
 * Stop / Resume playback by pressing `SPACE`
+* For quick reference get the printable [Quicksheet (PDF)](https://raw.githubusercontent.com/DavidValin/vtmate/refs/heads/main/docs/en/quicksheet.pdf)
 
 ###  Separate agents
 

@@ -670,6 +670,32 @@ fn push_or_update_last_assistant(
   });
 }
 
+/// Get response from LLM for debate mode (synchronous, non-streaming)
+async fn get_response(
+  messages: Vec<ChatMessage>,
+  agent: &crate::config::AgentSettings,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+  let interrupt_counter = Arc::new(AtomicU64::new(0));
+  let mut result = String::new();
+  let mut on_piece = |piece: &str| {
+    result.push_str(piece);
+  };
+  crate::llm::llama_server_stream_response_into(
+    &messages,
+    &agent.baseurl,
+    &agent.model,
+    &agent.provider,
+    interrupt_counter.clone(),
+    0,
+    &mut on_piece,
+    false,
+    &[],
+    None::<&mut dyn FnMut(&serde_json::Value)>,
+  )
+  .await?;
+  Ok(result)
+}
+
 /// ReAct loop: sends messages to LLM with tools, executes tool calls, loops until final answer.
 /// If no tools are available, it streams directly with per-phrase TTS (simple reply).
 fn react_loop(

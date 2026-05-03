@@ -181,7 +181,7 @@ pub fn spawn_ui_thread(
             out.flush().unwrap();
 
             // Re-send history lines
-            let is_debate = GLOBAL_STATE
+           let is_debate = GLOBAL_STATE
               .get()
               .map(|s| s.debate_enabled.load(Ordering::SeqCst))
               .unwrap_or(false);
