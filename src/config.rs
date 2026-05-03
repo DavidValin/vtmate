@@ -1496,12 +1496,6 @@ pub fn try_load_settings(
       errors.push(format!("Agent {}: {}", agent.name, e));
     }
 
-    if let Err(e) =
-      validate_tools(&agent.tools).map_err(|e: std::io::Error| -> Error { Error::new(e) })
-    {
-      errors.push(format!("Agent {}: {}", agent.name, e));
-    }
-
     agents.push(agent);
   }
 
