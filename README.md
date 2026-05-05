@@ -506,6 +506,16 @@ Cloning does not train a model on the speaker: it searches for the `supertonic3`
 
 ###  Tools
 
+Available tools:
+
+* `glob`: Search for files using glob patterns like **/*.js or src/**/*.ts
+* `grep`: Fast content search across files in a directory using full regex syntax
+* `read_file`: Reads specific line ranges from a file
+* `apply_patch`: Applies a unified diff patch to a file
+* `bash_command`: Executes a bash command on the host system
+* `search`: Searches the web for a term (q) and return a list of results (title+url)
+* `web_fetch`: Fetches a single web page using a url and returns a JSON containing its content and links
+
 vtmate supports **dynamic HTTP request tools** — custom API call definitions loaded from JSON files. Each definition registers a new tool that the LLM can call.
 
 Create a JSON file in `~/.vtmate/tools/http_requests/` with this structure:
@@ -687,5 +697,22 @@ build_linux.sh
 build_macos.sh
 build_windows.ps1
 ```
+
+## Testing
+
+Test tools:
+```
+cargo test \
+  --test glob_test \
+  --test grep_test \
+  --test read_file_test \
+  --test  apply_patch_test
+```
+
+Test all:
+```
+cargo test
+```
+
 
 Have fun o:)

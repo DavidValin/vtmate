@@ -5225,6 +5225,7 @@ dependencies = [
  "env_logger",
  "flate2",
  "futures-util",
+ "glob",
  "global-hotkey",
  "hex",
  "hound",
