@@ -671,8 +671,110 @@ fn push_or_update_last_assistant(
   });
 }
 
-/// ReAct loop: sends messages to LLM with tools, executes tool calls, loops until final answer.
-/// If no tools are available, it streams directly with per-phrase TTS (simple reply).
+/* ------------------------------------------------------------------
+ *  ReAct loop (Reasoning + Acting)
+ * ------------------------------------------------------------------
+ *
+ *  PURPOSE
+ *    Sends the user request to an LLM, optionally with tools, and loops
+ *    through reasoning → tool call → tool result → more reasoning until
+ *    a final answer is produced.
+ *
+ *  TWO MODES
+ *
+ *  1. No-tools mode (simple reply)
+ *     - LLM response is streamed char-by-char to the UI via `on_piece`.
+ *     - Each phrase boundary (newline or period) triggers immediate TTS.
+ *     - Phrases are pushed directly into `conversation_history` as they
+ *       arrive, replacing the empty assistant placeholder.
+ *     - Once streaming completes, the full reply is returned. Single pass.
+ *
+ *  2. Tools mode (multi-iteration ReAct)
+ *     - A temporary `react_messages` vector carries full context across
+ *       all iterations: system prompt, original history, user request,
+ *       reasoning, tool calls, and tool results.
+ *     - `conversation_history` only sees the original user message and
+ *       the final reply — intermediate reasoning and tool calls are hidden.
+ *
+ *  ITERATION FLOW (tools mode)
+ *
+ *     ┌───────────────────────────────────────────────────────┐
+ *     │  1. STREAM from LLM                                   │
+ *     │     - `on_piece`     → reply text (displayed to UI)   │
+ *     │     - `on_reasoning` → reasoning (grey, not spoken)   │
+ *     │     - `on_tool_call` → collects tool call JSON        │
+ *     └──────────────────┬────────────────────────────────────┘
+ *                        ▼
+ *     ┌───────────────────────────────────────────────────────┐
+ *     │  2. CLASSIFY output                                   │
+ *     │     - No tool calls + text → reasoning or final answer│
+ *     │     - Tool calls present → execute tools              │
+ *     └──────────────────┬────────────────────────────────────┘
+ *                        ▼
+ *     ┌───────────────────────────────────────────────────────┐
+ *     │  3A. NO TOOL CALLS                                    │
+ *     │     - reasoning + reply pushed to react_messages      │
+ *     │     - consecutive_text_only counter incremented       │
+ *     │     - If >= 2 text-only iterations → FINAL ANSWER     │
+ *     │       (LLM already had one chance to call tools)      │
+ *     └──────────────────┬────────────────────────────────────┘
+ *                        ▼
+ *     ┌───────────────────────────────────────────────────────┐
+ *     │  3B. TOOL CALLS                                       │
+ *     │     - reasoning + reply pushed to react_messages      │
+ *     │     - Each tool call executed sequentially            │
+ *     │     - `finalize` → immediate final answer (shortcut) │
+ *     │     - Tool results accumulated, pushed to             │
+ *     │       react_messages for next iteration               │
+ *     └──────────────────┬────────────────────────────────────┘
+ *                        ▼
+ *                    (loop again)
+ *
+ *  CONTEXT MANAGEMENT
+ *
+ *     conversation_history (persistent, saved to file):
+ *       ┌─────────────────────────────────────┐
+ *       │ system                              │
+ *       │ prior conversation turns            │
+ *       │ user: "which services does this..." │
+ *       │ assistant: "This company offers…    │ ← only final reply
+ *       └─────────────────────────────────────┘
+ *
+ *     react_messages (temporary, per-react_loop invocation):
+ *       ┌─────────────────────────────────────────────┐
+ *       │ system                                      │
+ *       │ prior conversation turns                    │
+ *       │ user: "which services does this..."         │
+ *       │ assistant: [reasoning] web_fetch(...)       │ ← iteration 1
+ *       │ assistant: Tool result [...]: {...}         │ ← tool output 1
+ *       │ assistant: [reasoning] web_fetch(...)       │ ← iteration 2
+ *       │ assistant: Tool result [...]: {...}         │ ← tool output 2
+ *       │ assistant: [reasoning]                      │ ← iteration 3
+ *       │ assistant: "This company offers..."         │ ← final text
+ *       └─────────────────────────────────────────────┘
+ *
+ *  TERMINATION (three paths)
+ *
+ *     1. `finalize` tool call — parameterless signal; the last text response
+ *        produced by the LLM (from the same iteration) becomes the final answer
+ *     2. Text-only response with no tools available — immediate final answer
+ *     3. `react_loop_count > 20` — safety guard, returns last text response
+ *
+ *  INTERRUPTION
+ *     An `AtomicU64` counter is captured at entry (`my_interrupt`). Any
+ *     user action that increments the counter (Esc key, new utterance)
+ *     is checked at the top of each iteration and during tool execution.
+ *     On interruption the empty placeholder is cleaned up and settings
+ *     are restored before returning.
+ *
+ *  UI / TTS
+ *     - Reply text: streamed to UI via `stream|` during LLM streaming
+ *     - Reasoning: streamed via `stream|\x1b[90m...\x1b[0m` (grey)
+ *     - TTS in no-tools mode: per-phrase during streaming + flush
+ *     - TTS in tools mode: only for intermediate reply text (between
+ *       tool iterations) and for the final reply (handled by caller)
+ * 
+ * ------------------------------------------------------------------ */
 fn react_loop(
   state: &AppState,
   settings: &crate::config::AgentSettings,
@@ -706,24 +808,45 @@ fn react_loop(
   let originals = apply_agent_settings(state, settings);
 
   let system_prompt_clone = system_prompt.clone();
-  let mut messages =
+  // react_messages carries full reAct context (tool calls + outputs) across iterations.
+  // Only the final reply is pushed to conversation_history.
+  let mut react_messages =
     create_full_context_messages(system_prompt_clone, user_msg.clone(), conversation_history);
 
   let max_react_loop_iters = 20;
   let mut react_loop_count = 0;
+  // Track the last reply text across iterations so finalize can return it
+  let mut last_reply = String::new();
 
   loop {
     react_loop_count += 1;
     if react_loop_count > max_react_loop_iters {
       crate::log::log(
-        "error",
-        "react loop exceeded max iterations, forcing final response",
+        "warn",
+        "react loop exceeded max iterations, using last text as final response",
       );
-      // Remove empty assistant placeholder if still empty
+      // Extract last assistant text from react_messages as final response
+      let final_reply = react_messages
+        .iter()
+        .rev()
+        .find(|m| m.role == "assistant" && !m.content.contains("Tool result") && !m.content.contains("Tool error"))
+        .map(|m| {
+          // Strip reasoning prefix if present, prefer the reply part
+          m.content.clone()
+        })
+        .unwrap_or_else(|| {
+          crate::log::log("error", "no text response found in react loop history");
+          "Lo siento, no pude completar la solicitud tras varios intentos.".to_string()
+        });
       remove_empty_placeholder(&conversation_history);
-      restore_agent_settings(state, originals);
+      conversation_history.lock().unwrap().push(ChatMessage {
+        role: "assistant".to_string(),
+        content: final_reply.clone(),
+        agent_name: Some(assistant_name_for_closure.clone()),
+      });
       perform_save(&conversation_history, settings);
-      return Some("Lo siento, no pude completar la solicitud tras varios intentos. Por favor intenta de nuevo.".to_string());
+      restore_agent_settings(state, originals);
+      return Some(final_reply);
     }
     if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
       // Remove empty assistant placeholder if still empty
@@ -733,8 +856,14 @@ fn react_loop(
       return Some("User interrupted the request.".to_string());
     }
 
-    let mut tool_calls: Vec<serde_json::Value> = Vec::new();
+   let mut tool_calls: Vec<serde_json::Value> = Vec::new();
     let tool_calls_count = tool_calls.len();
+    // Pre-compute tool list for prompts (includes finalize)
+    let tool_list = if has_tools {
+      format!("{}, finalize", available_tools.join(", "))
+    } else {
+      String::new()
+    };
     crate::log::log(
       "debug",
       &format!(
@@ -744,6 +873,9 @@ fn react_loop(
     );
     let speaker_arc = Arc::new(Mutex::new(PhraseSpeaker::new()));
     let reply_accum = Arc::new(Mutex::new(String::new()));
+    // Separate accumulator for reasoning tokens (Gemma 4, DeepSeek, etc.)
+    // Reasoning is displayed with a visual distinction but NOT spoken via TTS.
+    let reasoning_accum = Arc::new(Mutex::new(String::new()));
 
     let mut on_piece = {
       let speaker_arc = speaker_arc.clone();
@@ -785,8 +917,28 @@ fn react_loop(
       tool_calls.push(tc.clone());
     };
 
+    // Reasoning callback: display with visual distinction, do NOT speak
+    let mut on_reasoning_piece = {
+      let reasoning_accum = reasoning_accum.clone();
+      let tx_ui = tx_ui.clone();
+      move |piece: &str| {
+        if piece.is_empty() {
+          return;
+        }
+        if let Ok(mut acc) = reasoning_accum.lock() {
+          acc.push_str(piece);
+        }
+        // Display reasoning with grey styling
+        let _ = tx_ui.send(format!("stream|\x1b[90m{}\x1b[0m", piece));
+      }
+    };
+
+    crate::log::log(
+      "debug",
+      &format!("react_loop: sending to LLM with tools: {:?}", available_tools),
+    );
     let stream_result = rt.block_on(crate::llm::llama_server_stream_response_into(
-      &messages,
+      &react_messages,
       &settings.baseurl,
       &settings.model,
       &settings.provider,
@@ -796,6 +948,7 @@ fn react_loop(
       has_tools,
       available_tools,
       Some(&mut on_tool_call),
+      Some(&mut on_reasoning_piece),
     ));
 
     if let Err(e) = stream_result {
@@ -831,40 +984,102 @@ fn react_loop(
       cloned
     };
 
+    // Extract accumulated reasoning text
+    let reasoning = {
+      let mut acc = reasoning_accum.lock().unwrap();
+      let cloned = acc.clone();
+      acc.clear();
+      cloned
+    };
+
     crate::log::log(
       "debug",
       &format!(
-        "react_loop: after stream - reply.len={}, tool_calls.len={}",
+        "react_loop: after stream - reply.len={}, reasoning.len={}, tool_calls.len={}",
         reply.len(),
+        reasoning.len(),
         tool_calls.len()
       ),
     );
 
-    // If no tool calls, this is the final answer
+    // No tool calls: LLM produced reasoning text
     if tool_calls.is_empty() {
-      if reply.is_empty() {
+      if reply.is_empty() && reasoning.is_empty() {
         // LLM produced nothing - force it to give a final text response
-        messages.push(ChatMessage {
+        react_messages.push(ChatMessage {
           role: "user".to_string(),
           content: "Please provide your final response.".to_string(),
           agent_name: None,
         });
         continue;
       }
-      // When tools are active, push final answer to history (no-tools case already pushed during streaming)
-      if has_tools {
-        push_or_update_last_assistant(&conversation_history, &reply, &assistant_name_for_closure);
+
+      // Reply text was already displayed during streaming via on_piece + flush.
+      // If no tools available, this IS the final answer (use reply text, not reasoning)
+      if !has_tools {
+        // In no-tools mode, phrases were already pushed to history during streaming via on_piece.
+        // No need to push again here.
+        perform_save(&conversation_history, settings);
+        restore_agent_settings(state, originals);
+        return Some(reply);
       }
-      perform_save(&conversation_history, settings);
-      restore_agent_settings(state, originals);
-      return Some(reply);
+
+      // Tools available but LLM produced text without calling any.
+      // Show the LLM its response with a prompt to call finalize.
+      last_reply = reply.clone();
+      if !reasoning.is_empty() {
+        react_messages.push(ChatMessage {
+          role: "assistant".to_string(),
+          content: reasoning.clone(),
+          agent_name: Some(assistant_name_for_closure.clone()),
+        });
+      }
+     let prompt = format!(
+        "here is the response\n----------------------------\n{}\n---------------------------\n\nAvailable tools: {}. If you want this response to be the final response call the \"finalize\" tool call. Otherwise make another tool call or produce a different response.",
+        reply, tool_list
+      );
+      react_messages.push(ChatMessage {
+        role: "assistant".to_string(),
+        content: prompt,
+        agent_name: Some(settings.name.clone()),
+      });
+      continue;
     }
+
+  // Tool calls present — display reasoning (already streamed) and reply before executing tools
+    if !reasoning.is_empty() {
+      let _ = tx_ui.send("line|".to_string());
+    }
+    if !reply.is_empty() {
+      // Reply was already displayed during streaming; only speak here.
+      last_reply = reply.clone();
+      let _ = tts_tx.send((reply.clone(), my_interrupt, settings.voice.clone()));
+      let _ = tts_done_rx.recv();
+      // Add reasoning to react_messages so LLM has it in context.
+      // The reply itself will be shown via the "here is the response" prompt after tool outputs.
+      if !reasoning.is_empty() {
+        react_messages.push(ChatMessage {
+          role: "assistant".to_string(),
+          content: reasoning.clone(),
+          agent_name: Some(assistant_name_for_closure.clone()),
+        });
+      }
+    } else if !reasoning.is_empty() {
+      // Only reasoning, no reply text — add reasoning to react_messages
+      react_messages.push(ChatMessage {
+        role: "assistant".to_string(),
+        content: reasoning.clone(),
+        agent_name: Some(assistant_name_for_closure.clone()),
+      });
+    }
+
+
 
     crate::log::log(
       "debug",
       &format!("react_loop: executing {} tool calls", tool_calls.len()),
     );
-    // Execute tool calls and collect results to feed back to LLM
+   // Execute tool calls and collect results to feed back to LLM
     let mut tool_outputs: Vec<String> = Vec::new();
     for tc in &tool_calls {
       if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
@@ -894,6 +1109,26 @@ fn react_loop(
           _ => serde_json::Value::Null,
         };
         let args_str = serde_json::to_string(&args_parsed).unwrap_or("{}".to_string());
+
+       // finalize: parameterless signal that the last text response is final.
+         if tool_name == "finalize" {
+           // Use the last reply text (from current or previous iteration).
+           let final_reply = if reply.is_empty() {
+             last_reply.clone()
+           } else {
+             reply.clone()
+           };
+           // Replace empty placeholder with final reply
+           let mut hist = conversation_history.lock().unwrap();
+           if let Some(last) = hist.last_mut() {
+             last.content = final_reply.clone();
+           }
+           drop(hist);
+           perform_save(&conversation_history, settings);
+           restore_agent_settings(state, originals);
+           return Some(final_reply);
+         }
+
         let payload = format!(r#"{{"name":"{}","arguments":{}}}"#, tool_name, args_str);
         // Log tool execution to UI
         let _ = tx_ui.send(format!(
@@ -923,20 +1158,20 @@ fn react_loop(
                 .join(", ")
             })
             .unwrap_or_default();
-          // Record failure output
-          tool_outputs.push(format!(
-            "Tool error [{}#{}]: {}. Try a different approach.",
-            tool_name, tool_id, reasons
-          ));
+         // Record failure output
+           tool_outputs.push(format!(
+             "Tool error [{}#{}]: {}. Try a different approach or call 'finalize' tool if you have enough information.",
+             tool_name, tool_id, reasons
+           ));
           // Display the tool failure in the UI
           let _ = tx_ui.send(format!("line|The tool `{}` failed: {}", tool_name, reasons));
           let _ = tx_ui.send("line|".to_string());
         } else {
-          // Record success output
-          tool_outputs.push(format!(
-            "Tool result [{}#{}]: {}. If this contains what you need, provide a full response for the user, otherwise feel free to make a different tool call.",
-            tool_name, tool_id, output
-          ));
+        // Record success output
+           tool_outputs.push(format!(
+             "Tool result [{}#{}]: {}. Available tools: {}. If this contains what you need, produce your response text and call 'finalize', otherwise make a different tool call.",
+             tool_name, tool_id, output, tool_list
+           ));
           // Display the tool result in the UI
           let _ = tx_ui.send(format!("line|{}", output.trim()));
           let _ = tx_ui.send("line|".to_string());
@@ -945,21 +1180,31 @@ fn react_loop(
         let _ = tx_ui.send("line|\n\x1b[32m".to_string());
       }
     }
-    // Build next iteration messages: system + history + tool output (do NOT push to persistent history)
+    // Accumulate tool outputs in react_messages for next iteration
     let output_text = tool_outputs.join("\n");
-    let mut new_messages =
-      create_full_context_messages(system_prompt.clone(), String::new(), conversation_history);
     if !output_text.is_empty() {
-      new_messages.push(ChatMessage {
+      react_messages.push(ChatMessage {
         role: "assistant".to_string(),
         content: output_text.clone(),
         agent_name: Some(settings.name.clone()),
       });
     }
-    // No user message for next iteration; just use the tool output
+
+  // Show the LLM its last text response with a prompt to call finalize
+    if !last_reply.is_empty() {
+      let prompt = format!(
+        "here is the response\n----------------------------\n{}\n---------------------------\n\nAvailable tools: {}. If you want this response to be the final response call the \"finalize\" tool call. Otherwise make another tool call or produce a different response.",
+        last_reply, tool_list
+      );
+      react_messages.push(ChatMessage {
+        role: "assistant".to_string(),
+        content: prompt,
+        agent_name: Some(settings.name.clone()),
+      });
+    }
+
+    // No user message for next iteration; react_messages already carries full context
     user_msg.clear();
-    // Set messages for next LLM call
-    messages = new_messages;
 
     // Loop: send updated messages back to LLM
     thread::sleep(Duration::from_millis(100));

@@ -32,10 +32,24 @@ mod log {
   pub fn log(_level: &str, _msg: &str) {}
 }
 
+mod tools {
+  pub mod http_request {
+    pub struct HttpToolDefinition {
+      pub name: String,
+    }
+    pub struct HttpRequestDefinition {
+      pub tool_definition: HttpToolDefinition,
+    }
+    pub fn load_http_request_definitions() -> Vec<HttpRequestDefinition> {
+      vec![]
+    }
+  }
+}
+
 #[path = "../src/config.rs"]
 mod config;
 
-use config::{AgentSettings, Args, load_settings};
+use config::{Args, load_settings};
 
 #[test]
 fn test_load_settings_with_double_quotes() {

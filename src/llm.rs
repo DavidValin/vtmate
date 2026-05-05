@@ -10,6 +10,7 @@ use std::sync::{Arc, atomic::AtomicU64};
 
 /// Stream response from Llama/Ollama endpoints, fallback if one fails, and mid-stream cancellation support.
 /// When `include_tools` is true, the LLM may return tool_calls which are delivered via `on_tool_call`.
+/// Reasoning tokens (from models like Gemma 4) are delivered via `on_reasoning`.
 pub async fn llama_server_stream_response_into(
   messages: &Vec<crate::conversation::ChatMessage>,
   llama_host: &str,
@@ -21,6 +22,7 @@ pub async fn llama_server_stream_response_into(
   include_tools: bool,
   tools: &[String],
   mut on_tool_call: Option<&mut dyn FnMut(&serde_json::Value)>,
+  mut on_reasoning: Option<&mut dyn FnMut(&str)>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   crate::log::log(
     "debug",
@@ -97,11 +99,17 @@ pub async fn llama_server_stream_response_into(
           "stream": true,
           "tools": tools_payload,
           "tool_choice": if include_tools { Some("auto") } else { None::<&str> },
-          "parallel_tool_calls": if include_tools { Some(false) } else { None::<bool> }
+          "parallel_tool_calls": if include_tools { Some(false) } else { None::<bool> },
+          "options": {
+            "think": false
+          },
         });
         crate::log::log(
           "debug",
-          &format!("OAI payload has tools: {:?}", tools_payload.is_some()),
+          &format!(
+            "OAI payload tools: {:?}",
+            tools_payload.as_ref().map(|v| v.iter().filter_map(|t| t.get("name").and_then(|n| n.as_str())).collect::<Vec<_>>())
+          ),
         );
         client.post(&url).json(&payload)
       }
@@ -114,8 +122,8 @@ pub async fn llama_server_stream_response_into(
         crate::log::log(
           "debug",
           &format!(
-            "Ollama payload tools count: {}",
-            tools_payload.as_ref().map_or(0, |v| v.len())
+            "Ollama payload tools: {:?}",
+            tools_payload.as_ref().map(|v| v.iter().filter_map(|t| t.get("name").and_then(|n| n.as_str())).collect::<Vec<_>>())
           ),
         );
         let payload = json!({
@@ -125,7 +133,10 @@ pub async fn llama_server_stream_response_into(
           "stream": true,
           "tools": tools_payload,
           "tool_choice": if include_tools { Some("auto") } else { None::<&str> },
-          "parallel_tool_calls": if include_tools { Some(false) } else { None::<bool> }
+          "parallel_tool_calls": if include_tools { Some(false) } else { None::<bool> },
+          "options": {
+            "think": false
+          },
         });
         client.post(&url).json(&payload)
       }
@@ -252,6 +263,14 @@ pub async fn llama_server_stream_response_into(
                         if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
                           if !content.is_empty() {
                             on_piece(content);
+                          }
+                        }
+                        // Extract reasoning tokens (Gemma 4, DeepSeek, etc.)
+                        if let Some(reasoning) = delta.get("reasoning").and_then(|r| r.as_str()) {
+                          if !reasoning.is_empty() {
+                            if let Some(ref mut cb) = on_reasoning {
+                              cb(reasoning);
+                            }
                           }
                         }
                         // Check for tool_calls in delta (streaming response)

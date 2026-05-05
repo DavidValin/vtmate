@@ -75,20 +75,15 @@ pub fn tools_schemas(
       }
     }
   }
-  // Always include _finalize: the agent calls this with its final answer
-  // to explicitly signal "I'm done" — decouples text production from loop termination.
+  // Always include finalize: parameterless signal that the last text response
+  // produced by the model is the final answer. react_loop extracts that text.
   schemas.push(json!({
-    "name": "_finalize",
-    "description": "Call this with your final response text when you have completed all necessary tool calls and are ready to provide the final answer to the user.",
+    "name": "finalize",
+    "description": "Call this when you have completed all necessary tool calls and have the final text answer for the user. Your last text response will be used as the final answer.",
     "parameters": {
       "type": "object",
-      "properties": {
-        "response": {
-          "type": "string",
-          "description": "The final answer text to return to the user."
-        }
-      },
-      "required": ["response"]
+      "properties": {},
+      "required": []
     }
   }));
 
