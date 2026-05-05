@@ -87,6 +87,20 @@ mod llm_cli {
   }
 }
 
+mod tools {
+  pub mod http_request {
+    pub struct HttpToolDefinition {
+      pub name: String,
+    }
+    pub struct HttpRequestDefinition {
+      pub tool_definition: HttpToolDefinition,
+    }
+    pub fn load_http_request_definitions() -> Vec<HttpRequestDefinition> {
+      vec![]
+    }
+  }
+}
+
 #[path = "../src/config.rs"]
 mod config;
 

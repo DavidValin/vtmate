@@ -440,6 +440,7 @@ mod tests {
       end_silence_ms: 900,
       voice_speed: 1.5,
       system_prompt_name: None,
+      tools: Vec::new(),
     }
   }
 
