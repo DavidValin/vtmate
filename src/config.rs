@@ -820,7 +820,11 @@ fn validate_tools(tools: &[String]) -> Result<(), std::io::Error> {
   let mut valid_tools: Vec<String> = vec![
     "web_fetch".to_string(),
     "bash_command".to_string(),
+    "glob".to_string(),
+    "grep".to_string(),
+    "read_file".to_string(),
     "search".to_string(),
+    "apply_patch".to_string(),
   ];
   // Add dynamically loaded HTTP request tool names
   for def in crate::tools::http_request::load_http_request_definitions() {

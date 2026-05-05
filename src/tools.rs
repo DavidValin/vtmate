@@ -2,8 +2,12 @@
 //  Tool handling
 // ------------------------------------------------------------------
 
+use apply_patch::ApplyPatchTool;
 use bash_command::BashCommandTool;
+use glob::GlobTool;
+use grep::GrepTool;
 use http_request::HttpRequestTool;
+use read_file::ReadFileTool;
 use search::SearchTool;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -13,8 +17,12 @@ use web_fetch::WebFetchTool;
 // API
 // ------------------------------------------------------------------
 
+pub mod apply_patch;
 pub mod bash_command;
+pub mod glob;
+pub mod grep;
 pub mod http_request;
+pub mod read_file;
 pub mod search;
 pub mod web_fetch;
 
@@ -37,18 +45,6 @@ fn load_http_tools() -> &'static Vec<HttpRequestTool> {
   })
 }
 
-pub fn get_available_tools() -> Result<Vec<Value>, Box<dyn std::error::Error + Send + Sync>> {
-  let mut tools = vec![
-    WebFetchTool::new().json_schema()?,
-    BashCommandTool::new().json_schema()?,
-    SearchTool::new().json_schema()?,
-  ];
-  for tool in load_http_tools() {
-    tools.push(tool.json_schema()? as Value);
-  }
-  Ok(tools)
-}
-
 /// Given a list of tool names, return their JSON schemas.
 pub fn tools_schemas(
   tool_names: &[String],
@@ -66,6 +62,10 @@ pub fn tools_schemas(
       "web_fetch" => schemas.push(WebFetchTool::new().json_schema()?),
       "bash_command" => schemas.push(BashCommandTool::new().json_schema()?),
       "search" => schemas.push(SearchTool::new().json_schema()?),
+      "apply_patch" => schemas.push(ApplyPatchTool::new().json_schema()?),
+      "read_file" => schemas.push(ReadFileTool::new().json_schema()?),
+      "glob" => schemas.push(GlobTool::new().json_schema()?),
+      "grep" => schemas.push(GrepTool::new().json_schema()?),
       _ => {
         if let Some(tool) = http_tool_map.get(name.as_str()) {
           schemas.push(tool.json_schema()? as Value);
@@ -75,6 +75,23 @@ pub fn tools_schemas(
       }
     }
   }
+  // Always include _finalize: the agent calls this with its final answer
+  // to explicitly signal "I'm done" — decouples text production from loop termination.
+  schemas.push(json!({
+    "name": "_finalize",
+    "description": "Call this with your final response text when you have completed all necessary tool calls and are ready to provide the final answer to the user.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "response": {
+          "type": "string",
+          "description": "The final answer text to return to the user."
+        }
+      },
+      "required": ["response"]
+    }
+  }));
+
   crate::log::log(
     "debug",
     &format!(
@@ -171,6 +188,10 @@ fn try_handle_tool_call(
     "web_fetch" => WebFetchTool::new().json_schema()?,
     "bash_command" => BashCommandTool::new().json_schema()?,
     "search" => SearchTool::new().json_schema()?,
+    "apply_patch" => ApplyPatchTool::new().json_schema()?,
+    "read_file" => ReadFileTool::new().json_schema()?,
+    "glob" => GlobTool::new().json_schema()?,
+    "grep" => GrepTool::new().json_schema()?,
     _ => {
       let http_tools = load_http_tools();
       let tool = http_tools
@@ -188,6 +209,10 @@ fn try_handle_tool_call(
     "web_fetch" => WebFetchTool::new().handle(args),
     "bash_command" => BashCommandTool::new().handle(args),
     "search" => SearchTool::new().handle(args),
+    "apply_patch" => ApplyPatchTool::new().handle(args),
+    "read_file" => ReadFileTool::new().handle(args),
+    "glob" => GlobTool::new().handle(args),
+    "grep" => GrepTool::new().handle(args),
     _ => {
       let http_tools = load_http_tools();
       let tool = http_tools
