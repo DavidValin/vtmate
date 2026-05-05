@@ -76,6 +76,7 @@ pub fn spawn_ui_thread(
 
     let mut waiting_for_first_line = true;
     let mut skip_next_bottom_bar = false;
+    let mut interrupt_shown = false;
 
     loop {
       while let Ok(msg) = rx_ui.try_recv() {
@@ -112,6 +113,7 @@ pub fn spawn_ui_thread(
           }
 
           "stream" => {
+            interrupt_shown = false;
             let msg_str = parts.next().unwrap();
 
             if waiting_for_first_line {
@@ -135,16 +137,19 @@ pub fn spawn_ui_thread(
             pending_stream.clear();
             waiting_for_first_line = false;
 
-            handle_line_message(
-              &mut out,
-              "\n\n🛑 USER interrupted",
-              &mut buffer,
-              &mut ui_state,
-              &spinner,
-              &status_line,
-              &mut bottom_bar,
-            );
-            skip_next_bottom_bar = true;
+            if !interrupt_shown {
+              handle_line_message(
+                &mut out,
+                "\n\n🛑 USER interrupted",
+                &mut buffer,
+                &mut ui_state,
+                &spinner,
+                &status_line,
+                &mut bottom_bar,
+              );
+              interrupt_shown = true;
+              skip_next_bottom_bar = true;
+            }
           }
 
           "modal_show" => {
