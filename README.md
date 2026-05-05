@@ -714,4 +714,21 @@ Test all:
 cargo test
 ```
 
+## Testing
+
+Test tools:
+```
+cargo test \
+  --test glob_test \
+  --test grep_test \
+  --test read_file_test \
+  --test  apply_patch_test
+```
+
+Test all:
+```
+cargo test
+```
+
+
 Have fun o:)
