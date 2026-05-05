@@ -23,6 +23,7 @@ pub async fn llama_server_stream_response_into(
   tools: &[String],
   mut on_tool_call: Option<&mut dyn FnMut(&serde_json::Value)>,
   mut on_reasoning: Option<&mut dyn FnMut(&str)>,
+  think: bool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   crate::log::log(
     "debug",
@@ -95,13 +96,13 @@ pub async fn llama_server_stream_response_into(
         let payload = json!({
           "model": llama_model,
           "messages": messages.iter().map(|m| json!({ "role": m.role, "content": m.content })).collect::<Vec<_>>(),
-          "think": false,
+          "think": think,
           "stream": true,
           "tools": tools_payload,
           "tool_choice": if include_tools { Some("auto") } else { None::<&str> },
           "parallel_tool_calls": if include_tools { Some(false) } else { None::<bool> },
           "options": {
-            "think": false
+            "think": think
           },
         });
         crate::log::log(
@@ -129,13 +130,13 @@ pub async fn llama_server_stream_response_into(
         let payload = json!({
           "model": llama_model,
           "messages": messages.iter().map(|m| json!({ "role": m.role, "content": m.content })).collect::<Vec<_>>(),
-          "think": false,
+          "think": think,
           "stream": true,
           "tools": tools_payload,
           "tool_choice": if include_tools { Some("auto") } else { None::<&str> },
           "parallel_tool_calls": if include_tools { Some(false) } else { None::<bool> },
           "options": {
-            "think": false
+            "think": think
           },
         });
         client.post(&url).json(&payload)
