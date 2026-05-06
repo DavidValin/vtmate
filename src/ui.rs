@@ -76,6 +76,7 @@ pub fn spawn_ui_thread(
 
     let mut waiting_for_first_line = true;
     let mut skip_next_bottom_bar = false;
+    let mut interrupt_shown = false;
 
     loop {
       while let Ok(msg) = rx_ui.try_recv() {
@@ -112,6 +113,7 @@ pub fn spawn_ui_thread(
           }
 
           "stream" => {
+            interrupt_shown = false;
             let msg_str = parts.next().unwrap();
 
             if waiting_for_first_line {
@@ -135,16 +137,19 @@ pub fn spawn_ui_thread(
             pending_stream.clear();
             waiting_for_first_line = false;
 
-            handle_line_message(
-              &mut out,
-              "\n\n🛑 USER interrupted",
-              &mut buffer,
-              &mut ui_state,
-              &spinner,
-              &status_line,
-              &mut bottom_bar,
-            );
-            skip_next_bottom_bar = true;
+            if !interrupt_shown {
+              handle_line_message(
+                &mut out,
+                "\n\n🛑 USER interrupted",
+                &mut buffer,
+                &mut ui_state,
+                &spinner,
+                &status_line,
+                &mut bottom_bar,
+              );
+              interrupt_shown = true;
+              skip_next_bottom_bar = true;
+            }
           }
 
           "modal_show" => {
@@ -181,15 +186,24 @@ pub fn spawn_ui_thread(
             out.flush().unwrap();
 
             // Re-send history lines
+            let is_debate = GLOBAL_STATE
+              .get()
+              .map(|s| s.debate_enabled.load(Ordering::SeqCst))
+              .unwrap_or(false);
             for msg in conversation_history.lock().unwrap().iter() {
               let role_label = if msg.role == "assistant" {
-                "\x1b[48;5;22;37mASSISTANT:\x1b[0m"
+                if is_debate {
+                  let name = msg.agent_name.as_deref().unwrap_or("ASSISTANT");
+                  format!("\x1b[48;5;22;37m{}:\x1b[0m", name)
+                } else {
+                  "\x1b[48;5;22;37mASSISTANT:\x1b[0m".to_string()
+                }
               } else {
-                "\x1b[47;30mUSER:\x1b[0m"
+                "\x1b[47;30mUSER:\x1b[0m".to_string()
               };
               handle_line_message(
                 &mut out,
-                role_label,
+                &role_label,
                 &mut buffer,
                 &mut ui_state,
                 &spinner,

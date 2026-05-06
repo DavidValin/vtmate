@@ -23,6 +23,7 @@ mod playback;
 mod record;
 mod state;
 mod stt;
+mod tools;
 mod tts;
 mod ui;
 mod util;

@@ -8,21 +8,33 @@ use reqwest::StatusCode;
 use serde_json::json;
 use std::sync::{Arc, atomic::AtomicU64};
 
-/// Stream response from Llama/Ollama endpoints, fallback if one fails, and mid-stream cancellation support
+/// Stream response from Llama/Ollama endpoints, fallback if one fails, and mid-stream cancellation support.
+/// When `include_tools` is true, the LLM may return tool_calls which are delivered via `on_tool_call`.
+/// Reasoning tokens (from models like Gemma 4) are delivered via `on_reasoning`.
 pub async fn llama_server_stream_response_into(
   messages: &Vec<crate::conversation::ChatMessage>,
   llama_host: &str,
   llama_model: &str,
   server_type: &str,
-
   interrupt_counter: Arc<AtomicU64>,
   expected_interrupt: u64,
   on_piece: &mut dyn FnMut(&str),
+  include_tools: bool,
+  tools: &[String],
+  mut on_tool_call: Option<&mut dyn FnMut(&serde_json::Value)>,
+  mut on_reasoning: Option<&mut dyn FnMut(&str)>,
+  think: bool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  crate::log::log(
+    "debug",
+    &format!(
+      "llama_server_stream_response_into called with include_tools: {} tools: {:?}",
+      include_tools, tools
+    ),
+  );
   #[derive(Clone, Copy, Debug)]
   enum ApiKind {
     OaiChat,
-    OllamaGenerate,
     OllamaChat,
   }
 
@@ -53,18 +65,12 @@ pub async fn llama_server_stream_response_into(
       }
       "ollama" => {
         out.push((
-          format!("http://{}/v1/generate", base),
-          ApiKind::OllamaGenerate,
-        ));
-        out.push((format!("http://{}/api/chat", base), ApiKind::OllamaChat));
-      }
-      _ => {
-        out.push((
           format!("http://{}/v1/chat/completions", base),
           ApiKind::OaiChat,
         ));
         out.push((format!("http://{}/api/chat", base), ApiKind::OllamaChat));
       }
+      _ => {}
     }
     out
   }
@@ -82,35 +88,62 @@ pub async fn llama_server_stream_response_into(
 
     let req = match kind {
       ApiKind::OaiChat => {
+        let tools_payload = if include_tools {
+          Some(crate::tools::tools_schemas(tools).unwrap_or_default())
+        } else {
+          None
+        };
         let payload = json!({
           "model": llama_model,
           "messages": messages.iter().map(|m| json!({ "role": m.role, "content": m.content })).collect::<Vec<_>>(),
-          "think": false,
-          "stream": true
-        });
-        client.post(&url).json(&payload)
-      }
-      ApiKind::OllamaGenerate => {
-        let prompt_str = messages
-          .iter()
-          .map(|m| m.content.as_str())
-          .collect::<Vec<&str>>()
-          .join("\n");
-        let payload = json!({
-          "model": llama_model,
-          "prompt": prompt_str,
-          "think": false,
+          "think": think,
           "stream": true,
-          "max_tokens": 1024
+          "tools": tools_payload,
+          "tool_choice": if include_tools { Some("auto") } else { None::<&str> },
+          "parallel_tool_calls": if include_tools { Some(false) } else { None::<bool> },
+          "options": {
+            "think": think
+          },
         });
+        crate::log::log(
+          "debug",
+          &format!(
+            "OAI payload tools: {:?}",
+            tools_payload.as_ref().map(|v| v
+              .iter()
+              .filter_map(|t| t.get("name").and_then(|n| n.as_str()))
+              .collect::<Vec<_>>())
+          ),
+        );
         client.post(&url).json(&payload)
       }
       ApiKind::OllamaChat => {
+        let tools_payload = if include_tools {
+          Some(crate::tools::tools_schemas(tools).unwrap_or_default())
+        } else {
+          None
+        };
+        crate::log::log(
+          "debug",
+          &format!(
+            "Ollama payload tools: {:?}",
+            tools_payload.as_ref().map(|v| v
+              .iter()
+              .filter_map(|t| t.get("name").and_then(|n| n.as_str()))
+              .collect::<Vec<_>>())
+          ),
+        );
         let payload = json!({
           "model": llama_model,
           "messages": messages.iter().map(|m| json!({ "role": m.role, "content": m.content })).collect::<Vec<_>>(),
-          "think": false,
-          "stream": true
+          "think": think,
+          "stream": true,
+          "tools": tools_payload,
+          "tool_choice": if include_tools { Some("auto") } else { None::<&str> },
+          "parallel_tool_calls": if include_tools { Some(false) } else { None::<bool> },
+          "options": {
+            "think": think
+          },
         });
         client.post(&url).json(&payload)
       }
@@ -176,15 +209,64 @@ pub async fn llama_server_stream_response_into(
                   on_piece(content);
                 }
               }
+              // Check for tool_calls in message (non-streaming response)
+              if let Some(tcs) = message.get("tool_calls").and_then(|t| t.as_array()) {
+                if !tcs.is_empty() {
+                  if let Some(ref mut cb) = on_tool_call {
+                    for tc in tcs {
+                      // Extract name and arguments from inside "function" wrapper
+                      if let Some(func) = tc.get("function") {
+                        if let Some(name) = func.get("name").and_then(|v| v.as_str()) {
+                          let args = func.get("arguments").and_then(|v| v.as_str()).unwrap_or("");
+                          let msg = format!("\n\x1b[32m {} called with {}", name, args);
+                          crate::log::send_line(&msg);
+                        }
+                      }
+                      cb(tc);
+                    }
+                  }
+                }
+              }
+              // End-of-stream signal from Ollama chat API
+              if v.get("done").and_then(|x| x.as_bool()) == Some(true) {
+                return Ok(());
+              }
             } else {
               match kind {
-                ApiKind::OaiChat | ApiKind::OllamaChat | ApiKind::OllamaGenerate => {
+                ApiKind::OaiChat | ApiKind::OllamaChat => {
                   if let Some(choices) = v.get("choices").and_then(|c| c.as_array()) {
                     for choice in choices {
                       if let Some(delta) = choice.get("delta") {
                         if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
                           if !content.is_empty() {
                             on_piece(content);
+                          }
+                        }
+                        // Extract reasoning tokens (Gemma 4, DeepSeek, etc.)
+                        if let Some(reasoning) = delta.get("reasoning").and_then(|r| r.as_str()) {
+                          if !reasoning.is_empty() {
+                            if let Some(ref mut cb) = on_reasoning {
+                              cb(reasoning);
+                            }
+                          }
+                        }
+                        // Check for tool_calls in delta (streaming response)
+                        if let Some(tcs) = delta.get("tool_calls").and_then(|t| t.as_array()) {
+                          if !tcs.is_empty() {
+                            if let Some(ref mut cb) = on_tool_call {
+                              for tc in tcs {
+                                // Extract name and arguments from inside "function" wrapper
+                                if let Some(func) = tc.get("function") {
+                                  if let Some(name) = func.get("name").and_then(|v| v.as_str()) {
+                                    let args =
+                                      func.get("arguments").and_then(|v| v.as_str()).unwrap_or("");
+                                    let msg = format!("\n\x1b[32m {} called with {}", name, args);
+                                    crate::log::send_line(&msg);
+                                  }
+                                }
+                                cb(tc);
+                              }
+                            }
                           }
                         }
                       }

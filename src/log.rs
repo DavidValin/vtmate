@@ -11,6 +11,12 @@ static VERBOSE: AtomicBool = AtomicBool::new(false);
 static TX_UI: OnceLock<Sender<String>> = OnceLock::new();
 
 // API
+
+pub fn send_line(msg: &str) {
+  if let Some(sender) = TX_UI.get() {
+    let _ = sender.send(format!("line|{}", msg));
+  }
+}
 // ------------------------------------------------------------------
 
 pub fn set_verbose(v: bool) {
