@@ -33,18 +33,21 @@ impl LineRange {
     }
 
     let start: usize = parts[0].parse().map_err(|_| {
-      format!("Invalid range start '{}': must be a positive integer", parts[0])
+      format!(
+        "Invalid range start '{}': must be a positive integer",
+        parts[0]
+      )
     })?;
 
     let end: usize = parts[1].parse().map_err(|_| {
-      format!("Invalid range end '{}': must be a positive integer", parts[1])
+      format!(
+        "Invalid range end '{}': must be a positive integer",
+        parts[1]
+      )
     })?;
 
     if start == 0 {
-      return Err(format!(
-        "Invalid range '{}': line numbers must be >= 1",
-        s
-      ));
+      return Err(format!("Invalid range '{}': line numbers must be >= 1", s));
     }
 
     if start > end {
@@ -155,5 +158,3 @@ impl Tool for ReadFileTool {
     }))
   }
 }
-
-

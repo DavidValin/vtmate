@@ -3,7 +3,7 @@
 // ------------------------------------------------------------------
 
 use super::Tool;
-use glob::{glob_with, MatchOptions};
+use glob::{MatchOptions, glob_with};
 use serde_json::{Value, json};
 use std::fs;
 use std::time::SystemTime;
@@ -78,7 +78,10 @@ impl Tool for GlobTool {
 
     // Format output
     if matches.is_empty() {
-      return Ok(format!("No files matched pattern '{}' in '{}'", pattern, root));
+      return Ok(format!(
+        "No files matched pattern '{}' in '{}'",
+        pattern, root
+      ));
     }
 
     let mut result = format!(
@@ -125,5 +128,3 @@ impl Tool for GlobTool {
     }))
   }
 }
-
-

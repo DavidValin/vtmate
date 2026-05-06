@@ -3,7 +3,7 @@
 // ------------------------------------------------------------------
 
 use super::Tool;
-use glob::{glob_with, MatchOptions};
+use glob::{MatchOptions, glob_with};
 use regex::RegexBuilder;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -107,10 +107,11 @@ impl Tool for GrepTool {
         if let Some(m) = re.find(line) {
           let line_1based = line_num + 1;
           let col_1based: usize = m.start() + 1;
-          results
-            .entry(filepath.clone())
-            .or_default()
-            .push((line_1based, col_1based, line.trim_end_matches('\r').to_string()));
+          results.entry(filepath.clone()).or_default().push((
+            line_1based,
+            col_1based,
+            line.trim_end_matches('\r').to_string(),
+          ));
 
           total_matches += 1;
           if total_matches >= max_results {
@@ -143,7 +144,9 @@ impl Tool for GrepTool {
 
     for (filepath, matches) in &results {
       // Strip the search path prefix for cleaner display
-      let display_path = filepath.strip_prefix(&path_prefix).unwrap_or(filepath.as_str());
+      let display_path = filepath
+        .strip_prefix(&path_prefix)
+        .unwrap_or(filepath.as_str());
       file_count += 1;
       output.push_str(&format!("[{}]\n", display_path));
       for (line, col, text) in matches {
@@ -158,10 +161,7 @@ impl Tool for GrepTool {
         total_matches, file_count, max_results
       )
     } else {
-      format!(
-        "Found {} matches in {} file(s)",
-        total_matches, file_count
-      )
+      format!("Found {} matches in {} file(s)", total_matches, file_count)
     };
 
     Ok(format!("{}\n{}", output.trim_end(), summary))
@@ -203,5 +203,3 @@ impl Tool for GrepTool {
     }))
   }
 }
-
-
