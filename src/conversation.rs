@@ -671,110 +671,6 @@ fn push_or_update_last_assistant(
   });
 }
 
-/* ------------------------------------------------------------------
- *  ReAct loop (Reasoning + Acting)
- * ------------------------------------------------------------------
- *
- *  PURPOSE
- *    Sends the user request to an LLM, optionally with tools, and loops
- *    through reasoning → tool call → tool result → more reasoning until
- *    a final answer is produced.
- *
- *  TWO MODES
- *
- *  1. No-tools mode (simple reply)
- *     - LLM response is streamed char-by-char to the UI via `on_piece`.
- *     - Each phrase boundary (newline or period) triggers immediate TTS.
- *     - Phrases are pushed directly into `conversation_history` as they
- *       arrive, replacing the empty assistant placeholder.
- *     - Once streaming completes, the full reply is returned. Single pass.
- *
- *  2. Tools mode (multi-iteration ReAct)
- *     - A temporary `react_messages` vector carries full context across
- *       all iterations: system prompt, original history, user request,
- *       reasoning, tool calls, and tool results.
- *     - `conversation_history` only sees the original user message and
- *       the final reply — intermediate reasoning and tool calls are hidden.
- *
- *  ITERATION FLOW (tools mode)
- *
- *     ┌───────────────────────────────────────────────────────┐
- *     │  1. STREAM from LLM                                   │
- *     │     - `on_piece`     → reply text (displayed to UI)   │
- *     │     - `on_reasoning` → reasoning (grey, not spoken)   │
- *     │     - `on_tool_call` → collects tool call JSON        │
- *     └──────────────────┬────────────────────────────────────┘
- *                        ▼
- *     ┌───────────────────────────────────────────────────────┐
- *     │  2. CLASSIFY output                                   │
- *     │     - No tool calls + text → reasoning or final answer│
- *     │     - Tool calls present → execute tools              │
- *     └──────────────────┬────────────────────────────────────┘
- *                        ▼
- *     ┌───────────────────────────────────────────────────────┐
- *     │  3A. NO TOOL CALLS                                    │
- *     │     - reasoning + reply pushed to react_messages      │
- *     │     - consecutive_text_only counter incremented       │
- *     │     - If >= 2 text-only iterations → FINAL ANSWER     │
- *     │       (LLM already had one chance to call tools)      │
- *     └──────────────────┬────────────────────────────────────┘
- *                        ▼
- *     ┌───────────────────────────────────────────────────────┐
- *     │  3B. TOOL CALLS                                       │
- *     │     - reasoning + reply pushed to react_messages      │
- *     │     - Each tool call executed sequentially            │
- *     │     - `finalize` → immediate final answer (shortcut) │
- *     │     - Tool results accumulated, pushed to             │
- *     │       react_messages for next iteration               │
- *     └──────────────────┬────────────────────────────────────┘
- *                        ▼
- *                    (loop again)
- *
- *  CONTEXT MANAGEMENT
- *
- *     conversation_history (persistent, saved to file):
- *       ┌─────────────────────────────────────┐
- *       │ system                              │
- *       │ prior conversation turns            │
- *       │ user: "which services does this..." │
- *       │ assistant: "This company offers…    │ ← only final reply
- *       └─────────────────────────────────────┘
- *
- *     react_messages (temporary, per-react_loop invocation):
- *       ┌─────────────────────────────────────────────┐
- *       │ system                                      │
- *       │ prior conversation turns                    │
- *       │ user: "which services does this..."         │
- *       │ assistant: [reasoning] web_fetch(...)       │ ← iteration 1
- *       │ assistant: Tool result [...]: {...}         │ ← tool output 1
- *       │ assistant: [reasoning] web_fetch(...)       │ ← iteration 2
- *       │ assistant: Tool result [...]: {...}         │ ← tool output 2
- *       │ assistant: [reasoning]                      │ ← iteration 3
- *       │ assistant: "This company offers..."         │ ← final text
- *       └─────────────────────────────────────────────┘
- *
- *  TERMINATION (three paths)
- *
- *     1. `finalize` tool call — parameterless signal; the last text response
- *        produced by the LLM (from the same iteration) becomes the final answer
- *     2. Text-only response with no tools available — immediate final answer
- *     3. `react_loop_count > 20` — safety guard, returns last text response
- *
- *  INTERRUPTION
- *     An `AtomicU64` counter is captured at entry (`my_interrupt`). Any
- *     user action that increments the counter (Esc key, new utterance)
- *     is checked at the top of each iteration and during tool execution.
- *     On interruption the empty placeholder is cleaned up and settings
- *     are restored before returning.
- *
- *  UI / TTS
- *     - Reply text: streamed to UI via `stream|` during LLM streaming
- *     - Reasoning: streamed via `stream|\x1b[90m...\x1b[0m` (grey)
- *     - TTS in no-tools mode: per-phrase during streaming + flush
- *     - TTS in tools mode: only for intermediate reply text (between
- *       tool iterations) and for the final reply (handled by caller)
- * 
- * ------------------------------------------------------------------ */
 fn react_loop(
   state: &AppState,
   settings: &crate::config::AgentSettings,
@@ -788,6 +684,8 @@ fn react_loop(
   available_tools: &[String],
 ) -> Option<String> {
   let system_prompt = settings.system_prompt.replace("\\n", "\n");
+  let system_prompt = augment_system_prompt(system_prompt, available_tools);
+
   let assistant_name = settings.name.clone();
   let assistant_name_for_closure = assistant_name.clone();
   let my_interrupt = interrupt_counter.load(Ordering::SeqCst);
@@ -815,7 +713,7 @@ fn react_loop(
 
   let max_react_loop_iters = 20;
   let mut react_loop_count = 0;
-  // Track the last reply text across iterations so finalize can return it
+  // Track the last reply text across iterations
   let mut last_reply = String::new();
 
   loop {
@@ -829,7 +727,11 @@ fn react_loop(
       let final_reply = react_messages
         .iter()
         .rev()
-        .find(|m| m.role == "assistant" && !m.content.contains("Tool result") && !m.content.contains("Tool error"))
+        .find(|m| {
+          m.role == "assistant"
+            && !m.content.contains("Tool result")
+            && !m.content.contains("Tool error")
+        })
         .map(|m| {
           // Strip reasoning prefix if present, prefer the reply part
           m.content.clone()
@@ -856,11 +758,11 @@ fn react_loop(
       return Some("User interrupted the request.".to_string());
     }
 
-   let mut tool_calls: Vec<serde_json::Value> = Vec::new();
+    let mut tool_calls: Vec<serde_json::Value> = Vec::new();
     let tool_calls_count = tool_calls.len();
-    // Pre-compute tool list for prompts (includes finalize)
+    // Pre-compute tool list for prompts
     let tool_list = if has_tools {
-      format!("{}, finalize", available_tools.join(", "))
+      available_tools.join(", ")
     } else {
       String::new()
     };
@@ -935,7 +837,10 @@ fn react_loop(
 
     crate::log::log(
       "debug",
-      &format!("react_loop: sending to LLM with tools: {:?}", available_tools),
+      &format!(
+        "react_loop: sending to LLM with tools: {:?}",
+        available_tools
+      ),
     );
     let stream_result = rt.block_on(crate::llm::llama_server_stream_response_into(
       &react_messages,
@@ -949,6 +854,7 @@ fn react_loop(
       available_tools,
       Some(&mut on_tool_call),
       Some(&mut on_reasoning_piece),
+      has_tools,
     ));
 
     if let Err(e) = stream_result {
@@ -1003,6 +909,7 @@ fn react_loop(
     );
 
     // No tool calls: LLM produced reasoning text
+    // ----------------------------------------------------------
     if tool_calls.is_empty() {
       if reply.is_empty() && reasoning.is_empty() {
         // LLM produced nothing - force it to give a final text response
@@ -1024,8 +931,15 @@ fn react_loop(
         return Some(reply);
       }
 
+      // If LLM produced a text response (no tools), return it immediately
+      if !reply.is_empty() {
+        // Push final reply into history
+        push_or_update_last_assistant(&conversation_history, &reply, &assistant_name_for_closure);
+        perform_save(&conversation_history, settings);
+        restore_agent_settings(state, originals);
+        return Some(reply);
+      }
       // Tools available but LLM produced text without calling any.
-      // Show the LLM its response with a prompt to call finalize.
       last_reply = reply.clone();
       if !reasoning.is_empty() {
         react_messages.push(ChatMessage {
@@ -1034,19 +948,10 @@ fn react_loop(
           agent_name: Some(assistant_name_for_closure.clone()),
         });
       }
-     let prompt = format!(
-        "here is the response\n----------------------------\n{}\n---------------------------\n\nAvailable tools: {}. If you want this response to be the final response call the \"finalize\" tool call. Otherwise make another tool call or produce a different response.",
-        reply, tool_list
-      );
-      react_messages.push(ChatMessage {
-        role: "assistant".to_string(),
-        content: prompt,
-        agent_name: Some(settings.name.clone()),
-      });
       continue;
     }
 
-  // Tool calls present — display reasoning (already streamed) and reply before executing tools
+    // Tool calls present — display reasoning (already streamed) and reply before executing tools
     if !reasoning.is_empty() {
       let _ = tx_ui.send("line|".to_string());
     }
@@ -1073,13 +978,12 @@ fn react_loop(
       });
     }
 
-
-
     crate::log::log(
       "debug",
       &format!("react_loop: executing {} tool calls", tool_calls.len()),
     );
-   // Execute tool calls and collect results to feed back to LLM
+
+    // Execute tool calls and collect results to feed back to LLM
     let mut tool_outputs: Vec<String> = Vec::new();
     for tc in &tool_calls {
       if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
@@ -1110,25 +1014,6 @@ fn react_loop(
         };
         let args_str = serde_json::to_string(&args_parsed).unwrap_or("{}".to_string());
 
-       // finalize: parameterless signal that the last text response is final.
-         if tool_name == "finalize" {
-           // Use the last reply text (from current or previous iteration).
-           let final_reply = if reply.is_empty() {
-             last_reply.clone()
-           } else {
-             reply.clone()
-           };
-           // Replace empty placeholder with final reply
-           let mut hist = conversation_history.lock().unwrap();
-           if let Some(last) = hist.last_mut() {
-             last.content = final_reply.clone();
-           }
-           drop(hist);
-           perform_save(&conversation_history, settings);
-           restore_agent_settings(state, originals);
-           return Some(final_reply);
-         }
-
         let payload = format!(r#"{{"name":"{}","arguments":{}}}"#, tool_name, args_str);
         // Log tool execution to UI
         let _ = tx_ui.send(format!(
@@ -1158,20 +1043,20 @@ fn react_loop(
                 .join(", ")
             })
             .unwrap_or_default();
-         // Record failure output
-           tool_outputs.push(format!(
-             "Tool error [{}#{}]: {}. Try a different approach or call 'finalize' tool if you have enough information.",
-             tool_name, tool_id, reasons
-           ));
+          // Record failure output
+          tool_outputs.push(format!(
+            "Tool error [{}#{}]: {}. Try a different approach.",
+            tool_name, tool_id, reasons
+          ));
           // Display the tool failure in the UI
           let _ = tx_ui.send(format!("line|The tool `{}` failed: {}", tool_name, reasons));
           let _ = tx_ui.send("line|".to_string());
         } else {
-        // Record success output
-           tool_outputs.push(format!(
-             "Tool result [{}#{}]: {}. Available tools: {}. If this contains what you need, produce your response text and call 'finalize', otherwise make a different tool call.",
-             tool_name, tool_id, output, tool_list
-           ));
+          // Record success output
+          tool_outputs.push(format!(
+            "Tool result [{}#{}]: {}.\n\nIf this result contains what you need, use this tool result to produce your text response for the user, otherwise make a different tool call.",
+            tool_name, tool_id, output
+          ));
           // Display the tool result in the UI
           let _ = tx_ui.send(format!("line|{}", output.trim()));
           let _ = tx_ui.send("line|".to_string());
@@ -1180,25 +1065,13 @@ fn react_loop(
         let _ = tx_ui.send("line|\n\x1b[32m".to_string());
       }
     }
+
     // Accumulate tool outputs in react_messages for next iteration
     let output_text = tool_outputs.join("\n");
     if !output_text.is_empty() {
       react_messages.push(ChatMessage {
         role: "assistant".to_string(),
         content: output_text.clone(),
-        agent_name: Some(settings.name.clone()),
-      });
-    }
-
-  // Show the LLM its last text response with a prompt to call finalize
-    if !last_reply.is_empty() {
-      let prompt = format!(
-        "here is the response\n----------------------------\n{}\n---------------------------\n\nAvailable tools: {}. If you want this response to be the final response call the \"finalize\" tool call. Otherwise make another tool call or produce a different response.",
-        last_reply, tool_list
-      );
-      react_messages.push(ChatMessage {
-        role: "assistant".to_string(),
-        content: prompt,
         agent_name: Some(settings.name.clone()),
       });
     }
@@ -1317,6 +1190,78 @@ fn create_full_context_messages(
     agent_name: None,
   });
   messages
+}
+
+// Augment system prompt with tool instructions if tools are available
+fn augment_system_prompt(mut system_prompt: String, available_tools: &[String]) -> String {
+  if !available_tools.is_empty() {
+    let current_date = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let cwd = std::env::current_dir()
+      .unwrap_or_default()
+      .to_string_lossy()
+      .to_string();
+    system_prompt.push_str("\n\nAvailable tools:\n");
+    for tool in available_tools {
+      match tool.as_str() {
+        "read_file" => {
+          system_prompt.push_str(
+            "        - read_file: Read file contents, including multiple range reads at once\n",
+          );
+        }
+        "apply_patch" => {
+          system_prompt
+            .push_str("        - apply_patch: applies a patch to a file using diff notation\n");
+        }
+        "bash_command" => {
+          system_prompt
+            .push_str("        - bash_command: Execute bash commands (ls, grep, find, etc.)\n");
+        }
+        "glob" => {
+          system_prompt
+            .push_str("        - glob: search for files using glob patterns like **/*.js or *\n");
+        }
+        "grep" => {
+          system_prompt.push_str("        - grep: search matching content across files in a directory using full regex syntax\n");
+        }
+        "search" => {
+          system_prompt.push_str("        - search: search online urls for a search term\n");
+        }
+        "web_fetch" => {
+          system_prompt.push_str("        - web_fetch: get page links and content of a url\n");
+        }
+        _ => {}
+      }
+    }
+    // Add dynamic HTTP request tools
+    let http_defs = crate::tools::http_request::load_http_request_definitions();
+    for def in http_defs {
+      if available_tools.contains(&def.tool_definition.name) {
+        system_prompt.push_str(&format!(
+          "        - {}: {}\n",
+          def.tool_definition.name, def.tool_definition.description
+        ));
+      }
+    }
+    system_prompt.push_str("\n");
+    system_prompt.push_str("      Guidelines:\n");
+    system_prompt.push_str("        - Use read_file to examine files instead of bash_command.\n");
+    system_prompt.push_str("        - Use bash_comand for file operations like ls, rg, find... or to build a smart command for a complex task in one go\n");
+    system_prompt.push_str(
+      "        - Use bash_command for new files, complete rewrites or append to end of file\n",
+    );
+    system_prompt.push_str("        - Use apply_patch for precise file changes, unified diff patch should match exactly\n");
+    system_prompt.push_str("        - When changing multiple separate locations in one file, use one apply_patch call with multiple entries instead of multiple apply_patch calls\n");
+    system_prompt.push_str("        - Each apply_patch call uses the current file state, not old file states before applying changes to it. Do not emit overlapping or nested edits. Merge nearby changes into one apply_patch.\n");
+    system_prompt.push_str("        - Keep apply_patch as small as possible while still being unique in the file. Do not pad with large unchanged regions.\n");
+    system_prompt.push_str("        - Use write only for new files or complete rewrites.\n");
+    system_prompt.push_str("        - Be concise in your responses\n");
+    system_prompt.push_str("        - Show file paths clearly when working with files\n\n");
+    system_prompt.push_str("        - If you need new information, use search to find results and then web_fetch to inspect the page content\n\n");
+    system_prompt.push_str(&format!("        Current date: {}\n", current_date));
+    system_prompt.push_str(&format!("        Current working directory: {}\n", cwd));
+  }
+
+  system_prompt
 }
 
 fn apply_agent_settings(

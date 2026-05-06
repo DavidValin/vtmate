@@ -75,17 +75,6 @@ pub fn tools_schemas(
       }
     }
   }
-  // Always include finalize: parameterless signal that the last text response
-  // produced by the model is the final answer. react_loop extracts that text.
-  schemas.push(json!({
-    "name": "finalize",
-    "description": "Call this when you have completed all necessary tool calls and have the final text answer for the user. Your last text response will be used as the final answer.",
-    "parameters": {
-      "type": "object",
-      "properties": {},
-      "required": []
-    }
-  }));
 
   crate::log::log(
     "debug",

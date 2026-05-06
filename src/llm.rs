@@ -109,7 +109,10 @@ pub async fn llama_server_stream_response_into(
           "debug",
           &format!(
             "OAI payload tools: {:?}",
-            tools_payload.as_ref().map(|v| v.iter().filter_map(|t| t.get("name").and_then(|n| n.as_str())).collect::<Vec<_>>())
+            tools_payload.as_ref().map(|v| v
+              .iter()
+              .filter_map(|t| t.get("name").and_then(|n| n.as_str()))
+              .collect::<Vec<_>>())
           ),
         );
         client.post(&url).json(&payload)
@@ -124,7 +127,10 @@ pub async fn llama_server_stream_response_into(
           "debug",
           &format!(
             "Ollama payload tools: {:?}",
-            tools_payload.as_ref().map(|v| v.iter().filter_map(|t| t.get("name").and_then(|n| n.as_str())).collect::<Vec<_>>())
+            tools_payload.as_ref().map(|v| v
+              .iter()
+              .filter_map(|t| t.get("name").and_then(|n| n.as_str()))
+              .collect::<Vec<_>>())
           ),
         );
         let payload = json!({

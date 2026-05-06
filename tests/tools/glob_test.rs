@@ -26,11 +26,7 @@ static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
 fn make_test_files() -> String {
   let dir = std::env::temp_dir();
   let unique = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-  let test_dir = dir.join(format!(
-    "glob_test_{}_{}",
-    std::process::id(),
-    unique
-  ));
+  let test_dir = dir.join(format!("glob_test_{}_{}", std::process::id(), unique));
   std::fs::create_dir_all(&test_dir).unwrap();
 
   // Create a subdirectory

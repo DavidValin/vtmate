@@ -13,7 +13,7 @@ pub trait Tool {
 #[path = "../../src/tools/apply_patch.rs"]
 mod apply_patch;
 
-use self::apply_patch::{parse_range, ApplyPatchTool};
+use self::apply_patch::{ApplyPatchTool, parse_range};
 
 #[test]
 fn test_simple_replace() {
@@ -27,7 +27,8 @@ fn test_simple_replace() {
 #[test]
 fn test_add_line() {
   let content = "line1\nline2\nline3\n";
-  let patch = "--- a/test.txt\n+++ b/test.txt\n@@ -1,3 +1,4 @@\n line1\n line2\n+inserted\n line3\n";
+  let patch =
+    "--- a/test.txt\n+++ b/test.txt\n@@ -1,3 +1,4 @@\n line1\n line2\n+inserted\n line3\n";
   let hunks = ApplyPatchTool::parse_hunks(patch).unwrap();
   let result = ApplyPatchTool::apply_hunks(content, &hunks).unwrap();
   assert_eq!(result, "line1\nline2\ninserted\nline3\n");
@@ -49,7 +50,10 @@ fn test_combined_add_remove() {
   let patch = "--- a/test.txt\n+++ b/test.txt\n@@ -1,5 +1,6 @@\n line1\n-line2\n+line2 modified\n line3\n+inserted line\n line4\n line5\n";
   let hunks = ApplyPatchTool::parse_hunks(patch).unwrap();
   let result = ApplyPatchTool::apply_hunks(content, &hunks).unwrap();
-  assert_eq!(result, "line1\nline2 modified\nline3\ninserted line\nline4\nline5\n");
+  assert_eq!(
+    result,
+    "line1\nline2 modified\nline3\ninserted line\nline4\nline5\n"
+  );
 }
 
 #[test]
@@ -76,7 +80,8 @@ fn test_no_trailing_newline() {
 #[test]
 fn test_context_mismatch_returns_error() {
   let content = "line1\nline2\nline3\n";
-  let patch = "--- a/test.txt\n+++ b/test.txt\n@@ -1,3 +1,3 @@\n line1\n-wrong\n+line2 modified\n line3\n";
+  let patch =
+    "--- a/test.txt\n+++ b/test.txt\n@@ -1,3 +1,3 @@\n line1\n-wrong\n+line2 modified\n line3\n";
   let hunks = ApplyPatchTool::parse_hunks(patch).unwrap();
   let result = ApplyPatchTool::apply_hunks(content, &hunks);
   assert!(result.is_err());
