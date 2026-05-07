@@ -2,6 +2,7 @@
 name = "vtmate"
 version = "0.4.3"
 edition = "2024"
+build = "build.rs"
 
 authors = ["David Valin <hola@davidvalin.com>"]
 homepage = "https://github.com/DavidValin/vtmate"
@@ -24,6 +25,7 @@ serde_json = "1"
 urlencoding = "2"
 url = "2"
 whisper-rs = { version = "0.15.1", default-features = false }
+ort = { version = "2.0.0-rc.11", features = [ "std", "ndarray", "tls-rustls" ] }
 hound = "3"
 crossterm = "0.27"
 tokio = { version = "1", features = ["rt", "macros"] }
@@ -50,11 +52,21 @@ once_cell = "1"
 flate2 = "1"
 tar = "0.4"
 
-
 [features]
-whisper-openblas = ["whisper-rs/openblas"]
-whisper-vulkan   = ["whisper-rs/vulkan"]
-whisper-cuda     = ["whisper-rs/cuda"]
-whisper-hipblas  = ["whisper-rs/hipblas"]
-whisper-metal    = ["whisper-rs/metal"]
-whisper-logs     = ["whisper-rs/log_backend", "whisper-rs/tracing_backend"]
+default               = []
+whisper-openblas      = ["whisper-rs/openblas"]
+whisper-vulkan        = ["whisper-rs/vulkan"]
+whisper-cuda          = ["whisper-rs/cuda"]
+whisper-hipblas       = ["whisper-rs/hipblas"]
+whisper-metal         = ["whisper-rs/metal"]
+whisper-logs          = ["whisper-rs/log_backend", "whisper-rs/tracing_backend"]
+ort-download-binaries = ["ort/download-binaries"]
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
+lto = "thin"
+panic = "abort"
+strip = "symbols"
+incremental = false
+

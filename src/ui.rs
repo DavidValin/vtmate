@@ -20,7 +20,6 @@ use std::thread;
 use std::time::Duration;
 
 // API
-// ------------------------------------------------------------------
 
 pub static STOP_STREAM: AtomicBool = AtomicBool::new(false);
 
@@ -43,6 +42,7 @@ pub fn spawn_ui_thread(
   rx_ui: Receiver<String>,
   conversation_history: crate::conversation::ConversationHistory,
 ) -> thread::JoinHandle<()> {
+  // separate thread for bottom bar update + render
   thread::spawn(move || {
     let conversation_history = conversation_history;
     let mut ui_state = ui_state;
