@@ -11,7 +11,7 @@ $ErrorActionPreference = "Stop"
 # ==========================================================
 # CONFIG
 # ==========================================================
-$BIN_BASE       = "ai-mate"
+$BIN_BASE       = "vtmate"
 $PROJECT_ROOT   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $DIST_DIR       = Join-Path $PROJECT_ROOT "dist"
 $TARGET_DIR     = Join-Path $PROJECT_ROOT "target-cross"
