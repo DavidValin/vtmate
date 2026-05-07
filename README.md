@@ -57,16 +57,6 @@ https://github.com/user-attachments/assets/8b9e982c-ba97-4aeb-8e55-1db6a92bc164
 - 📌 Interface with `OpenTTS` system (requires external docker service)
 - 📌 Use any gguf model from huggingface.com (using llama-server) or any ollama model
 
-### English demo
-https://github.com/user-attachments/assets/d9c27108-41f7-4148-8c32-28c8ca6d8516
-
-### Spanish demo
-https://github.com/user-attachments/assets/e612feaa-8ab0-4761-9c67-53ec7d40cab7
-
-### Status
-
-✅ Ready to kick in! [Download](https://github.com/DavidValin/vtmate/releases)
-
 ## How it works
 
 ```
@@ -372,70 +362,6 @@ If you need help:
 ```
 vtmate --help
 ```
-
-## Build vtmate from source code
-
-- There are 3 script `build_macos.sh`, `build_linux.sh` and `build_windows.bat`
-- The scripts accept --arch flag to build for specific architecture
-- If you are building for specific acceleration, make sure the SDKs are installed
-- During build, TTS and STT models are fetched locally (around 1GB)
-- The built binaries will be placed under `./dist` once built
-
-***MacOS***
-- (require docker for building the image)
-- You can only build the MacOS build from a mac machine
-```
-./build_macos.sh
-```
-
-***Linux***
-- (require docker for building the image)
-- Openblas is always included in all variants by default
-
-Examples:
-```
-WITH_CUDA=0 ./build_linux.sh --arch amd64
-WITH_CUDA=1 ./build_linux.sh --arch amd64
-LINUX_WITH_VULKAN=1 WITH_CUDA=0 ./build_linux.sh --arch amd64
-
-WITH_CUDA=0 ./build_linux.sh --arch arm64
-LINUX_WITH_VULKAN=1 WITH_CUDA=0 ./build_linux.sh --arch arm64
-```
-
-***Windows***
-- You can only build the Windows build from windows
-- You need to install [Visual CPP Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools)
-
-```
-build_windows.bat cpu
-build_windows.bat cuda
-build_windows.bat openblas
-build_windows.bat vulkan
-```
-
-## Tricks
-
-For conveniance create bash aliases with the options you want to use, example:
-
-```
-# English
-alias vtmate_qwen='vtmate --model "qwen3:30b"'
-alias vtmate_llama='vtmate --model "llama3:8b"'
-
-# Spanish
-alias vtmate_es_qwen='vtmate --model "qwen3:30b" --language es'
-alias vtmate_es_llama='vtmate --model "llama3:8b" --language es'
-```
-
-## Useful to know
-
-vtmate self contains espeak-ng-data, the whisper tiny & small models and kokoro model and voices which will be autoextracted when running vtmate if they are not found in next locations:
-
-- `~/.vtmate/espeak-ng-data.tar.gz`
-- `~/.whisper-models/ggml-tiny.bin`
-- `~/.whisper-models/ggml-small.bin`
-- `~/.cache/k/0.onnx`
-- `~/.cache/k/0.bin`
 
 ## Language support
 

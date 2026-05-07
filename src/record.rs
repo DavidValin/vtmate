@@ -28,6 +28,7 @@ pub fn record_thread(
   gate_until_ms: Arc<AtomicU64>,
   interrupt_counter: Arc<AtomicU64>,
   peak: Arc<Mutex<f32>>,
+
   ui: crate::state::UiState,
   volume: Arc<Mutex<f32>>,
   recording_paused: Arc<AtomicBool>,
@@ -335,37 +336,6 @@ fn build_input_i16(
   device.build_input_stream(
     config,
     move |data: &[f32], _| {
-      if recording_paused.load(Ordering::Relaxed) {
-        // Flush buffer if not empty
-        let mut b = utt_buf.lock().unwrap();
-        if !b.is_empty() {
-          let audio = std::mem::take(&mut *b);
-          let denom = (sample_rate as u64).saturating_mul(channels as u64).max(1);
-          let dur_ms = (audio.len() as u64).saturating_mul(1000) / denom;
-          if dur_ms >= min_utt_ms {
-            crate::util::SPEECH_END_AT.store(
-              crate::util::now_ms(&START_INSTANT),
-              std::sync::atomic::Ordering::SeqCst,
-            );
-            let _ = tx_utt.send(crate::audio::AudioChunk {
-              data: audio,
-              channels,
-              sample_rate,
-            });
-          } else {
-            crate::log::log(
-              "info",
-              &format!(
-                "[{}ms] utterance too short ({}ms < {}ms), dropped",
-                crate::util::now_ms(start_instant),
-                dur_ms,
-                min_utt_ms
-              ),
-            );
-          }
-        }
-        return;
-      }
       if recording_paused.load(Ordering::Relaxed) {
         // Flush buffer if not empty
         let mut b = utt_buf.lock().unwrap();

@@ -43,7 +43,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   }
   crate::log::set_verbose(args.verbose || false);
   let _ = START_INSTANT.get_or_init(Instant::now);
-  let args = crate::config::Args::parse();
 
   // Ctrl-C handler to set should_exit flag
   let should_exit = Arc::new(std::sync::atomic::AtomicBool::new(false));
