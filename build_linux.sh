@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BIN_NAME="ai-mate"
+BIN_NAME="vtmate"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DIST_DIR="${PROJECT_ROOT}/dist"
 PKG_DIR="${DIST_DIR}/packages"
@@ -932,7 +932,7 @@ if want_arch arm64; then build_linux_arm64_docker_variants; fi
 # -----------------------------
 # Check static build
 # -----------------------------
-for f in dist/ai-mate-*-linux-*/ai-mate; do
+for f in dist/vtmate-*-linux-*/vtmate; do
   echo "Checking $f"
 
   if ldd "$f" 2>&1 | grep -q "not a dynamic"; then

@@ -1,33 +1,38 @@
 [package]
-name = "ai-mate"
-version = "0.3.3"
+name = "vtmate"
+version = "0.4.3"
 edition = "2024"
 build = "build.rs"
 
 authors = ["David Valin <hola@davidvalin.com>"]
-homepage = "https://github.com/DavidValin/ai-mate"
-repository = "https://github.com/DavidValin/ai-mate"
+homepage = "https://github.com/DavidValin/vtmate"
+repository = "https://github.com/DavidValin/vtmate"
 description = "A simple audio ai conversation system"
 license-file = "LICENSE"
 readme = "README.md"
 
 [dependencies]
-openssl = { version = "0.10.75", features = ["vendored"] }
+anyhow = "1.0"
+serde_ini = "0.2.0"
 clap = { version = "4", features = ["derive", "env"] }
 cpal = "0.15"
 crossbeam-channel = "0.5"
-reqwest = { version = "0.12", features = ["stream", "multipart", "blocking", "json", "rustls-tls"] }
+reqwest = { version = "0.12", features = ["stream", "multipart", "blocking", "json", "native-tls-vendored"] }
 futures-util = "0.3"   # for StreamExt
 bytes = "1.4"          # for Bytes in streaming
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 urlencoding = "2"
-whisper-rs = { version = "0.15.1" }
+url = "2"
+whisper-rs = { version = "0.15.1", default-features = false }
+ort = { version = "2.0.0-rc.11", features = [ "std", "ndarray", "tls-rustls" ] }
 hound = "3"
 crossterm = "0.27"
 tokio = { version = "1", features = ["rt", "macros"] }
-kokoro-micro = { version = "1.0.0" }
-ort = { version = "2.0.0-rc.11", features = [ "std", "ndarray", "tls-rustls" ] }
+ctrlc = "3"
+kokoro-micro = "1.0.0"
+supersonic2-tts = "1.0.1"
+espeak-rs = "0.1.9"
 flate2 = "1"
 tar = "0.4"
 sha2 = "0.10"
@@ -35,19 +40,17 @@ hex = "0.4"
 directories = "5"
 log = "0.4"
 env_logger = "0.11"
+encoding_rs = "0.8"
+encoding_rs_io = "0.1"
+chrono = "0.4.44"
+uuid = { version = "1.23.1", features = ["v4"] }
 
 [build-dependencies]
 sha2 = "0.10"
 hex = "0.4"
 once_cell = "1"
-
-[profile.release]
-opt-level = 3
-codegen-units = 1
-lto = "thin"
-panic = "abort"
-strip = "symbols"
-incremental = false
+flate2 = "1"
+tar = "0.4"
 
 [features]
 default               = []
@@ -58,3 +61,12 @@ whisper-hipblas       = ["whisper-rs/hipblas"]
 whisper-metal         = ["whisper-rs/metal"]
 whisper-logs          = ["whisper-rs/log_backend", "whisper-rs/tracing_backend"]
 ort-download-binaries = ["ort/download-binaries"]
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
+lto = "thin"
+panic = "abort"
+strip = "symbols"
+incremental = false
+

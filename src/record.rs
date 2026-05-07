@@ -2,17 +2,15 @@
 //  Record
 // ------------------------------------------------------------------
 
-use crate::ui::STOP_STREAM;
 use crate::START_INSTANT;
 use cpal::traits::{DeviceTrait, StreamTrait};
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::Sender;
 use std::sync::OnceLock;
 use std::sync::{
-  atomic::{AtomicBool, AtomicU64, Ordering},
   Arc, Mutex,
+  atomic::{AtomicBool, AtomicU64, Ordering},
 };
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 // API
 // ------------------------------------------------------------------
@@ -29,7 +27,6 @@ pub fn record_thread(
   playback_active: Arc<AtomicBool>,
   gate_until_ms: Arc<AtomicU64>,
   interrupt_counter: Arc<AtomicU64>,
-  stop_all_rx: Receiver<()>,
   peak: Arc<Mutex<f32>>,
   ui: crate::state::UiState,
   volume: Arc<Mutex<f32>>,
@@ -74,7 +71,6 @@ pub fn record_thread(
       user_speaking.clone(),
       last_voice_ms.clone(),
       stop_sent.clone(),
-      stop_all_rx.clone(),
       peak.clone(),
       ui,
       volume.clone(),
@@ -101,7 +97,6 @@ pub fn record_thread(
       user_speaking.clone(),
       last_voice_ms.clone(),
       stop_sent.clone(),
-      stop_all_rx.clone(),
       peak.clone(),
       ui,
       volume.clone(),
@@ -128,7 +123,6 @@ pub fn record_thread(
       user_speaking.clone(),
       last_voice_ms.clone(),
       stop_sent.clone(),
-      stop_all_rx.clone(),
       peak.clone(),
       ui,
       volume.clone(),
@@ -142,12 +136,10 @@ pub fn record_thread(
 
   stream.play()?;
 
-  while stop_all_rx.try_recv().is_err() {
-    thread::sleep(Duration::from_millis(20));
+  // Keep the stream alive until the program exits
+  loop {
+    std::thread::sleep(std::time::Duration::from_millis(10));
   }
-
-  drop(stream);
-  Ok(())
 }
 
 // PRIVATE
@@ -171,7 +163,6 @@ fn build_input_f32(
   user_speaking: Arc<AtomicBool>,
   last_voice_ms: Arc<AtomicU64>,
   stop_sent: Arc<AtomicBool>,
-  stop_all_rx: Receiver<()>,
   peak: Arc<Mutex<f32>>,
   ui: crate::state::UiState,
   volume: Arc<Mutex<f32>>,
@@ -182,9 +173,6 @@ fn build_input_f32(
   device.build_input_stream(
     config,
     move |data: &[f32], _| {
-      if stop_all_rx.try_recv().is_ok() {
-        return;
-      }
       let local_peak = peak_abs(data);
 
       if let Ok(mut p) = peak.lock() {
@@ -243,8 +231,7 @@ fn build_input_f32(
           let mut vol = volume.lock().unwrap();
           *vol = 0.0;
           interrupt_counter.fetch_add(1, Ordering::SeqCst);
-          STOP_STREAM.store(true, Ordering::Relaxed);
-          let _ = tx_ui.send("stop_ui|".to_string());
+          let _ = tx_ui.send("user_interrupt_show|".to_string());
           stop_sent.store(true, Ordering::Relaxed);
           gate_until_ms.store(
             crate::util::now_ms(start_instant).saturating_add(hangover_ms),
@@ -261,7 +248,14 @@ fn build_input_f32(
         let last = last_voice_ms.load(Ordering::Relaxed);
 
         // silence detected
-        if last > 0 && crate::util::now_ms(start_instant).saturating_sub(last) >= end_silence_ms {
+        if last > 0
+          && !crate::state::GLOBAL_STATE
+            .get()
+            .unwrap()
+            .ptt
+            .load(Ordering::Relaxed)
+          && crate::util::now_ms(start_instant).saturating_sub(last) >= end_silence_ms
+        {
           crate::log::log("info", "Silence detected");
           ui.agent_speaking.store(false, Ordering::Relaxed);
           user_speaking.store(false, Ordering::Relaxed);
@@ -331,7 +325,6 @@ fn build_input_i16(
   user_speaking: Arc<AtomicBool>,
   last_voice_ms: Arc<AtomicU64>,
   stop_sent: Arc<AtomicBool>,
-  stop_all_rx: Receiver<()>,
   peak: Arc<Mutex<f32>>,
   ui: crate::state::UiState,
   volume: Arc<Mutex<f32>>,
@@ -342,7 +335,35 @@ fn build_input_i16(
   device.build_input_stream(
     config,
     move |data: &[f32], _| {
-      if stop_all_rx.try_recv().is_ok() {
+      if recording_paused.load(Ordering::Relaxed) {
+        // Flush buffer if not empty
+        let mut b = utt_buf.lock().unwrap();
+        if !b.is_empty() {
+          let audio = std::mem::take(&mut *b);
+          let denom = (sample_rate as u64).saturating_mul(channels as u64).max(1);
+          let dur_ms = (audio.len() as u64).saturating_mul(1000) / denom;
+          if dur_ms >= min_utt_ms {
+            crate::util::SPEECH_END_AT.store(
+              crate::util::now_ms(&START_INSTANT),
+              std::sync::atomic::Ordering::SeqCst,
+            );
+            let _ = tx_utt.send(crate::audio::AudioChunk {
+              data: audio,
+              channels,
+              sample_rate,
+            });
+          } else {
+            crate::log::log(
+              "info",
+              &format!(
+                "[{}ms] utterance too short ({}ms < {}ms), dropped",
+                crate::util::now_ms(start_instant),
+                dur_ms,
+                min_utt_ms
+              ),
+            );
+          }
+        }
         return;
       }
       if recording_paused.load(Ordering::Relaxed) {
@@ -407,8 +428,7 @@ fn build_input_i16(
           let mut vol = volume.lock().unwrap();
           *vol = 0.0;
           interrupt_counter.fetch_add(1, Ordering::SeqCst);
-          STOP_STREAM.store(true, Ordering::Relaxed);
-          let _ = tx_ui.send("stop_ui|".to_string());
+          let _ = tx_ui.send("user_interrupt_show|".to_string());
           stop_sent.store(true, Ordering::Relaxed);
           gate_until_ms.store(
             crate::util::now_ms(start_instant).saturating_add(hangover_ms),
@@ -423,7 +443,14 @@ fn build_input_i16(
           b.extend_from_slice(&tmp);
         }
         let last = last_voice_ms.load(Ordering::Relaxed);
-        if last > 0 && crate::util::now_ms(start_instant).saturating_sub(last) >= end_silence_ms {
+        if last > 0
+          && !crate::state::GLOBAL_STATE
+            .get()
+            .unwrap()
+            .ptt
+            .load(Ordering::Relaxed)
+          && crate::util::now_ms(start_instant).saturating_sub(last) >= end_silence_ms
+        {
           crate::log::log("info", "Silence detected");
           ui.agent_speaking.store(false, Ordering::Relaxed);
           user_speaking.store(false, Ordering::Relaxed);
@@ -492,7 +519,6 @@ fn build_input_u16(
   user_speaking: Arc<AtomicBool>,
   last_voice_ms: Arc<AtomicU64>,
   stop_sent: Arc<AtomicBool>,
-  stop_all_rx: Receiver<()>,
   peak: Arc<Mutex<f32>>,
   ui: crate::state::UiState,
   volume: Arc<Mutex<f32>>,
@@ -503,10 +529,6 @@ fn build_input_u16(
   device.build_input_stream(
     config,
     move |data: &[u16], _| {
-      if stop_all_rx.try_recv().is_ok() {
-        return;
-      }
-
       // Convert once (preserve existing behavior), and reuse for peak + utt_buf + resample
       let mut tmp = Vec::with_capacity(data.len());
       for &s in data {
@@ -569,8 +591,7 @@ fn build_input_u16(
           let mut vol = volume.lock().unwrap();
           *vol = 0.0;
           interrupt_counter.fetch_add(1, Ordering::SeqCst);
-          STOP_STREAM.store(true, Ordering::Relaxed);
-          let _ = tx_ui.send("stop_ui|".to_string());
+          let _ = tx_ui.send("user_interrupt_show|".to_string());
           stop_sent.store(true, Ordering::Relaxed);
           gate_until_ms.store(
             crate::util::now_ms(start_instant).saturating_add(hangover_ms),
@@ -585,7 +606,14 @@ fn build_input_u16(
           b.extend_from_slice(&tmp);
         }
         let last = last_voice_ms.load(Ordering::Relaxed);
-        if last > 0 && crate::util::now_ms(start_instant).saturating_sub(last) >= end_silence_ms {
+        if last > 0
+          && !crate::state::GLOBAL_STATE
+            .get()
+            .unwrap()
+            .ptt
+            .load(Ordering::Relaxed)
+          && crate::util::now_ms(start_instant).saturating_sub(last) >= end_silence_ms
+        {
           crate::log::log("info", "Silence detected");
           // FIX: ensure UI clears speaking state on silence
           ui.agent_speaking.store(false, Ordering::Relaxed);

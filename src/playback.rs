@@ -4,6 +4,7 @@
 
 use crate::state::GLOBAL_STATE;
 use cpal::traits::{DeviceTrait, StreamTrait};
+use crossbeam_channel::Sender;
 use crossbeam_channel::{Receiver, select};
 use std::collections::VecDeque;
 use std::sync::OnceLock;
@@ -16,6 +17,13 @@ use std::time::Duration;
 use std::time::Instant;
 
 // API
+
+static WAV_TX: OnceLock<Sender<crate::audio::AudioChunk>> = OnceLock::new();
+
+/// Set the global channel used by the WAV writer thread.
+pub fn set_wav_tx(tx: Sender<crate::audio::AudioChunk>) {
+  WAV_TX.set(tx).ok();
+}
 // ------------------------------------------------------------------
 
 pub fn playback_thread(
@@ -25,7 +33,6 @@ pub fn playback_thread(
   config: cpal::StreamConfig,
   rx_audio: Receiver<crate::audio::AudioChunk>,
   stop_play_rx: Receiver<()>,
-  stop_all_rx: Receiver<()>,
   playback_active: Arc<AtomicBool>,
   gate_until_ms: Arc<AtomicU64>,
   paused: Arc<AtomicBool>,
@@ -256,10 +263,7 @@ pub fn playback_thread(
     other => return Err(format!("unsupported output format: {other:?}").into()),
   };
 
-  // Outer loop to recreate stream on interrupt
-  let stop_all_triggered = false;
-  let mut interrupted = false;
-  while !stop_all_triggered {
+  loop {
     stream.play()?;
     // Reset state before each stream
     *volume.lock().unwrap() = 1.0;
@@ -269,28 +273,34 @@ pub fn playback_thread(
     ui.playing.store(false, Ordering::Relaxed);
     loop {
       select! {
-        recv(stop_all_rx) -> _ => {
-          // Interrupt: pause and clear, reset flag to allow new audio
-          stream.pause()?;
-          queue.lock().unwrap().clear();
-          interrupted = true;
-        }
         recv(stop_play_rx) -> _ => {
-          // Stop current stream, drop it, and let outer loop recreate
-          stream.pause()?;
-          // Clear queue immediately before pausing
-          queue.lock().unwrap().clear();
           // Drain any pending audio chunks from rx_audio
           while let Ok(_) = rx_audio.try_recv() {}
-          // Allow CPAL buffer to flush
-          std::thread::sleep(std::time::Duration::from_millis(10));
+          // Clear queue immediately before stopping
+          queue.lock().unwrap().clear();
+          // Stop current stream immediately by dropping it; let outer loop recreate
           break;
         }
         recv(rx_audio) -> msg => {
           let Ok(chunk) = msg else { break };
-          if interrupted {
-            // Drop any audio received during interrupt
-            continue;
+          // Forward to wav writer if set
+          if let Some(tx) = WAV_TX.get() {
+            // Determine data that will actually be played
+            let mut out_data = if chunk.channels != out_channels {
+              convert_channels(&chunk.data, chunk.channels, out_channels)
+            } else {
+              chunk.data.clone()
+            };
+            if chunk.sample_rate != config.sample_rate.0 {
+              let resampled = crate::audio::resample_to(&out_data, out_channels, chunk.sample_rate, config.sample_rate.0);
+              out_data = resampled;
+            }
+            let writer_chunk = crate::audio::AudioChunk {
+              data: out_data,
+              channels: out_channels,
+              sample_rate: config.sample_rate.0,
+            };
+            tx.send(writer_chunk).unwrap_or(());
           }
           let channels = out_channels as usize;
           let max_samples = crate::tts::QUEUE_CAP_FRAMES * channels;
@@ -327,7 +337,6 @@ pub fn playback_thread(
       }
     }
   }
-  Ok(())
 }
 
 // PRIVATE

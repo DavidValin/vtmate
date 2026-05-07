@@ -1,0 +1,44 @@
+%%{init: {'flowchart': {'curve': 'linear'}}}%%
+flowchart LR
+
+    %% Main thread
+    Main(Main)
+
+    %% Thread groups
+    subgraph Audio[Audio Stack]
+        Rec[Record thread]
+        Conv[Conversation thread]
+        TTS[TTS thread]
+        Play[Playback thread]
+    end
+    subgraph Control[Control Stack]
+        Key[Keyboard thread]
+        UI[UI thread]
+    end
+
+    %% Global stop propagation
+    Main -->|stop_all_tx| Audio
+    Main -->|stop_all_tx| Control
+
+    %% Record -> Conversation
+    Rec -->|tx_utt - microphone audio| Conv
+    Rec -->|tx_utt - recognized utterance audio| Conv
+    Rec -->|tx_ui - user_interrupt_show| UI
+
+    %% Conversation -> others
+    Conv -->|tx_tts - TTS sentence| TTS
+    Conv -->|tx_play - speech audio| Play
+    Conv -->|tx_ui - conversation chunks & 🧠 Memory saved| UI
+    Conv -->|stop_all_tx - global stop| Main
+
+    %% TTS -> Playback
+    TTS -->|tx_play - synthetized audio chunks| Play
+    TTS -->|stop_play_tx - interruption| Play
+
+    %% Playback interactions
+    Play -->|stop_play_rx - stop playback| Play
+    Play -->|stop_all_rx - global stop| Main
+
+    %% Keyboard interactions
+    Key -->|stop_all_tx - global stop| Main
+    Key -->|stop_play_tx - ESC stop| Play

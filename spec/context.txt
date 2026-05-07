@@ -1,0 +1,48 @@
+Domain:
+---------------------------------------------------------------------------------------------------
+  ai voice assistant for the terminal
+  includes integrated stt and tts systems
+  integrates with ollama and llama.cpp engines
+
+Tech Stack:
+---------------------------------------------------------------------------------------------------
+
+  Language: Rust
+  Key libraries: whisper-rs, supersonic2, kokoro-micro, ort, cpal, crossbeam-channel
+  Testing: no testing framework
+  Data persistance: -
+
+Architecture:
+---------------------------------------------------------------------------------------------------
+
+  Multithreaded event-driven terminal application using terminal raw mode
+  Consists of several main threads:
+    UI thread: receives messages with new state and draws the terminal ui continuously
+    TTS thread: receives sentences to turn into audio
+    Playback thread: receives audio to be played
+    Record thread: records audio from the microphone and sends the audio chunks to TTS thread
+    Conversation thread: handles a single conversation with an agent, orchestrating user input and agent responses
+    Keyword thread: handles keyboard events from the user
+
+Features:
+---------------------------------------------------------------------------------------------------
+
+  - 📌 Continuous Voice chat (live conversation): `records user continuously and stops on silence, submitting the request to the agent`
+  - 📌 Push to Talk mode (PTT): `keep &lt;SPACE&gt; pressed while talking and release to stop recording`
+  - 🚀 AI agents debate (2 agents talking to each other): `give an initial input and let the agents talk to each other. You can interrupt in the middle of the debate changing the subject`
+  - 📌 Realtime agent swap: `change the agent by pressing &lt;ARROW_LEFT&gt; / &lt;ARROW_RIGHT&gt; (applicable to next response)`
+  - 📌 Voice interrupt: `the agent stops talking if you interrupt via voice`
+  - 📌 Recording Pause / Resume: `toggle "&lt;SPACE&gt;" key to pause / resume voice recording only`
+  - 📌 Stop PlayBack: `press "&lt;ESCAPE&gt;" ONCE to stop the playback for the current response`
+  - 📌 Interrupt: `press "&lt;ESCAPE&gt;" TWICE to interrupt the current response alltogether`
+  - 📌 Voice speed change: `change the agent voice speed by pressing &lt;ARROW_UP&gt; / &lt;ARROW_DOWN&gt; (applicable to next response)`
+  - 📌 Voice read a txt file: `vtmate -r myfile.txt`
+  - 📌 Voice read text from stdin phrase by phrase: `echo "Hello. How are you?" | vtmate -r -`
+  - 📌 Save conversation as audio and text: `vtmate -s`
+  - 📌 Load separate settings file with different agents: `vtmate -c philosophers-settings.txt`
+  - 📌 Integrated `whisper`
+  - 📌 Integrated `kokoro TTS` system
+  - 📌 Interface with `OpenTTS` system
+  - 📌 Supports `ollama` or `llama-server`
+  - 📌 28 languages supported (`vtmate --list-voices`)
+  - 📌 Use any gguf model from huggingface.com or ollama models (small models reply faster)
