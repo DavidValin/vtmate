@@ -11,6 +11,7 @@ use supersonic2_tts_crate::TtsEngine as SupersonicTtsEngine;
 pub mod kokoro_tts;
 pub mod opentts_tts;
 pub mod supersonic2_tts;
+pub mod supertonic_tts;
 
 use std::sync::OnceLock;
 use std::sync::{Arc, Mutex, atomic::AtomicU64};
@@ -36,9 +37,13 @@ pub enum SpeakOutcome {
 
 static KOKORO_ENGINE: OnceLock<Arc<Mutex<TtsEngine>>> = OnceLock::new();
 static SUPSONIC_ENGINE: OnceLock<Arc<Mutex<SupersonicTtsEngine>>> = OnceLock::new();
+static SUPERTONIC_ENGINE: OnceLock<Arc<Mutex<crate::tts::supertonic_tts::TextToSpeech>>> = OnceLock::new();
 
 // Supported languages for Supersonic2 TTS
 static SUPSONIC_LANGS: &[&str] = &["en", "es", "fr", "ko", "pt"];
+// Supported languages for Supertonic TTS
+// NOTE: Current model is opensource-en (English only)
+static SUPERTONIC_LANGS: &[&str] = &["en"];
 
 pub fn speak(
   text: &str,
@@ -70,6 +75,17 @@ pub fn speak(
       voice,
       speed,
       gain,
+      language,
+      tx,
+      interrupt_counter,
+      expected_interrupt,
+    )
+  } else if tts == "supertonic" {
+    let speed = crate::state::get_speed();
+    supertonic_tts::speak_via_supertonic(
+      text,
+      voice,
+      speed,
       language,
       tx,
       interrupt_counter,
@@ -168,6 +184,8 @@ pub fn get_all_available_languages() -> Vec<&'static str> {
   );
   // Include supersonic2 supported languages
   langs.extend(SUPSONIC_LANGS.iter().copied());
+  // Include supertonic supported languages
+  langs.extend(SUPERTONIC_LANGS.iter().copied());
   langs.sort();
   langs.dedup();
   langs
@@ -200,6 +218,15 @@ pub fn get_voices_for(tts: &str, language: &str) -> Vec<&'static str> {
         Vec::new()
       }
     }
+    "supertonic" => {
+      // Supertonic voices are supported for all its languages
+      let supertonic_voices = crate::tts::supertonic_tts::SUPERTONIC_VOICE_STYLES;
+      if SUPERTONIC_LANGS.contains(&language) {
+        supertonic_voices.to_vec()
+      } else {
+        Vec::new()
+      }
+    }
     _ => Vec::new(),
   }
 }
@@ -208,11 +235,28 @@ pub fn print_voices() {
   let langs = get_all_available_languages();
 
   println!(
+    "supertonic 🏆 High Quality Voices\n======================================================\n{:<8}\t{:<12}\t{:<2}\t{}",
+    "TTS", "Language", "Flag", "Voices"
+  );
+  println!("======================================================");
+  for lang in langs.iter() {
+    let voices = get_voices_for("supertonic", lang);
+    if voices.is_empty() {
+      continue;
+    }
+    let flag = crate::util::get_flag(lang);
+    let voices_str = voices.join(", ");
+    println!(
+      "{:<8}\t{:<12}\t{:<2}\t{}",
+      "supertonic", lang, flag, voices_str
+    );
+  }
+  println!();
+  println!(
     "supersonic2 🏆 High Quality Voices\n======================================================\n{:<8}\t{:<12}\t{:<2}\t{}",
     "TTS", "Language", "Flag", "Voices"
   );
   println!("======================================================");
-  // kokoro
   for lang in langs.iter() {
     let voices = get_voices_for("supersonic2", lang);
     if voices.is_empty() {

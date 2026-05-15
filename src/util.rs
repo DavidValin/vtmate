@@ -156,6 +156,9 @@ pub fn get_user_home_path() -> Option<PathBuf> {
 /// Strip special characters from text for TTS
 /// Handles code blocks (text between ```) by not stripping chars inside them
 /// Preserves unicode characters (accents, tildes, etc.)
+/// NOTE: Keeps sentence-ending punctuation (. ! ?) and commas intact
+/// because TTS models need them for proper sentence boundary detection
+/// and natural speech rhythm.
 pub fn strip_special_chars(s: &str) -> String {
   let mut result = String::new();
   let parts: Vec<&str> = s.split("```").collect();
@@ -164,14 +167,14 @@ pub fn strip_special_chars(s: &str) -> String {
     if !inside {
       result.extend(part.chars().filter(|c| {
         // Keep letters (including unicode letters with accents), digits, spaces, and whitespace
-        // Remove only specific punctuation marks
+        // Remove only specific special characters (keep . ! ? , ; : for TTS)
         if c.is_alphanumeric() || c.is_whitespace() {
           true
         } else {
-          // Remove specific special characters
+          // Remove specific special characters but KEEP sentence punctuation
           ![
-            '+', '.', '~', '*', '&', '-', ',', ';', ':', '(', ')', '[', ']', '{', '}', '"', '”',
-            '\'', '#', '`', '|', '!', '?', '/', '\\', '<', '>', '=', '@', '$', '%', '^',
+            '+', '~', '*', '&', '-', '(', ')', '[', ']', '{', '}', '"', '”',
+            '\'', '#', '`', '|', '/', '\\', '<', '>', '=', '@', '$', '%', '^',
           ]
           .contains(c)
         }
