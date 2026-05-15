@@ -97,7 +97,8 @@ Explanation on the fields:
                           to be released to submit the audio.
   ------------------------------------------------------------
   * tts:                  the tts system to use, it can be
-                          'kokoro' or 'opentts'.
+                          'kokoro', 'opentts', 'supersonic2',
+                          or 'supertonic'.
 
                             - opentts requires opentts docker
                             container to be running:
@@ -619,11 +620,11 @@ fn validate_voice(voice: &str, language: &str, tts: &str) -> Result<(), std::io:
 }
 
 fn validate_tts(tts: &str) -> Result<(), std::io::Error> {
-  if tts != "kokoro" && tts != "opentts" && tts != "supersonic2" {
+  if tts != "kokoro" && tts != "opentts" && tts != "supersonic2" && tts != "supertonic" {
     return Err(std::io::Error::new(
       std::io::ErrorKind::Other,
       format!(
-        "Invalid tts '{}' . Must be 'kokoro', 'opentts', or 'supersonic2'",
+        "Invalid tts '{}' . Must be 'kokoro', 'opentts', 'supersonic2', or 'supertonic'",
         tts
       ),
     ));
