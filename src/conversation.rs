@@ -770,7 +770,7 @@ impl PhraseSpeaker {
     if trigger { self.flush() } else { None }
   }
   fn flush(&mut self) -> Option<String> {
-    let out = self.buf.trim().to_string();
+    let out = self.buf.trim_end().to_string();
     self.buf.clear();
     if out.is_empty() { None } else { Some(out) }
   }
