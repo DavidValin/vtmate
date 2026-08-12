@@ -250,8 +250,10 @@ pub fn conversation_thread(
               let debate_agents = state.debate_agents.lock().unwrap().clone();
               let turn = state.debate_turn.load(Ordering::SeqCst) as usize;
               let agent_count = debate_agents.len();
-              let next_agent = &debate_agents[turn % agent_count];
-              let _ = apply_agent_settings(state, next_agent);
+              if agent_count > 0 {
+                let next_agent = &debate_agents[turn % agent_count];
+                let _ = apply_agent_settings(state, next_agent);
+              }
 
               let _pcm_f32: Vec<f32> = utt.data.clone();
               let mono_f32 = crate::audio::convert_to_mono(&utt);
