@@ -723,29 +723,33 @@ fn react_loop(
         "warn",
         "react loop exceeded max iterations, using last text as final response",
       );
-      // Extract last assistant text from react_messages as final response
-      let final_reply = react_messages
-        .iter()
-        .rev()
-        .find(|m| {
-          m.role == "assistant"
-            && !m.content.contains("Tool result")
-            && !m.content.contains("Tool error")
-        })
-        .map(|m| {
-          // Strip reasoning prefix if present, prefer the reply part
-          m.content.clone()
-        })
-        .unwrap_or_else(|| {
-          crate::log::log("error", "no text response found in react loop history");
-          "Lo siento, no pude completar la solicitud tras varios intentos.".to_string()
+      // Prefer the last thing actually said; fall back to scanning react_messages.
+      let final_reply = if !last_reply.is_empty() {
+        last_reply.clone()
+      } else {
+        react_messages
+          .iter()
+          .rev()
+          .find(|m| {
+            m.role == "assistant"
+              && !m.content.contains("Tool result")
+              && !m.content.contains("Tool error")
+          })
+          .map(|m| m.content.clone())
+          .unwrap_or_else(|| {
+            crate::log::log("error", "no text response found in react loop history");
+            "Lo siento, no pude completar la solicitud tras varios intentos.".to_string()
+          })
+      };
+      // last_reply was already pushed to conversation_history when it was produced.
+      if last_reply.is_empty() {
+        remove_empty_placeholder(&conversation_history);
+        conversation_history.lock().unwrap().push(ChatMessage {
+          role: "assistant".to_string(),
+          content: final_reply.clone(),
+          agent_name: Some(assistant_name_for_closure.clone()),
         });
-      remove_empty_placeholder(&conversation_history);
-      conversation_history.lock().unwrap().push(ChatMessage {
-        role: "assistant".to_string(),
-        content: final_reply.clone(),
-        agent_name: Some(assistant_name_for_closure.clone()),
-      });
+      }
       perform_save(&conversation_history, settings);
       restore_agent_settings(state, originals);
       return Some(final_reply);
@@ -760,12 +764,6 @@ fn react_loop(
 
     let mut tool_calls: Vec<serde_json::Value> = Vec::new();
     let tool_calls_count = tool_calls.len();
-    // Pre-compute tool list for prompts
-    let tool_list = if has_tools {
-      available_tools.join(", ")
-    } else {
-      String::new()
-    };
     crate::log::log(
       "debug",
       &format!(
@@ -960,6 +958,13 @@ fn react_loop(
       last_reply = reply.clone();
       let _ = tts_tx.send((reply.clone(), my_interrupt, settings.voice.clone()));
       let _ = tts_done_rx.recv();
+      // Persist so it stays in context for later loop iterations and turns.
+      push_or_update_last_assistant(&conversation_history, &reply, &assistant_name_for_closure);
+      react_messages.push(ChatMessage {
+        role: "assistant".to_string(),
+        content: reply.clone(),
+        agent_name: Some(assistant_name_for_closure.clone()),
+      });
       // Add reasoning to react_messages so LLM has it in context.
       // The reply itself will be shown via the "here is the response" prompt after tool outputs.
       if !reasoning.is_empty() {

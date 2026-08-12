@@ -91,3 +91,7 @@ path = "tests/tools/read_file_test.rs"
 [[test]]
 name = "apply_patch_test"
 path = "tests/tools/apply_patch_test.rs"
+
+[[test]]
+name = "http_request_test"
+path = "tests/tools/http_request_test.rs"

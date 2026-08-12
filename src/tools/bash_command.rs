@@ -20,6 +20,27 @@ impl BashCommandTool {
   }
 }
 
+/// Best-effort check for a bare `rm` after `;`, `&&`, `||`, `|`, a newline, or `( )`.
+/// Not a sandbox — just a tripwire against the obvious `ls; rm -rf ~` case.
+fn contains_rm_invocation(command: &str) -> bool {
+  let normalized = command
+    .replace("&&", ";")
+    .replace("||", ";")
+    .replace('|', ";")
+    .replace('\n', ";")
+    .replace('(', ";")
+    .replace(')', ";");
+  normalized.split(';').any(|segment| {
+    let mut seg = segment.trim();
+    for prefix in ["sudo ", "env ", "command ", "exec "] {
+      if let Some(stripped) = seg.strip_prefix(prefix) {
+        seg = stripped.trim_start();
+      }
+    }
+    seg == "rm" || seg.starts_with("rm ") || seg.starts_with("rm\t")
+  })
+}
+
 impl Tool for BashCommandTool {
   fn name(&self) -> &str {
     "bash_command"
@@ -35,8 +56,7 @@ impl Tool for BashCommandTool {
       .ok_or("Missing 'command' argument")?;
 
     // Block the dangerous "rm" command
-    let trimmed = command.trim();
-    if trimmed == "rm" || trimmed.starts_with("rm ") || trimmed.starts_with("rm\t") {
+    if contains_rm_invocation(command) {
       return Err("The 'rm' command is not allowed via this tool".into());
     }
 

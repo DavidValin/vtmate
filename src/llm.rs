@@ -38,6 +38,60 @@ pub async fn llama_server_stream_response_into(
     OllamaChat,
   }
 
+  /// Accumulates one streamed tool call across SSE chunks, keyed by `index`.
+  #[derive(Default, Clone)]
+  struct ToolCallBuilder {
+    id: String,
+    name: String,
+    arguments: String,
+  }
+
+  /// Turn accumulated builders into complete tool_call JSON values, draining the buffer.
+  fn finalize_tool_calls(builders: &mut Vec<Option<ToolCallBuilder>>) -> Vec<serde_json::Value> {
+    builders
+      .drain(..)
+      .flatten()
+      .filter(|b| !b.name.is_empty())
+      .map(|b| {
+        json!({
+          "id": b.id,
+          "type": "function",
+          "function": {
+            "name": b.name,
+            "arguments": b.arguments
+          }
+        })
+      })
+      .collect()
+  }
+
+  /// Finalize and dispatch any pending tool calls, if there are any and a callback is set.
+  fn flush_tool_calls(
+    builders: &mut Vec<Option<ToolCallBuilder>>,
+    on_tool_call: &mut Option<&mut dyn FnMut(&serde_json::Value)>,
+  ) {
+    if builders.is_empty() {
+      return;
+    }
+    let calls = finalize_tool_calls(builders);
+    if let Some(cb) = on_tool_call.as_mut() {
+      for tc in &calls {
+        let name = tc
+          .get("function")
+          .and_then(|f| f.get("name"))
+          .and_then(|n| n.as_str())
+          .unwrap_or("");
+        let args = tc
+          .get("function")
+          .and_then(|f| f.get("arguments"))
+          .and_then(|a| a.as_str())
+          .unwrap_or("");
+        crate::log::send_line(&format!("\n\x1b[32m {} called with {}", name, args));
+        cb(tc);
+      }
+    }
+  }
+
   fn should_fallback_status(code: StatusCode) -> bool {
     matches!(
       code,
@@ -177,6 +231,8 @@ pub async fn llama_server_stream_response_into(
     crate::log::log("info", &format!("Streaming response from: {}", url));
     // inside your endpoint loop
     let mut stream = resp.bytes_stream();
+    // Accumulates fragmented tool_calls (see ToolCallBuilder) for this endpoint attempt.
+    let mut tool_call_builders: Vec<Option<ToolCallBuilder>> = Vec::new();
 
     // Bound how long we wait for the next chunk: without this, a server that accepts
     // the connection but stops sending bytes mid-stream (no close, no data) hangs here
@@ -227,6 +283,7 @@ pub async fn llama_server_stream_response_into(
         for line in text.lines() {
           let payload = line.trim().strip_prefix("data:").unwrap_or(line).trim();
           if payload == "[DONE]" {
+            flush_tool_calls(&mut tool_call_builders, &mut on_tool_call);
             return Ok(());
           }
 
@@ -259,6 +316,7 @@ pub async fn llama_server_stream_response_into(
               }
               // End-of-stream signal from Ollama chat API
               if v.get("done").and_then(|x| x.as_bool()) == Some(true) {
+                flush_tool_calls(&mut tool_call_builders, &mut on_tool_call);
                 return Ok(());
               }
             } else {
@@ -280,27 +338,36 @@ pub async fn llama_server_stream_response_into(
                             }
                           }
                         }
-                        // Check for tool_calls in delta (streaming response)
+                        // Accumulate by index — arguments arrive as partial JSON text.
                         if let Some(tcs) = delta.get("tool_calls").and_then(|t| t.as_array()) {
-                          if !tcs.is_empty() {
-                            if let Some(ref mut cb) = on_tool_call {
-                              for tc in tcs {
-                                // Extract name and arguments from inside "function" wrapper
-                                if let Some(func) = tc.get("function") {
-                                  if let Some(name) = func.get("name").and_then(|v| v.as_str()) {
-                                    let args =
-                                      func.get("arguments").and_then(|v| v.as_str()).unwrap_or("");
-                                    let msg = format!("\n\x1b[32m {} called with {}", name, args);
-                                    crate::log::send_line(&msg);
-                                  }
+                          for tc in tcs {
+                            let idx = tc.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
+                            if tool_call_builders.len() <= idx {
+                              tool_call_builders.resize_with(idx + 1, || None);
+                            }
+                            let builder =
+                              tool_call_builders[idx].get_or_insert_with(ToolCallBuilder::default);
+                            if let Some(id) = tc.get("id").and_then(|v| v.as_str()) {
+                              if !id.is_empty() {
+                                builder.id = id.to_string();
+                              }
+                            }
+                            if let Some(func) = tc.get("function") {
+                              if let Some(name) = func.get("name").and_then(|v| v.as_str()) {
+                                if !name.is_empty() {
+                                  builder.name = name.to_string();
                                 }
-                                cb(tc);
+                              }
+                              if let Some(args) = func.get("arguments").and_then(|v| v.as_str()) {
+                                builder.arguments.push_str(args);
                               }
                             }
                           }
                         }
                       }
-                      if choice.get("finish_reason").and_then(|r| r.as_str()) == Some("stop") {
+                      let finish_reason = choice.get("finish_reason").and_then(|r| r.as_str());
+                      if finish_reason == Some("stop") || finish_reason == Some("tool_calls") {
+                        flush_tool_calls(&mut tool_call_builders, &mut on_tool_call);
                         return Ok(());
                       }
                     }
@@ -308,6 +375,7 @@ pub async fn llama_server_stream_response_into(
                   if v.get("done").and_then(|x| x.as_bool()) == Some(true)
                     || v.get("status").and_then(|x| x.as_str()) == Some("completed")
                   {
+                    flush_tool_calls(&mut tool_call_builders, &mut on_tool_call);
                     return Ok(());
                   }
                 }
@@ -318,7 +386,9 @@ pub async fn llama_server_stream_response_into(
       }
     }
 
-    // success streaming completed
+    // Stream ended (closed or stalled) without an explicit finish signal —
+    // still flush any tool call fragments accumulated so far.
+    flush_tool_calls(&mut tool_call_builders, &mut on_tool_call);
     return Ok(());
   }
 
