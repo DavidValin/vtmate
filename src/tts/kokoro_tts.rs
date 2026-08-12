@@ -58,9 +58,14 @@ pub fn speak_via_kokoro(
   let interrupt_flag = streaming.interrupt_flag.clone();
   let int_counter = interrupt_counter.clone();
   let expected = expected_interrupt;
+  let stop_monitor = Arc::new(AtomicBool::new(false));
+  let stop_monitor_thread = stop_monitor.clone();
 
-  thread::spawn(move || {
+  let monitor_handle = thread::spawn(move || {
     loop {
+      if stop_monitor_thread.load(Ordering::Relaxed) {
+        break;
+      }
       if int_counter.load(Ordering::SeqCst) != expected {
         interrupt_flag.store(true, Ordering::Relaxed);
         break;
@@ -74,6 +79,10 @@ pub fn speak_via_kokoro(
     .enable_all()
     .build()?;
   let res = rt.block_on(streaming.speak_stream(text, tx.clone(), language));
+
+  // Synthesis finished (normally or interrupted) - stop the monitor thread so it doesn't leak
+  stop_monitor.store(true, Ordering::Relaxed);
+  let _ = monitor_handle.join();
 
   match res {
     Ok(_) => Ok(SpeakOutcome::Completed),
