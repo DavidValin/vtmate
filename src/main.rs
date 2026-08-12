@@ -432,7 +432,13 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       if !phrase.is_empty() {
         // Strip special characters before TTS
         let cleaned = crate::util::strip_special_chars(phrase);
-        if !cleaned.is_empty() {
+        if cleaned.is_empty() {
+          // Nothing left to speak (e.g. a punctuation-only line) - skip without
+          // waiting on TTS, otherwise the loop would spin on this index forever.
+          if current_phrase.load(Ordering::SeqCst) == idx {
+            current_phrase.fetch_add(1, Ordering::SeqCst);
+          }
+        } else {
           // Show this phrase as current (highlighted) - THIS IS WHEN IT STARTS PLAYING
           let displayed = displayed_phrases.lock().unwrap();
           update_display(&mut out, &displayed, Some(phrase));
@@ -509,6 +515,11 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
           if current_phrase.load(Ordering::SeqCst) == start_idx {
             current_phrase.fetch_add(1, Ordering::SeqCst);
           }
+        }
+      } else {
+        // Empty phrase (e.g. produced by a stray period on its own line) - skip it.
+        if current_phrase.load(Ordering::SeqCst) == idx {
+          current_phrase.fetch_add(1, Ordering::SeqCst);
         }
       }
     }
