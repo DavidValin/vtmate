@@ -936,6 +936,17 @@ fn handle_reply(
   ));
   if let Err(e) = stream_result {
     crate::log::log("error", &format!("Streaming error: {}", e));
+    // Drop the assistant placeholder if the request failed before any content
+    // was streamed — some backends reject empty-content messages, which would
+    // otherwise break every subsequent turn until the user manually undoes.
+    {
+      let mut h = conversation_history.lock().unwrap();
+      if let Some(last) = h.last() {
+        if last.role == "assistant" && last.content.is_empty() {
+          h.pop();
+        }
+      }
+    }
     restore_agent_settings(state, originals);
     // Persist conversation on interruption
     perform_save(&conversation_history, settings);
