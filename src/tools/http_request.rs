@@ -57,51 +57,39 @@ impl HttpRequestTool {
     HttpRequestTool { definition }
   }
 
-  /// Replace PICK_FROM['key'] patterns with the corresponding argument value
-  fn resolve_template(template: &str, args: &Value) -> String {
-    let mut result = String::new();
-    let mut chars = template.char_indices().peekable();
-    let mut buf = String::new();
+  /// Replace PICK_FROM['key'] patterns with the corresponding argument value.
+  pub fn resolve_template(template: &str, args: &Value) -> String {
+    const MARKER: &str = "PICK_FROM['";
+    const CLOSER: &str = "']";
 
-    while let Some((_, ch)) = chars.next() {
-      if ch == 'P' {
-        // Check if this starts a PICK_FROM expression
-        let start = buf.len();
-        buf.push('P');
-        let mut rest = String::new();
-        rest.push('P');
-        while let Some(&(_, c)) = chars.peek() {
-          if c == '\'' || c == ']' {
-            break;
-          }
-          let (_, c2) = chars.next().unwrap();
-          rest.push(c2);
-        }
-        if rest == "PICK_FROM['" {
-          // Read until the closing ]
-          let mut key = String::new();
-          while let Some(&(_, _c)) = chars.peek() {
-            let (_, c2) = chars.next().unwrap();
-            if c2 == ']' {
-              break;
-            }
-            key.push(c2);
-          }
-          // Replace with argument value
-          if let Some(val) = args.get(key.trim()) {
+    let mut result = String::new();
+    let mut rest = template;
+
+    while let Some(marker_pos) = rest.find(MARKER) {
+      // Emit everything before the marker unchanged
+      result.push_str(&rest[..marker_pos]);
+      let after_marker = &rest[marker_pos + MARKER.len()..];
+
+      match after_marker.find(CLOSER) {
+        Some(closer_pos) => {
+          let key = after_marker[..closer_pos].trim();
+          if let Some(val) = args.get(key) {
             match val {
-              Value::String(s) => buf.push_str(s),
-              _ => buf.push_str(&val.to_string()),
+              Value::String(s) => result.push_str(s),
+              _ => result.push_str(&val.to_string()),
             }
           }
-          buf.truncate(start);
-          result.push_str(&buf);
-          buf.clear();
+          rest = &after_marker[closer_pos + CLOSER.len()..];
+        }
+        None => {
+          // No closing "']" found — treat the marker as literal text and move past it
+          result.push_str(MARKER);
+          rest = after_marker;
         }
       }
-      buf.push(ch);
     }
-    result.push_str(&buf);
+
+    result.push_str(rest);
     result
   }
 }

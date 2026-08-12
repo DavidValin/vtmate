@@ -81,31 +81,37 @@ impl Tool for ReadFileTool {
       .and_then(|v| v.as_str())
       .ok_or("Missing 'file_path' argument")?;
 
-    let ranges_str = tool_call_args
-      .get("ranges")
-      .and_then(|v| v.as_str())
-      .ok_or("Missing 'ranges' argument")?;
-
-    // Parse comma-separated ranges like "1-2,200-204"
-    let ranges: Result<Vec<LineRange>, _> = ranges_str
-      .split(',')
-      .map(|s| s.trim())
-      .filter(|s| !s.is_empty())
-      .map(LineRange::parse)
-      .collect();
-
-    let ranges = ranges?;
-
-    if ranges.is_empty() {
-      return Err("At least one range must be provided".into());
-    }
-
-    // Read the file
+    // Read the file first so a missing/empty `ranges` argument can default to
+    // the whole file instead of forcing the caller to guess its length.
     let content = std::fs::read_to_string(file_path)
       .map_err(|e| format!("Failed to read file '{}': {}", file_path, e))?;
 
     let lines: Vec<&str> = content.lines().collect();
     let total_lines = lines.len();
+
+    let ranges_str = tool_call_args
+      .get("ranges")
+      .and_then(|v| v.as_str())
+      .map(|s| s.trim())
+      .filter(|s| !s.is_empty());
+
+    // Parse comma-separated ranges like "1-2,200-204"; default to the whole file.
+    let ranges: Vec<LineRange> = match ranges_str {
+      Some(s) => s
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(LineRange::parse)
+        .collect::<Result<Vec<LineRange>, _>>()?,
+      None => vec![LineRange {
+        start: 1,
+        end: total_lines.max(1),
+      }],
+    };
+
+    if ranges.is_empty() {
+      return Err("At least one range must be provided".into());
+    }
 
     // Collect output for each range
     let mut parts = Vec::new();
@@ -139,7 +145,7 @@ impl Tool for ReadFileTool {
       "type": "function",
       "function": {
         "name": "read_file",
-        "description": "Reads specific line ranges from a file. Supports multiple comma-separated ranges in 'start-end' format (1-based, inclusive). Each range must have end >= start. Returns content with line numbers prefixed.",
+        "description": "Reads a file's contents. Omit 'ranges' to read the whole file, or pass one or more comma-separated line ranges in 'start-end' format (1-based, inclusive) to read only specific portions. Each range must have end >= start. Returns content with line numbers prefixed.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -149,10 +155,10 @@ impl Tool for ReadFileTool {
             },
             "ranges": {
               "type": "string",
-              "description": "Comma-separated line ranges in 'start-end' format (1-based, inclusive). Example: '1-2,200-204'"
+              "description": "Comma-separated line ranges in 'start-end' format (1-based, inclusive). Example: '1-2,200-204'. Omit to read the entire file."
             }
           },
-          "required": ["file_path", "ranges"]
+          "required": ["file_path"]
         }
       }
     }))

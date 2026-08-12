@@ -120,9 +120,19 @@ fn test_missing_file_path() {
 }
 
 #[test]
-fn test_missing_ranges() {
+fn test_missing_ranges_reads_whole_file() {
+  let path = make_test_file(&["line1", "line2", "line3"]);
   let tool = ReadFileTool::new();
-  let args = json!({"file_path": "/some/file"});
-  let result = tool.handle(&args).unwrap_err();
-  assert!(result.to_string().contains("Missing 'ranges'"));
+  let args = json!({"file_path": path});
+  let result = tool.handle(&args).unwrap();
+  assert_eq!(result, "1:line1\n2:line2\n3:line3");
+}
+
+#[test]
+fn test_empty_ranges_reads_whole_file() {
+  let path = make_test_file(&["only one line"]);
+  let tool = ReadFileTool::new();
+  let args = json!({"file_path": path, "ranges": ""});
+  let result = tool.handle(&args).unwrap();
+  assert_eq!(result, "1:only one line");
 }

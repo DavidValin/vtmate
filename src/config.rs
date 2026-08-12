@@ -1619,7 +1619,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 tools = web_fetch
 
 [agent]
-name = explainer
+name = planner
 language = en
 tts = supertonic3
 voice = F3

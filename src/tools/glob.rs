@@ -41,7 +41,7 @@ impl Tool for GlobTool {
     // Build the full glob pattern: root/pattern
     let full_pattern = format!("{}/{}", root, pattern);
 
-    // Use case-insensitive matching for better cross-platform behavior
+    // Case-sensitive matching (matches shell glob semantics on Linux/macOS)
     let options = MatchOptions {
       case_sensitive: true,
       require_literal_separator: false,
