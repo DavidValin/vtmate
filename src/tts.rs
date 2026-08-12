@@ -144,9 +144,12 @@ pub fn tts_thread(
           }
           Err(_e) => {
             crate::log::log("error", &format!("TTS error. Can't play audio speech. Make sure OpenTTS is running: docker run --rm -p 5500:5500 synesthesiam/opentts:all"));
-            // Signal completion before breaking
+            // Signal completion so callers waiting on this phrase don't hang, but keep
+            // the thread alive — a transient failure (e.g. OpenTTS briefly unreachable)
+            // shouldn't permanently kill voice output or drop rx_tts, which would make
+            // read-file mode's tx_tts.send(...).unwrap() panic on the next phrase.
             let _ = tx_tts_done.try_send(());
-            break;
+            continue;
           }
         }
       }
