@@ -307,16 +307,24 @@ pub fn keyboard_thread(
           KeyCode::Char(' ') => {
             if state.ptt.load(Ordering::Relaxed) {
               crate::log::log("debug", &format!("SPACE event kind={:?}", k.kind));
-              last_space_time = Some(Instant::now());
               match k.kind {
                 KeyEventKind::Press => {
+                  last_space_time = Some(Instant::now());
                   recording_paused.store(false, Ordering::Relaxed);
                   space_pressed = true;
                 }
                 KeyEventKind::Repeat => {
+                  last_space_time = Some(Instant::now());
                   recording_paused.store(false, Ordering::Relaxed);
                 }
-                _ => {}
+                KeyEventKind::Release => {
+                  // Terminals that report key-release (e.g. Kitty protocol) give us
+                  // an explicit signal here, so pause immediately instead of waiting
+                  // on the idle-timeout fallback below.
+                  recording_paused.store(true, Ordering::Relaxed);
+                  space_pressed = false;
+                  last_space_time = None;
+                }
               }
               crate::log::log(
                 "debug",
