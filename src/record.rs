@@ -335,7 +335,7 @@ fn build_input_i16(
 ) -> Result<cpal::Stream, cpal::BuildStreamError> {
   device.build_input_stream(
     config,
-    move |data: &[f32], _| {
+    move |data: &[i16], _| {
       if recording_paused.load(Ordering::Relaxed) {
         // Flush buffer if not empty
         let mut b = utt_buf.lock().unwrap();
