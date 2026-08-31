@@ -4,30 +4,27 @@ set -euo pipefail
 BIN_NAME="vtmate"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DIST_DIR="${PROJECT_ROOT}/dist"
-PKG_DIR="${DIST_DIR}/packages"
 ASSETS_DIR="${PROJECT_ROOT}/assets"
 ESPEAK_ARCHIVE="${ASSETS_DIR}/espeak-ng-data.tar.gz"
-
-DO_PACKAGE=1
-
-# macOS optional
-MAC_WITH_OPENBLAS="${MAC_WITH_OPENBLAS:-0}"
 
 usage() {
   cat <<'USAGE'
 Usage:
-  ./build_macos.sh [--skip-package]
+  ./build_macos.sh [--arch arm64|x86_64]
 
-Env:
-  MAC_WITH_OPENBLAS=0|1 (macos) default 0
 Notes:
-  - macOS builds always enable Metal.
+  - macOS build
+  - Metal enabled
+  - No OpenBLAS
+  - Produces a single binary
 USAGE
 }
 
+ARCH_SEL=""
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --skip-package) DO_PACKAGE=0; shift ;;
+    --arch) ARCH_SEL="${2-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown arg: $1"; usage; exit 1 ;;
   esac
@@ -46,52 +43,24 @@ VERSION="$(
 )"
 [[ -n "${VERSION}" ]] || { echo "Failed to read version from Cargo.toml"; exit 1; }
 
-mkdir -p "${DIST_DIR}" "${PKG_DIR}" "${PROJECT_ROOT}/target-cross" "${ASSETS_DIR}"
+mkdir -p "${DIST_DIR}" "${ASSETS_DIR}"
 
 echo "Version: ${VERSION}"
-echo "macOS: Metal always, MAC_WITH_OPENBLAS=${MAC_WITH_OPENBLAS}"
 
-FEATURES_COMMON="whisper-logs"
-FEATURES_MACOS_METAL="${FEATURES_COMMON},whisper-metal"
-FEATURES_MACOS_METAL_OPENBLAS="${FEATURES_COMMON},whisper-metal,whisper-openblas"
 
-sha256_file() {
-  local file="$1" out="$2"
-  if command -v shasum >/dev/null 2>&1; then
-    (cd "$(dirname "$file")" && shasum -a 256 "$(basename "$file")") > "$out"
-    return 0
-  fi
-  if command -v openssl >/dev/null 2>&1; then
-    local line hash
-    line="$(openssl dgst -sha256 "$file")"
-    hash="${line##* }"
-    echo "${hash}  $(basename "$file")" > "$out"
-    return 0
-  fi
-  echo "ERROR: No SHA256 tool found."
-  exit 1
-}
-make_tgz() { local src="$1" tgz="$2"; tar -C "$(dirname "$src")" -czf "$tgz" "$(basename "$src")"; }
-package_one() {
-  local src="$1"
-  [[ -f "$src" ]] || return 0
-  local base tgz sha
-  base="$(basename "$src")"
-  tgz="${PKG_DIR}/${base}.tar.gz"
-  sha="${PKG_DIR}/${base}.tar.gz.sha256"
-  make_tgz "$src" "$tgz"
-  sha256_file "$tgz" "$sha"
-}
+# --- Embedded eSpeak asset generation ---
 
-# Embedded eSpeak asset generation (via Docker if missing)
 docker_ok=0
 command -v docker >/dev/null 2>&1 && docker_ok=1
+
 ensure_espeak_data_archive() {
   if [[ -f "${ESPEAK_ARCHIVE}" ]]; then
     echo "✔ Found embedded asset: ${ESPEAK_ARCHIVE}"
     return 0
   fi
+
   echo "== Generating embedded asset: ${ESPEAK_ARCHIVE} =="
+
   if [[ "$docker_ok" -ne 1 ]]; then
     echo "ERROR: Docker not found and ${ESPEAK_ARCHIVE} is missing."
     exit 1
@@ -136,37 +105,54 @@ ensure_espeak_data_archive
 
 command -v cargo >/dev/null 2>&1 || { echo "ERROR: cargo not found"; exit 1; }
 
-ARTIFACTS=()
-add_artifact() { [[ -f "$1" ]] && ARTIFACTS+=("$1"); }
+arch="${ARCH_SEL:-$(uname -m)}"
 
-arch="$(uname -m)"
+case "${arch}" in
+  arm64|aarch64) arch="arm64";  RUST_TARGET="aarch64-apple-darwin" ;;
+  x86_64|amd64)  arch="x86_64"; RUST_TARGET="x86_64-apple-darwin"  ;;
+  *) echo "ERROR: unsupported --arch '${arch}' (use arm64 or x86_64)"; exit 1 ;;
+esac
 
-echo "== macOS build [metal] features: ${FEATURES_MACOS_METAL} =="
-cargo build --release --no-default-features --features "${FEATURES_MACOS_METAL}"
-out="${DIST_DIR}/${BIN_NAME}-${VERSION}-macos-${arch}-metal"
-cp "${PROJECT_ROOT}/target/release/${BIN_NAME}" "$out"
-chmod +x "$out" || true
-add_artifact "$out"
-echo "✔ Built: $out"
-
-if [[ "${MAC_WITH_OPENBLAS}" == "1" ]]; then
-  echo "== macOS build [metal-openblas] features: ${FEATURES_MACOS_METAL_OPENBLAS} =="
-  CARGO_TARGET_DIR="${PROJECT_ROOT}/target-cross/macos-${arch}-metal-openblas" \
-    cargo build --release --no-default-features --features "${FEATURES_MACOS_METAL_OPENBLAS}"
-  out="${DIST_DIR}/${BIN_NAME}-${VERSION}-macos-${arch}-metal-openblas"
-  cp "${PROJECT_ROOT}/target-cross/macos-${arch}-metal-openblas/release/${BIN_NAME}" "$out"
-  chmod +x "$out" || true
-  add_artifact "$out"
-  echo "✔ Built: $out"
-fi
-
-if [[ "${DO_PACKAGE}" -eq 1 ]]; then
-  echo "== Packaging tar.gz + SHA256 =="
-  for f in "${ARTIFACTS[@]}"; do
-    package_one "$f"
-  done
+# ggml's Metal backend targets Apple GPUs; on Intel Macs it is unsupported or
+# slower than the CPU path, so Metal is gated on arm64.
+if [[ "${arch}" == "arm64" ]]; then
+  FEATURES="whisper-metal"
 else
-  echo "Skipping packaging (--skip-package)"
+  FEATURES=""
 fi
 
+# Apple Silicon hosts can emit x86_64 directly - the SDK carries both slices -
+# so the Intel build no longer needs an Intel runner.
+rustup target add "${RUST_TARGET}" >/dev/null 2>&1 || true
+
+echo "macOS build: ${arch} (${RUST_TARGET}, features: ${FEATURES:-none})"
+
+export MACOSX_DEPLOYMENT_TARGET=11.0
+
+export CARGO_PROFILE_RELEASE_LTO=false
+export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+export CARGO_PROFILE_RELEASE_DEBUG=false
+export CARGO_PROFILE_RELEASE_STRIP=symbols
+export CARGO_PROFILE_RELEASE_INCREMENTAL=false
+
+echo "== Building macOS (${arch}) with features: ${FEATURES:-none} =="
+
+# espeak-ng's phoneme compiler holds paths in a fixed ~180-byte buffer and
+# silently truncates past it ("Bad vowel file: vwl_en_us_nyc/a_raised" as it
+# looks for .../a_ra). Adding --target inserts the triple into the path, which
+# alone pushed the old target-cross/macos-<arch> layout over that limit, so
+# keep the build directory short and outside the project tree.
+CARGO_TARGET_DIR="${TARGET_ROOT:-${HOME}/t/${arch}}"
+mkdir -p "${CARGO_TARGET_DIR}"
+
+CARGO_TARGET_DIR="${CARGO_TARGET_DIR}" \
+cargo build --release \
+  --target "${RUST_TARGET}" \
+  --features "${FEATURES}"
+
+out="${DIST_DIR}/${BIN_NAME}-${VERSION}-macos-${arch}"
+cp "${CARGO_TARGET_DIR}/${RUST_TARGET}/release/${BIN_NAME}" "$out"
+chmod +x "$out" || true
+
+echo "✔ Built: $out"
 echo "✔ macOS build complete"
