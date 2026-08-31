@@ -1,5 +1,7 @@
+assets/openblas*
 target
 target-cross
 dist
 .DS_Store
 NEXT_STEPS.txt
+deps

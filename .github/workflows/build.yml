@@ -1,0 +1,255 @@
+name: Build All Platforms
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  # Callable so release.yml can reuse this exact matrix on a tag instead of
+  # duplicating it. The artifacts uploaded here are visible to the calling
+  # workflow's later jobs, since a reusable workflow shares the same run.
+  workflow_call:
+
+jobs:
+
+  linux:
+    name: Linux Build (${{ matrix.arch }}, ${{ matrix.variant }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # One arch+variant per runner, matching the windows-x64 job's shape.
+        # CUDA is amd64-only (build_linux.sh header).
+        #
+        # cpu is musl and fully static; arm64-cpu cross-compiles from amd64.
+        # vulkan/cuda are glibc - the Vulkan/CUDA loaders the user installs are
+        # glibc binaries and a musl process cannot load them. arm64-vulkan
+        # therefore needs a native arm64 runner: there is no glibc cross
+        # toolchain in that image, and emulating the Rust build would be far
+        # too slow.
+        include:
+          - { arch: amd64, variant: cpu,    runner: ubuntu-latest }
+          - { arch: amd64, variant: vulkan, runner: ubuntu-latest }
+          - { arch: amd64, variant: cuda,   runner: ubuntu-latest }
+          - { arch: arm64, variant: cpu,    runner: ubuntu-latest }
+          - { arch: arm64, variant: vulkan, runner: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@v4
+
+      # ----------------------
+      # build_linux.sh cross-compiles a full static ONNX Runtime + LLVM
+      # per arch inside Docker; that easily outgrows the ~14GB GitHub
+      # guarantees free on standard runners, so reclaim space taken up by
+      # preinstalled toolchains this build never touches before starting.
+      - name: Free up disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/.ghcup \
+            /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-}" || true
+          docker image prune -af || true
+          df -h /
+
+      - name: Build Linux (${{ matrix.arch }}, ${{ matrix.variant }})
+        run: |
+          chmod +x build_linux.sh
+          ./build_linux.sh --arch ${{ matrix.arch }} --variant ${{ matrix.variant }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}-${{ matrix.variant }}
+          # cpu variants are packaged tarballs; the glibc GPU variants are a
+          # directory holding the binary plus the ONNX Runtime .so files.
+          path: |
+            dist/packages/*-linux-${{ matrix.arch }}-${{ matrix.variant }}*
+            dist/*-linux-${{ matrix.arch }}-${{ matrix.variant }}-glibc/**
+
+  windows-x64:
+    name: Windows Build (x64, ${{ matrix.variant }})
+    runs-on: windows-latest
+    # The CUDA variant compiles ORT's provider for five GPU architectures with
+    # -rdc=true, which ran past two hours and was killed mid-build. Trimming
+    # CMAKE_CUDA_ARCHITECTURES is the lever if this gets too slow or costly.
+    timeout-minutes: 360
+    env:
+      # Keep in sync with $CUDA_VERSION in build_windows.ps1.
+      CUDA_VERSION: "13.3.0"
+      # CUDA installs into a directory named by major.minor (v12.3), NOT the
+      # full patch version, and the silent-install component names use the
+      # same major.minor form (nvcc_12.3).
+      CUDA_MM: "13.3"
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [cpu, vulkan, cuda]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare Directories
+        run: |
+          mkdir dist
+          mkdir packages
+
+      # ----------------------
+      # CUDA toolkit.
+      #
+      # This used to cache C:\ProgramData\chocolatey\lib\cuda, which holds
+      # chocolatey's package metadata - NOT the toolkit, which installs to
+      # C:\Program Files\NVIDIA GPU Computing Toolkit. So every run after the
+      # first got a cache hit, skipped the install, found no nvcc, and fell
+      # into build_windows.ps1's fallback network installer, which hangs.
+      # Cache the real install directory instead.
+      - name: Cache CUDA Toolkit
+        if: matrix.variant == 'cuda'
+        uses: actions/cache@v4
+        id: cuda-cache
+        with:
+          path: C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ env.CUDA_MM }}
+          key: windows-cuda-${{ env.CUDA_VERSION }}
+
+      - name: Install CUDA Toolkit (if not cached)
+        if: matrix.variant == 'cuda' && steps.cuda-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ver = "${{ env.CUDA_VERSION }}"
+          $mm  = "${{ env.CUDA_MM }}"
+          $root = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v$mm"
+          # Local (self-contained) installer, not the network one: the network
+          # installer pulls components at install time and is what stalls in CI.
+          # CUDA 13.x dropped the driver-version suffix from the installer name.
+          $url = "https://developer.download.nvidia.com/compute/cuda/$ver/local_installers/cuda_${ver}_windows.exe"
+          $exe = "$env:RUNNER_TEMP\cuda_installer.exe"
+          Write-Host "Downloading $url"
+          Invoke-WebRequest -Uri $url -OutFile $exe -UseBasicParsing
+          # $args is an automatic variable in PowerShell; use our own name.
+          $comps = @("nvcc", "cudart", "cublas_dev", "curand_dev", "cufft_dev",
+                     "cusparse_dev", "cusolver_dev", "thrust",
+                     "visual_studio_integration") | ForEach-Object { "${_}_$mm" }
+          $installArgs = "-s " + ($comps -join " ")
+          Write-Host "Running installer: $installArgs"
+          $p = Start-Process -FilePath $exe -ArgumentList $installArgs -PassThru
+          if (-not $p.WaitForExit(45 * 60 * 1000)) {
+            $p.Kill()
+            throw "CUDA installer timed out after 45 minutes"
+          }
+          if ($p.ExitCode -ne 0) { throw "CUDA installer failed with exit code $($p.ExitCode)" }
+          if (-not (Test-Path "$root\bin\nvcc.exe")) {
+            Write-Host "Contents of C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA:"
+            Get-ChildItem "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  $($_.Name)" }
+            throw "nvcc.exe not found under $root"
+          }
+
+          # CUDA 13 splits pieces the toolkit installer's component list does
+          # not cover into separate redistributables: crt/host_config.h (pulled
+          # in by cuda_runtime.h) and nvvm/bin/cicc.exe (nvcc's %CICC_PATH%).
+          # Without them nvcc fails with "Cannot open include file:
+          # 'crt/host_config.h'" and "The system cannot find the path
+          # specified". Overlay them from NVIDIA's manifest so the per-component
+          # versions stay correct. This lands in $root, so the cache keeps it.
+          $manifest = Invoke-RestMethod -UseBasicParsing `
+            -Uri "https://developer.download.nvidia.com/compute/cuda/redist/redistrib_$ver.json"
+          foreach ($comp in @("cuda_crt", "libnvvm", "libnvptxcompiler", "libnvfatbin")) {
+            $rel = $manifest.$comp."windows-x86_64".relative_path
+            if (-not $rel) { throw "no windows-x86_64 payload for $comp in CUDA $ver manifest" }
+            Write-Host "overlaying $comp -> $rel"
+            $zip = "$env:RUNNER_TEMP\$comp.zip"
+            Invoke-WebRequest -UseBasicParsing -OutFile $zip `
+              -Uri "https://developer.download.nvidia.com/compute/cuda/redist/$rel"
+            Expand-Archive -Path $zip -DestinationPath "$env:RUNNER_TEMP\$comp" -Force
+            # each archive holds one top-level dir laid out toolkit-relative
+            $top = (Get-ChildItem "$env:RUNNER_TEMP\$comp" -Directory)[0].FullName
+            Copy-Item -Recurse -Force "$top\*" "$root\"
+          }
+          foreach ($need in @("include\crt\host_config.h", "nvvm\bin\cicc.exe")) {
+            if (-not (Test-Path "$root\$need")) { throw "$need still missing after overlay" }
+          }
+
+      # refreshenv only affects the shell of the step that runs it; every later
+      # step is a fresh process. Persist via GITHUB_ENV/GITHUB_PATH so
+      # build_windows.ps1 finds nvcc instead of trying to install CUDA itself.
+      - name: Expose CUDA to later steps
+        if: matrix.variant == 'cuda'
+        shell: pwsh
+        run: |
+          $root = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ env.CUDA_MM }}"
+          if (-not (Test-Path "$root\bin\nvcc.exe")) { throw "CUDA missing at $root" }
+          # The MSBuild CUDA targets that the VS integration installs resolve
+          # CudaToolkitDir from CUDA_PATH_V<major>_<minor>. A silent component
+          # install never sets it, so nvcc is found but every .cu compile dies
+          # with "The CUDA Toolkit directory '' does not exist".
+          $vname = "CUDA_PATH_V" + ("${{ env.CUDA_MM }}" -replace '\.','_')
+          "CUDA_PATH=$root"        | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "CUDAToolkit_ROOT=$root" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "$vname=$root"           | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "CudaToolkitDir=$root"   | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          Write-Host "set $vname=$root"
+          "$root\bin"             | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          & "$root\bin\nvcc.exe" --version
+
+      - name: Prepare AI models
+        shell: cmd
+        run: |
+          set "KOKORO_CACHE=%USERPROFILE%\.cache\k"
+          mkdir "%KOKORO_CACHE%"
+          curl -L https://github.com/DavidValin/kokoro-micro/raw/main/models/0.bin -o "%KOKORO_CACHE%\0.bin"
+          curl -L https://github.com/DavidValin/kokoro-micro/raw/main/models/0.onnx -o "%KOKORO_CACHE%\0.onnx"
+
+      # ----------------------
+      # Build (Windows, ${{ matrix.variant }})
+      # Each variant is its own job on its own fresh runner - no variant
+      # shares a runner/session with another, unlike when cpu/vulkan/cuda
+      # ran as sequential steps in one job.
+
+      - name: Build Windows ${{ matrix.variant }}
+        shell: pwsh
+        run: ./build_windows.ps1 ${{ matrix.variant }}
+
+      # ----------------------
+      # Upload artifacts
+      - name: Upload ${{ matrix.variant }} Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-${{ matrix.variant }}
+          path: target-cross\${{ matrix.variant }}
+
+  macos:
+    name: macOS Build (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # arm64 only. macos-13 (the last Intel image) no longer schedules,
+          # and cross-compiling x86_64 from arm64 - which does work - dies at
+          # ort-sys: pyke ships no prebuilt ONNX Runtime for x86_64-apple-darwin.
+          # Restoring the Intel leg means building ORT from source on macOS.
+          # build_macos.sh still accepts --arch x86_64 for local builds.
+          - { arch: arm64, runner: macos-14 }
+    steps:
+      - uses: actions/checkout@v4
+
+      # ----------------------
+      # build_macos.sh gates whisper-metal on arm64 (ggml's Metal backend is
+      # not useful on Intel GPUs) and builds the CPU path on x86_64.
+      # build.rs fetches the whisper/kokoro/supersonic2 models into $HOME
+      # itself, so no model-prep step is needed here.
+      - name: Build macOS (${{ matrix.arch }})
+        run: |
+          chmod +x build_macos.sh
+          ./build_macos.sh --arch ${{ matrix.arch }}
+
+      - name: Verify linkage and deployment target
+        run: |
+          bin=$(ls dist/vtmate-*-macos-${{ matrix.arch }})
+          otool -L "$bin"
+          otool -l "$bin" | grep -A3 LC_BUILD_VERSION
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: dist/vtmate-*-macos-${{ matrix.arch }}
