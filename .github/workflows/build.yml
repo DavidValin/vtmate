@@ -7,6 +7,10 @@ on:
   pull_request:
     branches:
       - main
+  # Callable so release.yml can reuse this exact matrix on a tag instead of
+  # duplicating it. The artifacts uploaded here are visible to the calling
+  # workflow's later jobs, since a reusable workflow shares the same run.
+  workflow_call:
 
 jobs:
 
