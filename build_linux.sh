@@ -670,7 +670,7 @@ DOCKERFILE
       rustup target add "$target"
 
       # Build ALSA as a static library for musl (needed by cpal).
-      # --with-configdir must point at the end user's config path
+      # --with-configdir must point at the runtime config path
       # (/usr/share/alsa), not $prefix/share/alsa - that only exists in this
       # build container. Left unset, the binary fails to resolve "default"
       # on the target machine ("Unknown PCM default").
