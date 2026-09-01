@@ -669,7 +669,11 @@ DOCKERFILE
       cd /work
       rustup target add "$target"
 
-      # Build ALSA as a static library for musl (needed by cpal)
+      # Build ALSA as a static library for musl (needed by cpal).
+      # --with-configdir must point at the end user's config path
+      # (/usr/share/alsa), not $prefix/share/alsa - that only exists in this
+      # build container. Left unset, the binary fails to resolve "default"
+      # on the target machine ("Unknown PCM default").
       if [ ! -f /usr/local/lib/libasound.a ]; then
         echo "--- Building ALSA static library for musl ---"
         apt-get update -qq && apt-get install -y --no-install-recommends autoconf automake libtool
@@ -686,6 +690,7 @@ DOCKERFILE
           --enable-shared=no \
           --enable-static=yes \
           --with-pkg-config-plugindir=/usr/local/lib/pkgconfig \
+          --with-configdir=/usr/share/alsa \
           CC=x86_64-linux-musl-gcc \
           CFLAGS="--sysroot=/opt/x86_64-linux-musl-cross/x86_64-linux-musl -O3" \
           LDFLAGS="-L/opt/x86_64-linux-musl-cross/x86_64-linux-musl/lib"
@@ -1213,6 +1218,7 @@ DOCKERFILE
       rustup target add "$target"
 
 
+      # See the x86_64 ALSA build above for why --with-configdir is set.
       if [ ! -f /usr/local/lib/libasound.a ]; then
         echo "--- Building ALSA static library for musl ---"
         apt-get update -qq && apt-get install -y --no-install-recommends autoconf automake libtool
@@ -1229,6 +1235,7 @@ DOCKERFILE
           --enable-shared=no \
           --enable-static=yes \
           --with-pkg-config-plugindir=/usr/local/lib/pkgconfig \
+          --with-configdir=/usr/share/alsa \
           CC=aarch64-linux-musl-gcc \
           CFLAGS="--sysroot=/opt/aarch64-linux-musl-cross/aarch64-linux-musl -O3" \
           LDFLAGS="-L/opt/aarch64-linux-musl-cross/aarch64-linux-musl/lib"
@@ -1552,6 +1559,10 @@ ENV ONNXRUNTIME_INCLUDE_DIR=/onnxruntime-src/include
 # OpenBLAS statically linked.
 # ALSA, built static: cpal links libasound, and apt ships only libasound.so.
 # Only the GPU libraries are allowed to stay dynamic in these variants.
+# --with-configdir bakes the runtime PCM config lookup path into the binary;
+# left unset it defaults to $prefix/share/alsa, which only exists inside this
+# build container. Point it at /usr/share/alsa so it resolves "default" on
+# the end user's machine instead (else: "Unknown PCM default").
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends autoconf automake libtool; \
@@ -1562,7 +1573,8 @@ RUN set -eux; \
     cd /tmp/alsa-lib-1.2.12; \
     autoreconf -fi; \
     ./configure --prefix=/opt/alsa-static --enable-shared=no --enable-static=yes \
-      --with-pkg-config-plugindir=/opt/alsa-static/lib/pkgconfig; \
+      --with-pkg-config-plugindir=/opt/alsa-static/lib/pkgconfig \
+      --with-configdir=/usr/share/alsa; \
     make -j"$(nproc)"; \
     make install; \
     cd /; rm -rf /tmp/alsa-lib-1.2.12 /tmp/alsa.tar.gz; \
