@@ -1496,6 +1496,47 @@ RUN set -eux; \
     cmake --build $ONNX_DIR --config Release -j"$(nproc)"; \
     find $ONNX_DIR -name 'libonnxruntime_common.a' | grep -q . ; \
     rm -rf $ONNX_SRC/.git
+
+# re2, built from the source ORT itself fetched and against ORT's own abseil.
+# ORT leaves 6 undefined re2 symbols in its archives (re2::RE2::FullMatchN and
+# friends) but never builds re2, so ort-sys fails with
+#   could not find native static library `re2`
+# Building from _deps/re2-src guarantees the exact version and C++ ABI ORT
+# expects; a distro libre2 could silently mismatch.
+# re2 needs abseil, and ORT's abseil is only ever configured in-tree - it is
+# never installed, so _deps/abseil_cpp-build has no abslTargets.cmake for
+# find_package to consume. Install abseil from the source ORT pinned, at the
+# same C++20 standard ORT used, so re2 matches ORT's ABI exactly.
+RUN set -eux; \
+    test -f $ONNX_DIR/_deps/abseil_cpp-src/CMakeLists.txt; \
+    cmake -S $ONNX_DIR/_deps/abseil_cpp-src -B /tmp/absl-build \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DBUILD_SHARED_LIBS=OFF \
+      -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+      -DCMAKE_CXX_STANDARD=20 \
+      -DABSL_ENABLE_INSTALL=ON \
+      -DABSL_PROPAGATE_CXX_STD=ON \
+      -DABSL_BUILD_TESTING=OFF \
+      -DCMAKE_INSTALL_PREFIX=/opt/absl; \
+    cmake --build /tmp/absl-build -j"$(nproc)"; \
+    cmake --install /tmp/absl-build; \
+    rm -rf /tmp/absl-build; \
+    test -f /opt/absl/lib/cmake/absl/abslConfig.cmake
+
+RUN set -eux; \
+    test -f $ONNX_DIR/_deps/re2-src/CMakeLists.txt; \
+    cmake -S $ONNX_DIR/_deps/re2-src -B /tmp/re2-build \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DBUILD_SHARED_LIBS=OFF \
+      -DRE2_BUILD_TESTING=OFF \
+      -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+      -DCMAKE_CXX_STANDARD=20 \
+      -DCMAKE_PREFIX_PATH=/opt/absl; \
+    cmake --build /tmp/re2-build -j"$(nproc)"; \
+    mkdir -p $ONNX_DIR/_deps/re2-build; \
+    cp /tmp/re2-build/libre2.a $ONNX_DIR/_deps/re2-build/; \
+    rm -rf /tmp/re2-build; \
+    test -f $ONNX_DIR/_deps/re2-build/libre2.a
 ENV ORT_STRATEGY=system
 ENV ORT_LIB_LOCATION=/onnxruntime
 ENV ORT_PREFER_DYNAMIC_LINK=0
@@ -1595,6 +1636,7 @@ DOCKERFILE
       # -lasound that cpal emits resolves to the archive.
       export RUSTFLAGS="-C codegen-units=1 -C opt-level=3 \
         -L native=/opt/blas-static \
+        -L native=/onnxruntime/_deps/re2-build \
         -L native=/opt/alsa-static/lib \
         -C link-arg=-static-libstdc++ \
         -C link-arg=-static-libgcc \
