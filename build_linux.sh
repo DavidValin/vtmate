@@ -1634,10 +1634,28 @@ DOCKERFILE
       # binary to the host GCC runtime on top of the glibc floor), and
       # /opt/alsa-static holds libasound.a with no .so beside it, so the
       # -lasound that cpal emits resolves to the archive.
+      # ort-sys emits the libonnxruntime_*.a archives but not the third-party
+      # ones ORT links against, so they have to be named explicitly - the same
+      # thing the musl path does with its ABSL_LIBS list. Without them the link
+      # fails one dependency at a time (re2 first, then abseil, protobuf, ...).
+      # --start-group because these archives reference each other cyclically.
+      ORT_DEPS=""
+      for f in /onnxruntime/_deps/abseil_cpp-build/absl/*/libabsl_*.a \
+               /onnxruntime/_deps/protobuf-build/libprotobuf.a \
+               /onnxruntime/_deps/onnx-build/libonnx.a \
+               /onnxruntime/_deps/onnx-build/libonnx_proto.a \
+               /onnxruntime/_deps/pytorch_cpuinfo-build/libcpuinfo.a \
+               /onnxruntime/_deps/flatbuffers-build/libflatbuffers.a \
+               /onnxruntime/_deps/re2-build/libre2.a; do
+        [ -f "$f" ] && ORT_DEPS="$ORT_DEPS -C link-arg=$f"
+      done
+      echo "ORT dependency archives linked: $(echo $ORT_DEPS | wc -w)"
+
       export RUSTFLAGS="-C codegen-units=1 -C opt-level=3 \
         -L native=/opt/blas-static \
         -L native=/onnxruntime/_deps/re2-build \
         -L native=/opt/alsa-static/lib \
+        -C link-arg=-Wl,--start-group ${ORT_DEPS} -C link-arg=-Wl,--end-group \
         -C link-arg=-static-libstdc++ \
         -C link-arg=-static-libgcc \
         -C link-arg=-lgfortran"
