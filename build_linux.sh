@@ -1359,13 +1359,13 @@ DOCKERFILE
 # against glibc, with everything of ours still linked statically - only libc,
 # the GPU loaders, and ONNX Runtime stay dynamic.
 #
-# ONNX Runtime comes from Microsoft's prebuilt package rather than source:
-# it removes a multi-hour build, and for CUDA it is the only practical option
-# (the from-source CUDA EP build does not fit CI time limits at all).
+# ONNX Runtime is built from source and linked statically, so the binary ships
+# alone. Its CUDA execution provider is left off - that build overruns CI time
+# limits - and ggml/whisper supplies the GPU acceleration for these variants.
 # ==========================================================
 build_linux_glibc_variant() {
   local arch="$1" variant="$2"
-  local tmp df img target ort_url ort_dir
+  local tmp df img target
 
   local plat multiarch
   case "${arch}" in
@@ -1378,13 +1378,9 @@ build_linux_glibc_variant() {
     *) echo "ERROR: unsupported glibc arch ${arch}"; return 1 ;;
   esac
 
-  # CUDA 12 to match Ubuntu's nvidia-cuda-toolkit, so the ORT package and the
-  # ggml/whisper CUDA code agree on a major version.
   case "${arch}-${variant}" in
-    amd64-vulkan) ort_url="https://github.com/microsoft/onnxruntime/releases/download/v1.24.1/onnxruntime-linux-x64-1.24.1.tgz";           ort_dir="onnxruntime-linux-x64-1.24.1" ;;
-    arm64-vulkan) ort_url="https://github.com/microsoft/onnxruntime/releases/download/v1.24.1/onnxruntime-linux-aarch64-1.24.1.tgz";       ort_dir="onnxruntime-linux-aarch64-1.24.1" ;;
-    amd64-cuda)   ort_url="https://github.com/microsoft/onnxruntime/releases/download/v1.24.1/onnxruntime-linux-x64-gpu-1.24.1.tgz";       ort_dir="onnxruntime-linux-x64-gpu-1.24.1" ;;
-    *) echo "ERROR: no prebuilt ONNX Runtime for ${arch}-${variant}"; return 1 ;;
+    amd64-vulkan|arm64-vulkan|amd64-cuda) ;;
+    *) echo "ERROR: unsupported glibc combination ${arch}-${variant}"; return 1 ;;
   esac
 
   tmp="$(mktemp -d)"
@@ -1396,8 +1392,6 @@ FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 ARG ARCH
 ARG VARIANT
-ARG ORT_URL
-ARG ORT_DIR
 
 # noble, not jammy: ggml's Vulkan backend needs glslc to compile its shaders
 # and 22.04 ships only glslang-tools. The cost is a glibc 2.39 floor.
@@ -1430,19 +1424,123 @@ RUN if [ "$VARIANT" = "cuda" ]; then \
     fi
 ENV CUDNN_PATH=/usr/local/cudnn
 
-# Prebuilt ONNX Runtime (shared). Its .so files ship beside the binary.
+# ONNX Runtime built from source, static. Microsoft's prebuilt Linux packages
+# contain only libonnxruntime.so (no .a at all), so linking ORT statically means
+# building it. ORT's own CUDA execution provider is NOT enabled here: that build
+# is what overran CI time limits, and ggml/whisper provides the GPU acceleration
+# for these variants independently of ORT.
+#
+# Unlike the musl images this needs no protobuf/abseil/re2 prebuild (ORT fetches
+# its own), no musl locale shim, and no ORT_USE_CXX20_STD_CHRONO patch - noble
+# ships GCC 13, which has std::chrono operator<< for time_point.
+ENV ONNX_DIR=/onnxruntime
+ENV ONNX_SRC=/onnxruntime-src
 RUN set -eux; \
-    wget -nv --timeout=60 --tries=3 -O /tmp/ort.tgz "$ORT_URL"; \
-    mkdir -p /opt; \
-    tar xzf /tmp/ort.tgz -C /opt; \
-    rm -f /tmp/ort.tgz; \
-    ln -sfn "/opt/${ORT_DIR}" /opt/onnxruntime; \
-    test -f /opt/onnxruntime/lib/libonnxruntime.so
+    mkdir -p "$ONNX_DIR"; \
+    git clone --depth 1 -b v1.24.1 https://github.com/microsoft/onnxruntime.git $ONNX_SRC; \
+    cd $ONNX_SRC; \
+    cmake ./cmake -B $ONNX_DIR \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_CXX_STANDARD=20 \
+      -DCMAKE_CXX_STANDARD_REQUIRED=ON \
+      -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+      -DBUILD_SHARED_LIBS=OFF \
+      -DPython_EXECUTABLE=/usr/bin/python3 \
+      -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF \
+      -Donnxruntime_BUILD_SHARED_LIB=OFF \
+      -Donnxruntime_BUILD_UNIT_TESTS=OFF \
+      -Donnxruntime_RUN_ONNX_TESTS=OFF \
+      -Donnxruntime_BUILD_BENCHMARKS=OFF \
+      -Donnxruntime_ENABLE_PYTHON=OFF \
+      -Donnxruntime_BUILD_CSHARP=OFF \
+      -Donnxruntime_BUILD_JAVA=OFF \
+      -Donnxruntime_BUILD_NODEJS=OFF \
+      -Donnxruntime_BUILD_OBJC=OFF \
+      -Donnxruntime_BUILD_APPLE_FRAMEWORK=OFF \
+      -Donnxruntime_USE_VCPKG=OFF \
+      -Donnxruntime_USE_MIMALLOC=OFF \
+      -Donnxruntime_ENABLE_EXTERNAL_CUSTOM_OP_SCHEMAS=OFF \
+      -Donnxruntime_USE_CUDA=OFF \
+      -Donnxruntime_USE_CUDA_INTERFACE=OFF \
+      -Donnxruntime_USE_TENSORRT=OFF \
+      -Donnxruntime_USE_TENSORRT_INTERFACE=OFF \
+      -Donnxruntime_USE_NV=OFF \
+      -Donnxruntime_USE_NV_INTERFACE=OFF \
+      -Donnxruntime_USE_DNNL=OFF \
+      -Donnxruntime_USE_OPENVINO_INTERFACE=OFF \
+      -Donnxruntime_USE_VITISAI=OFF \
+      -Donnxruntime_USE_VITISAI_INTERFACE=OFF \
+      -Donnxruntime_USE_QNN_INTERFACE=OFF \
+      -Donnxruntime_USE_MIGRAPHX=OFF \
+      -Donnxruntime_USE_MIGRAPHX_INTERFACE=OFF \
+      -Donnxruntime_USE_NNAPI_BUILTIN=OFF \
+      -Donnxruntime_USE_VSINPU=OFF \
+      -Donnxruntime_USE_RKNPU=OFF \
+      -Donnxruntime_USE_ACL=OFF \
+      -Donnxruntime_USE_ARMNN=OFF \
+      -Donnxruntime_USE_XNNPACK=OFF \
+      -Donnxruntime_USE_WEBNN=OFF \
+      -Donnxruntime_USE_WEBGPU=OFF \
+      -Donnxruntime_USE_JSEP=OFF \
+      -Donnxruntime_USE_CANN=OFF \
+      -Donnxruntime_USE_NCCL=OFF \
+      -Donnxruntime_USE_KLEIDIAI=OFF \
+      -Donnxruntime_DISABLE_RTTI=OFF \
+      -Donnxruntime_DISABLE_EXCEPTIONS=OFF \
+      -Donnxruntime_MINIMAL_BUILD=OFF \
+      -Donnxruntime_ENABLE_LTO=OFF \
+      -Donnxruntime_ENABLE_TRAINING=OFF \
+      -Donnxruntime_ENABLE_TRAINING_OPS=OFF \
+      -Donnxruntime_ENABLE_TRAINING_APIS=OFF \
+      -DCMAKE_INSTALL_PREFIX=$ONNX_DIR; \
+    cmake --build $ONNX_DIR --config Release -j"$(nproc)"; \
+    find $ONNX_DIR -name 'libonnxruntime_common.a' | grep -q . ; \
+    rm -rf $ONNX_SRC/.git
+
+# re2, built from the source ORT itself fetched and against ORT's own abseil.
+# ORT leaves 6 undefined re2 symbols in its archives (re2::RE2::FullMatchN and
+# friends) but never builds re2, so ort-sys fails with
+#   could not find native static library `re2`
+# Building from _deps/re2-src guarantees the exact version and C++ ABI ORT
+# expects; a distro libre2 could silently mismatch.
+# re2 needs abseil, and ORT's abseil is only ever configured in-tree - it is
+# never installed, so _deps/abseil_cpp-build has no abslTargets.cmake for
+# find_package to consume. Install abseil from the source ORT pinned, at the
+# same C++20 standard ORT used, so re2 matches ORT's ABI exactly.
+RUN set -eux; \
+    test -f $ONNX_DIR/_deps/abseil_cpp-src/CMakeLists.txt; \
+    cmake -S $ONNX_DIR/_deps/abseil_cpp-src -B /tmp/absl-build \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DBUILD_SHARED_LIBS=OFF \
+      -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+      -DCMAKE_CXX_STANDARD=20 \
+      -DABSL_ENABLE_INSTALL=ON \
+      -DABSL_PROPAGATE_CXX_STD=ON \
+      -DABSL_BUILD_TESTING=OFF \
+      -DCMAKE_INSTALL_PREFIX=/opt/absl; \
+    cmake --build /tmp/absl-build -j"$(nproc)"; \
+    cmake --install /tmp/absl-build; \
+    rm -rf /tmp/absl-build; \
+    test -f /opt/absl/lib/cmake/absl/abslConfig.cmake
+
+RUN set -eux; \
+    test -f $ONNX_DIR/_deps/re2-src/CMakeLists.txt; \
+    cmake -S $ONNX_DIR/_deps/re2-src -B /tmp/re2-build \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DBUILD_SHARED_LIBS=OFF \
+      -DRE2_BUILD_TESTING=OFF \
+      -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+      -DCMAKE_CXX_STANDARD=20 \
+      -DCMAKE_PREFIX_PATH=/opt/absl; \
+    cmake --build /tmp/re2-build -j"$(nproc)"; \
+    mkdir -p $ONNX_DIR/_deps/re2-build; \
+    cp /tmp/re2-build/libre2.a $ONNX_DIR/_deps/re2-build/; \
+    rm -rf /tmp/re2-build; \
+    test -f $ONNX_DIR/_deps/re2-build/libre2.a
 ENV ORT_STRATEGY=system
-ENV ORT_LIB_LOCATION=/opt/onnxruntime/lib
-ENV ORT_PREFER_DYNAMIC_LINK=1
-ENV ONNXRUNTIME_INCLUDE_DIR=/opt/onnxruntime/include
-ENV ONNXRUNTIME_LIB_DIR=/opt/onnxruntime/lib
+ENV ORT_LIB_LOCATION=/onnxruntime
+ENV ORT_PREFER_DYNAMIC_LINK=0
+ENV ONNXRUNTIME_INCLUDE_DIR=/onnxruntime-src/include
 
 # whisper-rs-sys requires BLAS_INCLUDE_DIRS when built with OpenBLAS, and the
 # Debian layout puts the headers in the multiarch directory.
@@ -1452,6 +1550,25 @@ ENV ONNXRUNTIME_LIB_DIR=/opt/onnxruntime/lib
 # "-lopenblas" that whisper-rs-sys emits would otherwise resolve to the shared
 # one. A -L path is searched before the default directories, so this keeps
 # OpenBLAS statically linked.
+# ALSA, built static: cpal links libasound, and apt ships only libasound.so.
+# Only the GPU libraries are allowed to stay dynamic in these variants.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends autoconf automake libtool; \
+    rm -rf /var/lib/apt/lists/*; \
+    curl -sL -o /tmp/alsa.tar.gz \
+      "https://github.com/alsa-project/alsa-lib/archive/refs/tags/v1.2.12.tar.gz"; \
+    tar xzf /tmp/alsa.tar.gz -C /tmp; \
+    cd /tmp/alsa-lib-1.2.12; \
+    autoreconf -fi; \
+    ./configure --prefix=/opt/alsa-static --enable-shared=no --enable-static=yes \
+      --with-pkg-config-plugindir=/opt/alsa-static/lib/pkgconfig; \
+    make -j"$(nproc)"; \
+    make install; \
+    cd /; rm -rf /tmp/alsa-lib-1.2.12 /tmp/alsa.tar.gz; \
+    test -f /opt/alsa-static/lib/libasound.a
+ENV ALSA_STATIC_DIR=/opt/alsa-static
+
 ARG MULTIARCH
 RUN set -eux; \
     mkdir -p /opt/blas-static; \
@@ -1479,15 +1596,17 @@ DOCKERFILE
   docker build "${build_args[@]}" --platform="${plat}" \
     --build-arg ARCH="${arch}" \
     --build-arg VARIANT="${variant}" \
-    --build-arg ORT_URL="${ort_url}" \
-    --build-arg ORT_DIR="${ort_dir}" \
     --build-arg MULTIARCH="${multiarch}" \
     -f "$df" -t "$img" "$tmp"
 
+  # ort-cuda is deliberately dropped: ORT is built here without its CUDA
+  # execution provider (that build does not fit CI time limits), so requesting
+  # the feature would ask ort-sys for symbols this ORT does not contain.
+  # whisper/ggml still gets full CUDA acceleration via whisper-cuda.
   local feats
   case "${variant}" in
     vulkan) feats="${FEATURES_VULKAN}" ;;
-    cuda)   feats="${FEATURES_CUDA}" ;;
+    cuda)   feats="$(echo "${FEATURES_CUDA}" | sed 's/,ort-cuda//')" ;;
   esac
 
   echo "== Linux ${arch} ${variant} (glibc) cargo build =="
@@ -1510,10 +1629,35 @@ DOCKERFILE
       # Not +crt-static: this binary must be able to dlopen the Vulkan/CUDA
       # loaders the user installs. Our own libraries still link statically;
       # $ORIGIN lets it find the ONNX Runtime .so shipped alongside it.
+      # Only the GPU loaders may stay dynamic. -static-libstdc++/-static-libgcc
+      # drop libstdc++.so.6 and libgcc_s.so.1 (which would otherwise pin the
+      # binary to the host GCC runtime on top of the glibc floor), and
+      # /opt/alsa-static holds libasound.a with no .so beside it, so the
+      # -lasound that cpal emits resolves to the archive.
+      # ort-sys emits the libonnxruntime_*.a archives but not the third-party
+      # ones ORT links against, so they have to be named explicitly - the same
+      # thing the musl path does with its ABSL_LIBS list. Without them the link
+      # fails one dependency at a time (re2 first, then abseil, protobuf, ...).
+      # --start-group because these archives reference each other cyclically.
+      ORT_DEPS=""
+      for f in /onnxruntime/_deps/abseil_cpp-build/absl/*/libabsl_*.a \
+               /onnxruntime/_deps/protobuf-build/libprotobuf.a \
+               /onnxruntime/_deps/onnx-build/libonnx.a \
+               /onnxruntime/_deps/onnx-build/libonnx_proto.a \
+               /onnxruntime/_deps/pytorch_cpuinfo-build/libcpuinfo.a \
+               /onnxruntime/_deps/flatbuffers-build/libflatbuffers.a \
+               /onnxruntime/_deps/re2-build/libre2.a; do
+        [ -f "$f" ] && ORT_DEPS="$ORT_DEPS -C link-arg=$f"
+      done
+      echo "ORT dependency archives linked: $(echo $ORT_DEPS | wc -w)"
+
       export RUSTFLAGS="-C codegen-units=1 -C opt-level=3 \
-        -C link-arg=-Wl,-rpath,\$ORIGIN \
-        -C link-arg=-L/opt/onnxruntime/lib \
         -L native=/opt/blas-static \
+        -L native=/onnxruntime/_deps/re2-build \
+        -L native=/opt/alsa-static/lib \
+        -C link-arg=-Wl,--start-group ${ORT_DEPS} -C link-arg=-Wl,--end-group \
+        -C link-arg=-static-libstdc++ \
+        -C link-arg=-static-libgcc \
         -C link-arg=-lgfortran"
 
       export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
@@ -1524,15 +1668,14 @@ DOCKERFILE
       CARGO_TARGET_DIR="$ctd" cargo build --release --target "$TARGET" --features "$FEATS"
     '
 
-  # binary + the ONNX Runtime shared libraries it needs at run time
+  # ONNX Runtime is linked statically, so the binary stands alone: only the
+  # GPU loaders the user installs stay dynamic.
   local src_dir="${PROJECT_ROOT}/target-cross/linux-${arch}-${variant}/${target}/release"
   local out_dir="${DIST_DIR}/${BIN_NAME}-${VERSION}-linux-${arch}-${variant}-glibc"
   if [[ -f "${src_dir}/${BIN_NAME}" ]]; then
     rm -rf "${out_dir}"; mkdir -p "${out_dir}"
     cp "${src_dir}/${BIN_NAME}" "${out_dir}/"
     chmod +x "${out_dir}/${BIN_NAME}" || true
-    docker run --rm --platform="${plat}" -v "${out_dir}:/out" "$img" \
-      bash -lc 'cp -a /opt/onnxruntime/lib/libonnxruntime*.so* /out/ 2>/dev/null || true'
     add_artifact "${out_dir}"
     echo "✔ Built: ${out_dir}"
   else
