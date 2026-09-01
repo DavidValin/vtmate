@@ -1,9 +1,13 @@
 name: Build All Platforms
 
 on:
+  # Every branch, not just main: a push to a feature branch matched nothing
+  # before, so pushing there triggered no build at all.
   push:
     branches:
-      - main
+      - '**'
+    tags-ignore:
+      - '**'
   pull_request:
     branches:
       - main

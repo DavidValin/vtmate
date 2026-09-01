@@ -65,11 +65,12 @@ jobs:
           for dir in artifacts/*/; do
             name="$(basename "$dir")"
 
-            # The Linux jobs already produce .tar.gz + .sha256 via
+            # The Linux jobs already produce .tar.gz archives via
             # build_linux.sh's packaging step - take those as they are.
+            # The .sha256 files it writes alongside them are deliberately not
+            # published: GitHub shows a digest for every release asset already.
             if find "$dir" -name '*.tar.gz' | grep -q .; then
-              find "$dir" \( -name '*.tar.gz' -o -name '*.sha256' \) \
-                -exec cp {} assets/ \;
+              find "$dir" -name '*.tar.gz' -exec cp {} assets/ \;
               echo "packaged (pre-built archive): $name"
               continue
             fi
