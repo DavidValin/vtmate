@@ -7,8 +7,17 @@ on:
   # release.yml). The artifacts uploaded here are visible to the calling
   # workflow's later jobs, since a reusable workflow shares the same run.
   workflow_call:
+    inputs:
+      debug_symbols:
+        type: boolean
+        default: false
   # Manual runs from the Actions tab, for trying the matrix without a tag.
   workflow_dispatch:
+    inputs:
+      debug_symbols:
+        description: "Keep symbols + line tables in the Linux glibc GPU binaries (vulkan/cuda) so a gdb backtrace is readable"
+        type: boolean
+        default: false
 
 jobs:
 
@@ -54,6 +63,9 @@ jobs:
           df -h /
 
       - name: Build Linux (${{ matrix.arch }}, ${{ matrix.variant }})
+        env:
+          # Only the glibc vulkan/cuda variants honor this (build_linux.sh).
+          DEBUG_SYMBOLS: ${{ inputs.debug_symbols && '1' || '0' }}
         run: |
           chmod +x build_linux.sh
           ./build_linux.sh --arch ${{ matrix.arch }} --variant ${{ matrix.variant }}
