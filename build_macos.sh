@@ -150,9 +150,18 @@ cargo build --release \
   --target "${RUST_TARGET}" \
   --features "${FEATURES}"
 
-out="${DIST_DIR}/${BIN_NAME}-${VERSION}-macos-${arch}"
-cp "${CARGO_TARGET_DIR}/${RUST_TARGET}/release/${BIN_NAME}" "$out"
-chmod +x "$out" || true
+# Artifact naming: <bin>-<version>-macos-<arch>/vtmate, with the arch in
+# target-triple spelling (aarch64, x86_64) like the Linux/Windows artifacts.
+# The release workflow tars the directory contents, so the archive extracts
+# to ./vtmate directly.
+case "${arch}" in
+  arm64) artifact_arch="aarch64" ;;
+  *)     artifact_arch="${arch}" ;;
+esac
+out_dir="${DIST_DIR}/${BIN_NAME}-${VERSION}-macos-${artifact_arch}"
+rm -rf "${out_dir}"; mkdir -p "${out_dir}"
+cp "${CARGO_TARGET_DIR}/${RUST_TARGET}/release/${BIN_NAME}" "${out_dir}/"
+chmod +x "${out_dir}/${BIN_NAME}" || true
 
-echo "✔ Built: $out"
+echo "✔ Built: ${out_dir}/${BIN_NAME}"
 echo "✔ macOS build complete"

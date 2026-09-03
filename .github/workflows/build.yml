@@ -1,20 +1,14 @@
 name: Build All Platforms
 
 on:
-  # Every branch, not just main: a push to a feature branch matched nothing
-  # before, so pushing there triggered no build at all.
-  push:
-    branches:
-      - '**'
-    tags-ignore:
-      - '**'
-  pull_request:
-    branches:
-      - main
-  # Callable so release.yml can reuse this exact matrix on a tag instead of
-  # duplicating it. The artifacts uploaded here are visible to the calling
+  # Not on push or pull_request: the binaries are only built by release.yml,
+  # which calls this workflow on a tag. Pushing a commit together with its
+  # tag used to start two identical builds (the branch push here, the tag in
+  # release.yml). The artifacts uploaded here are visible to the calling
   # workflow's later jobs, since a reusable workflow shares the same run.
   workflow_call:
+  # Manual runs from the Actions tab, for trying the matrix without a tag.
+  workflow_dispatch:
 
 jobs:
 
@@ -33,12 +27,15 @@ jobs:
         # therefore needs a native arm64 runner: there is no glibc cross
         # toolchain in that image, and emulating the Rust build would be far
         # too slow.
+        #
+        # arch uses the artifact spelling (x86_64/aarch64); build_linux.sh
+        # accepts it as an alias of its internal amd64/arm64.
         include:
-          - { arch: amd64, variant: cpu,    runner: ubuntu-latest }
-          - { arch: amd64, variant: vulkan, runner: ubuntu-latest }
-          - { arch: amd64, variant: cuda,   runner: ubuntu-latest }
-          - { arch: arm64, variant: cpu,    runner: ubuntu-latest }
-          - { arch: arm64, variant: vulkan, runner: ubuntu-24.04-arm }
+          - { arch: x86_64,  variant: cpu,    runner: ubuntu-latest }
+          - { arch: x86_64,  variant: vulkan, runner: ubuntu-latest }
+          - { arch: x86_64,  variant: cuda,   runner: ubuntu-latest }
+          - { arch: aarch64, variant: cpu,    runner: ubuntu-latest }
+          - { arch: aarch64, variant: vulkan, runner: ubuntu-24.04-arm }
     steps:
       - uses: actions/checkout@v4
 
@@ -65,11 +62,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: linux-${{ matrix.arch }}-${{ matrix.variant }}
-          # cpu variants are packaged tarballs; the glibc GPU variants are a
-          # directory holding the binary plus the ONNX Runtime .so files.
-          path: |
-            dist/packages/*-linux-${{ matrix.arch }}-${{ matrix.variant }}*
-            dist/*-linux-${{ matrix.arch }}-${{ matrix.variant }}-glibc/**
+          # build_linux.sh packages every variant as
+          # vtmate-<version>-linux-<arch>-<variant>.tgz (binary at top level).
+          path: dist/packages/vtmate-*-linux-${{ matrix.arch }}-${{ matrix.variant }}.tgz
 
   windows-x64:
     name: Windows Build (x64, ${{ matrix.variant }})
@@ -217,8 +212,10 @@ jobs:
       - name: Upload ${{ matrix.variant }} Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: windows-x64-${{ matrix.variant }}
-          path: target-cross\${{ matrix.variant }}
+          name: windows-x86_64-${{ matrix.variant }}
+          # build_windows.ps1 writes vtmate-<version>-windows-x86_64-<variant>\
+          # holding vtmate.exe plus any bundled DLLs; upload its contents.
+          path: target-cross\vtmate-*-windows-x86_64-${{ matrix.variant }}
 
   macos:
     name: macOS Build (${{ matrix.arch }})
@@ -232,7 +229,10 @@ jobs:
           # ort-sys: pyke ships no prebuilt ONNX Runtime for x86_64-apple-darwin.
           # Restoring the Intel leg means building ORT from source on macOS.
           # build_macos.sh still accepts --arch x86_64 for local builds.
-          - { arch: arm64, runner: macos-14 }
+          #
+          # arch uses the artifact spelling (aarch64); build_macos.sh accepts
+          # it as an alias of arm64.
+          - { arch: aarch64, runner: macos-14 }
     steps:
       - uses: actions/checkout@v4
 
@@ -248,7 +248,7 @@ jobs:
 
       - name: Verify linkage and deployment target
         run: |
-          bin=$(ls dist/vtmate-*-macos-${{ matrix.arch }})
+          bin=$(ls dist/vtmate-*-macos-${{ matrix.arch }}/vtmate)
           otool -L "$bin"
           otool -l "$bin" | grep -A3 LC_BUILD_VERSION
 
@@ -256,4 +256,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: macos-${{ matrix.arch }}
+          # build_macos.sh writes vtmate-<version>-macos-<arch>/vtmate; upload
+          # the directory contents so the release step can tar them.
           path: dist/vtmate-*-macos-${{ matrix.arch }}

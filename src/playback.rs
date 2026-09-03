@@ -12,7 +12,6 @@ use std::sync::{
   Arc, Mutex,
   atomic::{AtomicBool, AtomicU64, Ordering},
 };
-use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
