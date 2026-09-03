@@ -12,7 +12,6 @@ use crossbeam_channel::{Receiver, Sender, select};
 use hound;
 use std::fs;
 use std::path::Path;
-use std::sync::OnceLock;
 use std::sync::{
   Arc, Mutex,
   atomic::{AtomicU64, Ordering},
@@ -21,8 +20,6 @@ use std::thread;
 use std::time::Duration;
 use tokio::runtime::Builder as TokioBuilder;
 use uuid::Uuid;
-
-static WHISPER_CTX: OnceLock<whisper_rs::WhisperContext> = OnceLock::new();
 
 // API
 // ------------------------------------------------------------------
@@ -41,17 +38,6 @@ pub enum Command {
   Undo,
 }
 
-/// Initialise the Whisper context once, performing a warm‑up.
-pub fn init_whisper_context(model_path: &str) -> &'static whisper_rs::WhisperContext {
-  WHISPER_CTX.get_or_init(|| {
-    let ctx = whisper_rs::WhisperContext::new_with_params(model_path, Default::default())
-      .expect("Failed to create WhisperContext");
-    // Perform warm‑up to load the model into memory
-    crate::stt::whisper_warmup(model_path).expect("Whisper warm‑up failed");
-    ctx
-  })
-}
-
 pub fn conversation_thread(
   rx_utt: Receiver<crate::audio::AudioChunk>,
   interrupt_counter: Arc<AtomicU64>,
@@ -68,7 +54,7 @@ pub fn conversation_thread(
   quiet: bool,
   save: bool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-  let ctx = init_whisper_context(&model_path);
+  let whisper = crate::stt::init(&model_path)?;
 
   // WAV writer thread: activated when -s option is used
   // WAV writer will be started lazily when the first save path is created.
@@ -258,8 +244,7 @@ pub fn conversation_thread(
               let _pcm_f32: Vec<f32> = utt.data.clone();
               let mono_f32 = crate::audio::convert_to_mono(&utt);
 
-              let user_text = crate::stt::whisper_transcribe_with_ctx(
-                &ctx,
+              let user_text = whisper.transcribe(
                 &mono_f32,
                 utt.sample_rate,
                 &state.language.lock().unwrap(),
@@ -428,7 +413,7 @@ pub fn conversation_thread(
         crate::log::log("debug", &format!("Received mono f32 pcm len {}", pcm_f32.len()));
         crate::log::log("debug", "Transcribing utterance...");
         let state = GLOBAL_STATE.get().expect("AppState not initialized");
-        let user_text = crate::stt::whisper_transcribe_with_ctx(&ctx, &mono_f32, utt.sample_rate, &state.language.lock().unwrap())?;
+        let user_text = whisper.transcribe(&mono_f32, utt.sample_rate, &state.language.lock().unwrap())?;
         crate::log::log("info", &format!("Transcribed: '{}'", user_text));
         let system_prompt = {
           let state = GLOBAL_STATE.get().expect("AppState not initialized");
