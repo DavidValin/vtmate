@@ -92,6 +92,53 @@ pub async fn llama_server_stream_response_into(
     }
   }
 
+  /// Serialize one chat message for the wire, including tool calls on assistant turns
+  /// and the call id on `tool` results.
+  fn message_to_json(m: &crate::conversation::ChatMessage, kind: ApiKind) -> serde_json::Value {
+    let mut obj = json!({ "role": m.role, "content": m.content });
+    if let Some(calls) = m.tool_calls.as_ref().filter(|c| !c.is_empty()) {
+      let calls: Vec<serde_json::Value> = calls
+        .iter()
+        .map(|tc| {
+          let mut tc = tc.clone();
+          if let Some(args) = tc.pointer_mut("/function/arguments") {
+            match kind {
+              // OpenAI-compatible endpoints expect `arguments` as a JSON-encoded string.
+              ApiKind::OaiChat => {
+                if !args.is_string() {
+                  *args = serde_json::Value::String(args.to_string());
+                }
+              }
+              // Ollama's native API expects an object.
+              ApiKind::OllamaChat => {
+                if let Some(parsed) = args
+                  .as_str()
+                  .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                {
+                  *args = parsed;
+                }
+              }
+            }
+          }
+          tc
+        })
+        .collect();
+      obj["tool_calls"] = serde_json::Value::Array(calls);
+    }
+    if m.role == "tool" {
+      if let Some(id) = &m.tool_call_id {
+        obj["tool_call_id"] = json!(id);
+      }
+      if let Some(name) = &m.tool_name {
+        match kind {
+          ApiKind::OaiChat => obj["name"] = json!(name),
+          ApiKind::OllamaChat => obj["tool_name"] = json!(name),
+        }
+      }
+    }
+    obj
+  }
+
   fn should_fallback_status(code: StatusCode) -> bool {
     matches!(
       code,
@@ -140,68 +187,35 @@ pub async fn llama_server_stream_response_into(
 
     crate::log::log("info", &format!("Trying endpoint: {}", url));
 
-    let req = match kind {
-      ApiKind::OaiChat => {
-        let tools_payload = if include_tools {
-          Some(crate::tools::tools_schemas(tools).unwrap_or_default())
-        } else {
-          None
-        };
-        let payload = json!({
-          "model": llama_model,
-          "messages": messages.iter().map(|m| json!({ "role": m.role, "content": m.content })).collect::<Vec<_>>(),
-          "think": think,
-          "stream": true,
-          "tools": tools_payload,
-          "tool_choice": if include_tools { Some("auto") } else { None::<&str> },
-          "parallel_tool_calls": if include_tools { Some(false) } else { None::<bool> },
-          "options": {
-            "think": think
-          },
-        });
-        crate::log::log(
-          "debug",
-          &format!(
-            "OAI payload tools: {:?}",
-            tools_payload.as_ref().map(|v| v
-              .iter()
-              .filter_map(|t| t.get("name").and_then(|n| n.as_str()))
-              .collect::<Vec<_>>())
-          ),
-        );
-        client.post(&url).json(&payload)
-      }
-      ApiKind::OllamaChat => {
-        let tools_payload = if include_tools {
-          Some(crate::tools::tools_schemas(tools).unwrap_or_default())
-        } else {
-          None
-        };
-        crate::log::log(
-          "debug",
-          &format!(
-            "Ollama payload tools: {:?}",
-            tools_payload.as_ref().map(|v| v
-              .iter()
-              .filter_map(|t| t.get("name").and_then(|n| n.as_str()))
-              .collect::<Vec<_>>())
-          ),
-        );
-        let payload = json!({
-          "model": llama_model,
-          "messages": messages.iter().map(|m| json!({ "role": m.role, "content": m.content })).collect::<Vec<_>>(),
-          "think": think,
-          "stream": true,
-          "tools": tools_payload,
-          "tool_choice": if include_tools { Some("auto") } else { None::<&str> },
-          "parallel_tool_calls": if include_tools { Some(false) } else { None::<bool> },
-          "options": {
-            "think": think
-          },
-        });
-        client.post(&url).json(&payload)
-      }
+    let tools_payload = if include_tools {
+      Some(crate::tools::tools_schemas(tools).unwrap_or_default())
+    } else {
+      None
     };
+    crate::log::log(
+      "debug",
+      &format!(
+        "{:?} payload tools: {:?}",
+        kind,
+        tools_payload.as_ref().map(|v| v
+          .iter()
+          .filter_map(|t| t.get("name").and_then(|n| n.as_str()))
+          .collect::<Vec<_>>())
+      ),
+    );
+    let payload = json!({
+      "model": llama_model,
+      "messages": messages.iter().map(|m| message_to_json(m, kind)).collect::<Vec<_>>(),
+      "think": think,
+      "stream": true,
+      "tools": tools_payload,
+      "tool_choice": if include_tools { Some("auto") } else { None::<&str> },
+      "parallel_tool_calls": if include_tools { Some(false) } else { None::<bool> },
+      "options": {
+        "think": think
+      },
+    });
+    let req = client.post(&url).json(&payload);
 
     let resp = match tokio::time::timeout(std::time::Duration::from_secs(120), req.send()).await {
       Ok(Ok(r)) => r,

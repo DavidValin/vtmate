@@ -27,11 +27,18 @@ static WHISPER_CTX: OnceLock<whisper_rs::WhisperContext> = OnceLock::new();
 // API
 // ------------------------------------------------------------------
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ChatMessage {
   pub role: String,
   pub content: String,
   pub agent_name: Option<String>,
+  /// Tool calls requested by an assistant turn, in OpenAI shape
+  /// (`{id, type, function: {name, arguments}}`) with `arguments` as a parsed object.
+  pub tool_calls: Option<Vec<serde_json::Value>>,
+  /// For `role: "tool"` messages: id of the tool call this result answers.
+  pub tool_call_id: Option<String>,
+  /// For `role: "tool"` messages: name of the tool that produced the result.
+  pub tool_name: Option<String>,
 }
 
 pub type ConversationHistory = std::sync::Arc<std::sync::Mutex<Vec<ChatMessage>>>;
@@ -345,19 +352,9 @@ pub fn conversation_thread(
           user_msg,
           &settings.tools,
         );
-        if let Some(ref text) = reply {
-          if !text.is_empty() && !settings.tools.is_empty() {
-            // Tools were active, react_loop did not speak — handle TTS for final reply
-            process_tts_phrases(
-              text,
-              &tts_tx,
-              &tts_done_rx,
-              settings.voice.clone(),
-              &interrupt_counter,
-              my_interrupt,
-            );
-            wait_for_playback(state, &interrupt_counter, my_interrupt);
-          }
+        // react_loop speaks phrases as they stream; wait for the queued audio to finish.
+        if reply.as_deref().map_or(false, |t| !t.is_empty()) {
+          wait_for_playback(state, &interrupt_counter, my_interrupt);
         }
         if quiet {
           crate::log::log("info", "Quiet mode playback finished. Exiting.");
@@ -451,19 +448,9 @@ pub fn conversation_thread(
           user_text.clone(),
           &settings.tools,
         );
-        if let Some(ref text) = reply {
-          if !text.is_empty() && !settings.tools.is_empty() {
-            // Tools were active — react_loop did not speak; handle TTS for final reply
-            process_tts_phrases(
-              text,
-              &tts_tx,
-              &tts_done_rx,
-              settings.voice.clone(),
-              &interrupt_counter,
-              my_interrupt,
-            );
-            wait_for_playback(state, &interrupt_counter, my_interrupt);
-          }
+        // react_loop speaks phrases as they stream; wait for the queued audio to finish.
+        if reply.as_deref().map_or(false, |t| !t.is_empty()) {
+          wait_for_playback(state, &interrupt_counter, my_interrupt);
         }
         ui_thinking_cloned_for_closure.store(false, Ordering::Relaxed);
       }
@@ -660,6 +647,12 @@ fn push_or_update_last_assistant(
   let mut hist = conversation_history.lock().unwrap();
   if let Some(last) = hist.last_mut() {
     if last.role == "assistant" {
+      let needs_gap = !last.content.is_empty()
+        && !last.content.ends_with(char::is_whitespace)
+        && !new_piece.starts_with(char::is_whitespace);
+      if needs_gap {
+        last.content.push(' ');
+      }
       last.content.push_str(new_piece);
       return;
     }
@@ -668,6 +661,7 @@ fn push_or_update_last_assistant(
     role: "assistant".to_string(),
     content: new_piece.to_string(),
     agent_name: Some(agent_name.to_string()),
+    ..Default::default()
   });
 }
 
@@ -680,7 +674,7 @@ fn react_loop(
   tts_done_rx: &Receiver<()>,
   rt: &tokio::runtime::Runtime,
   interrupt_counter: &Arc<AtomicU64>,
-  mut user_msg: String,
+  user_msg: String,
   available_tools: &[String],
 ) -> Option<String> {
   let system_prompt = settings.system_prompt.replace("\\n", "\n");
@@ -691,11 +685,19 @@ fn react_loop(
   let my_interrupt = interrupt_counter.load(Ordering::SeqCst);
   let has_tools = !available_tools.is_empty();
 
+  // react_messages carries full reAct context (tool calls + outputs) across iterations.
+  // Only the final reply is pushed to conversation_history.
+  // Snapshot the history BEFORE adding the assistant placeholder so the request
+  // does not carry an empty assistant turn.
+  let mut react_messages =
+    create_full_context_messages(system_prompt, user_msg, conversation_history);
+
   // Pre-add assistant placeholder for label
   conversation_history.lock().unwrap().push(ChatMessage {
     role: "assistant".to_string(),
     content: "".to_string(),
     agent_name: Some(assistant_name.clone()),
+    ..Default::default()
   });
 
   // Render assistant label once
@@ -704,12 +706,6 @@ fn react_loop(
   let _ = tx_ui.send(format!("line|{}", label));
 
   let originals = apply_agent_settings(state, settings);
-
-  let system_prompt_clone = system_prompt.clone();
-  // react_messages carries full reAct context (tool calls + outputs) across iterations.
-  // Only the final reply is pushed to conversation_history.
-  let mut react_messages =
-    create_full_context_messages(system_prompt_clone, user_msg.clone(), conversation_history);
 
   let max_react_loop_iters = 20;
   let mut react_loop_count = 0;
@@ -730,25 +726,30 @@ fn react_loop(
         react_messages
           .iter()
           .rev()
-          .find(|m| {
-            m.role == "assistant"
-              && !m.content.contains("Tool result")
-              && !m.content.contains("Tool error")
-          })
+          .find(|m| m.role == "assistant" && !m.content.is_empty())
           .map(|m| m.content.clone())
           .unwrap_or_else(|| {
             crate::log::log("error", "no text response found in react loop history");
             "Lo siento, no pude completar la solicitud tras varios intentos.".to_string()
           })
       };
-      // last_reply was already pushed to conversation_history when it was produced.
+      // last_reply was already displayed, spoken and pushed to conversation_history
+      // when it was produced. Anything else still has to be shown and spoken.
       if last_reply.is_empty() {
-        remove_empty_placeholder(&conversation_history);
-        conversation_history.lock().unwrap().push(ChatMessage {
-          role: "assistant".to_string(),
-          content: final_reply.clone(),
-          agent_name: Some(assistant_name_for_closure.clone()),
-        });
+        let _ = tx_ui.send(format!("line|{}", final_reply));
+        process_tts_phrases(
+          &final_reply,
+          tts_tx,
+          tts_done_rx,
+          settings.voice.clone(),
+          interrupt_counter,
+          my_interrupt,
+        );
+        push_or_update_last_assistant(
+          &conversation_history,
+          &final_reply,
+          &assistant_name_for_closure,
+        );
       }
       perform_save(&conversation_history, settings);
       restore_agent_settings(state, originals);
@@ -763,13 +764,9 @@ fn react_loop(
     }
 
     let mut tool_calls: Vec<serde_json::Value> = Vec::new();
-    let tool_calls_count = tool_calls.len();
     crate::log::log(
       "debug",
-      &format!(
-        "react_loop: starting iteration with {} existing tool calls",
-        tool_calls_count
-      ),
+      &format!("react_loop: starting iteration {}", react_loop_count),
     );
     let speaker_arc = Arc::new(Mutex::new(PhraseSpeaker::new()));
     let reply_accum = Arc::new(Mutex::new(String::new()));
@@ -777,6 +774,9 @@ fn react_loop(
     // Reasoning is displayed with a visual distinction but NOT spoken via TTS.
     let reasoning_accum = Arc::new(Mutex::new(String::new()));
 
+    // Text content is always prose: tool calls arrive through `on_tool_call`, never as
+    // content. So every completed phrase is displayed, spoken and persisted right away,
+    // whether or not tools are enabled for this turn.
     let mut on_piece = {
       let speaker_arc = speaker_arc.clone();
       let reply_accum = reply_accum.clone();
@@ -787,7 +787,6 @@ fn react_loop(
       let conversation_history = conversation_history.clone();
       let assistant_name = assistant_name.clone();
       let my_interrupt = my_interrupt;
-      let has_tools = has_tools;
       move |piece: &str| {
         if piece.is_empty() {
           return;
@@ -801,14 +800,16 @@ fn react_loop(
           speaker.push_text(piece)
         };
         if let Some(ref phrase) = phrase {
-          let _ = tx_ui.send(format!("stream|{}", phrase));
-          let _ = tx_ui.send("line|".to_string());
-          // When no tools, stream is the final answer — speak per phrase
-          if !has_tools {
-            let _ = tts_tx.send((phrase.clone(), my_interrupt, voice.clone()));
-            let _ = tts_done_rx.recv();
-            push_or_update_last_assistant(&conversation_history, phrase, &assistant_name);
-          }
+          speak_phrase(
+            &tx_ui,
+            &tts_tx,
+            &tts_done_rx,
+            &conversation_history,
+            phrase,
+            &assistant_name,
+            my_interrupt,
+            &voice,
+          );
         }
       }
     };
@@ -857,6 +858,7 @@ fn react_loop(
 
     if let Err(e) = stream_result {
       crate::log::log("error", &format!("Streaming error: {}", e));
+      let _ = tx_ui.send(format!("line|\x1b[31mError getting response: {}\x1b[0m", e));
       // Remove empty assistant placeholder if still empty
       remove_empty_placeholder(&conversation_history);
       restore_agent_settings(state, originals);
@@ -866,18 +868,16 @@ fn react_loop(
 
     // Flush remaining phrase (text already in reply_accum from raw pieces)
     if let Some(last_phrase) = speaker_arc.lock().unwrap().flush() {
-      let _ = tx_ui.send(format!("stream|{}", last_phrase));
-      let _ = tx_ui.send("line|".to_string());
-      // When no tools, stream is the final answer — speak and save
-      if !has_tools {
-        let _ = tts_tx.send((last_phrase.clone(), my_interrupt, settings.voice.clone()));
-        let _ = tts_done_rx.recv();
-        push_or_update_last_assistant(
-          &conversation_history,
-          &last_phrase,
-          &assistant_name_for_closure,
-        );
-      }
+      speak_phrase(
+        tx_ui,
+        tts_tx,
+        tts_done_rx,
+        conversation_history,
+        &last_phrase,
+        &assistant_name_for_closure,
+        my_interrupt,
+        &settings.voice,
+      );
     }
 
     // Final reply text
@@ -915,82 +915,65 @@ fn react_loop(
           role: "user".to_string(),
           content: "Please provide your final response.".to_string(),
           agent_name: None,
+          ..Default::default()
         });
         continue;
       }
 
-      // Reply text was already displayed during streaming via on_piece + flush.
-      // If no tools available, this IS the final answer (use reply text, not reasoning)
-      if !has_tools {
-        // In no-tools mode, phrases were already pushed to history during streaming via on_piece.
-        // No need to push again here.
+      // Reply text was already displayed, spoken and pushed to history phrase by
+      // phrase during streaming. Without tools the stream IS the final answer, and with
+      // tools a text-only response ends the loop.
+      if !reply.is_empty() || !has_tools {
         perform_save(&conversation_history, settings);
         restore_agent_settings(state, originals);
         return Some(reply);
       }
 
-      // If LLM produced a text response (no tools), return it immediately
-      if !reply.is_empty() {
-        // Push final reply into history
-        push_or_update_last_assistant(&conversation_history, &reply, &assistant_name_for_closure);
-        perform_save(&conversation_history, settings);
-        restore_agent_settings(state, originals);
-        return Some(reply);
-      }
-      // Tools available but LLM produced text without calling any.
-      last_reply = reply.clone();
-      if !reasoning.is_empty() {
-        react_messages.push(ChatMessage {
-          role: "assistant".to_string(),
-          content: reasoning.clone(),
-          agent_name: Some(assistant_name_for_closure.clone()),
-        });
-      }
-      continue;
-    }
-
-    // Tool calls present — display reasoning (already streamed) and reply before executing tools
-    if !reasoning.is_empty() {
-      let _ = tx_ui.send("line|".to_string());
-    }
-    if !reply.is_empty() {
-      // Reply was already displayed during streaming; only speak here.
-      last_reply = reply.clone();
-      let _ = tts_tx.send((reply.clone(), my_interrupt, settings.voice.clone()));
-      let _ = tts_done_rx.recv();
-      // Persist so it stays in context for later loop iterations and turns.
-      push_or_update_last_assistant(&conversation_history, &reply, &assistant_name_for_closure);
-      react_messages.push(ChatMessage {
-        role: "assistant".to_string(),
-        content: reply.clone(),
-        agent_name: Some(assistant_name_for_closure.clone()),
-      });
-      // Add reasoning to react_messages so LLM has it in context.
-      // The reply itself will be shown via the "here is the response" prompt after tool outputs.
-      if !reasoning.is_empty() {
-        react_messages.push(ChatMessage {
-          role: "assistant".to_string(),
-          content: reasoning.clone(),
-          agent_name: Some(assistant_name_for_closure.clone()),
-        });
-      }
-    } else if !reasoning.is_empty() {
-      // Only reasoning, no reply text — add reasoning to react_messages
+      // Tools available but the LLM only produced reasoning: keep it in context and
+      // let the model continue.
       react_messages.push(ChatMessage {
         role: "assistant".to_string(),
         content: reasoning.clone(),
         agent_name: Some(assistant_name_for_closure.clone()),
+        ..Default::default()
       });
+      continue;
     }
+
+    // Tool calls present. Any reply text was already displayed, spoken and persisted
+    // during streaming; remember it as the last thing said.
+    // ----------------------------------------------------------
+    if !reasoning.is_empty() {
+      let _ = tx_ui.send("line|".to_string());
+    }
+    if !reply.is_empty() {
+      last_reply = reply.clone();
+    }
+
+    let calls: Vec<ToolCallSpec> = tool_calls
+      .iter()
+      .enumerate()
+      .map(|(i, tc)| normalize_tool_call(tc, react_loop_count, i))
+      .collect();
+
+    // The assistant turn that requested the tools, with its tool_calls, so the provider
+    // sees a proper tool exchange. Tool results must directly follow this message, so
+    // reasoning is deliberately not inserted as a separate assistant message here.
+    react_messages.push(ChatMessage {
+      role: "assistant".to_string(),
+      content: reply.clone(),
+      agent_name: Some(assistant_name_for_closure.clone()),
+      tool_calls: Some(calls.iter().map(ToolCallSpec::to_json).collect()),
+      ..Default::default()
+    });
 
     crate::log::log(
       "debug",
-      &format!("react_loop: executing {} tool calls", tool_calls.len()),
+      &format!("react_loop: executing {} tool calls", calls.len()),
     );
 
-    // Execute tool calls and collect results to feed back to LLM
-    let mut tool_outputs: Vec<String> = Vec::new();
-    for tc in &tool_calls {
+    // Execute tool calls; each result goes back as a `tool` message tied to its call id.
+    for call in &calls {
       if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
         crate::log::log("debug", "Interrupted during tool execution");
         remove_empty_placeholder(&conversation_history);
@@ -998,95 +981,144 @@ fn react_loop(
         perform_save(&conversation_history, settings);
         return Some("User interrupted the request.".to_string());
       }
-      if let Some(func_obj) = tc.get("function") {
-        let tool_name = func_obj
-          .get("name")
-          .and_then(|n| n.as_str())
-          .unwrap_or("unknown");
-        let tool_id = tc.get("id").and_then(|id| id.as_str()).unwrap_or("");
-        // Ollama returns arguments as a JSON string, not an object.
-        // Parse it to get the actual object, then re-serialize for embedding.
-        let args_value = func_obj
-          .get("arguments")
-          .or_else(|| func_obj.get("parameters"))
-          .unwrap_or(&serde_json::Value::Null);
-        let args_parsed = match args_value {
-          serde_json::Value::String(s) => {
-            serde_json::from_str::<serde_json::Value>(s).unwrap_or(serde_json::Value::Null)
-          }
-          serde_json::Value::Object(obj) => serde_json::Value::Object(obj.clone()),
-          _ => serde_json::Value::Null,
-        };
-        let args_str = serde_json::to_string(&args_parsed).unwrap_or("{}".to_string());
-
-        let payload = format!(r#"{{"name":"{}","arguments":{}}}"#, tool_name, args_str);
-        // Log tool execution to UI
-        let _ = tx_ui.send(format!(
-          "line|\n\x1b[42m\x1b[30m {} \x1b[0m {}",
-          tool_name, args_str
-        ));
-        let result = crate::tools::handle_tool_call(&payload);
-        // handle_tool_call always returns Ok, wrapping errors in a JSON failure payload
-        let output =
-          result.unwrap_or_else(|e: Box<dyn std::error::Error + Send + Sync>| e.to_string());
-        let parsed: Option<serde_json::Value> = serde_json::from_str(&output).ok();
-        let is_failure = parsed
+      let args_str = serde_json::to_string(&call.arguments).unwrap_or_else(|_| "{}".to_string());
+      let payload =
+        serde_json::json!({ "name": call.name, "arguments": call.arguments }).to_string();
+      // Log tool execution to UI
+      let _ = tx_ui.send(format!(
+        "line|\n\x1b[42m\x1b[30m {} \x1b[0m {}",
+        call.name, args_str
+      ));
+      let result = crate::tools::handle_tool_call(&payload);
+      // handle_tool_call always returns Ok, wrapping errors in a JSON failure payload
+      let output =
+        result.unwrap_or_else(|e: Box<dyn std::error::Error + Send + Sync>| e.to_string());
+      let parsed: Option<serde_json::Value> = serde_json::from_str(&output).ok();
+      let is_failure = parsed
+        .as_ref()
+        .and_then(|v| v.get("status").and_then(|s| s.as_str()))
+        .map(|s| s == "failed")
+        .unwrap_or(false);
+      let content = if is_failure {
+        let reasons = parsed
           .as_ref()
-          .and_then(|v| v.get("status").and_then(|s| s.as_str()))
-          .map(|s| s == "failed")
-          .unwrap_or(false);
-        if is_failure {
-          let reasons = parsed
-            .as_ref()
-            .and_then(|v| v.get("reasons"))
-            .and_then(|r| r.as_array())
-            .map(|arr| {
-              arr
-                .iter()
-                .filter_map(|r| r.as_str().map(|s| s.to_string()))
-                .collect::<Vec<_>>()
-                .join(", ")
-            })
-            .unwrap_or_default();
-          // Record failure output
-          tool_outputs.push(format!(
-            "Tool error [{}#{}]: {}. Try a different approach.",
-            tool_name, tool_id, reasons
-          ));
-          // Display the tool failure in the UI
-          let _ = tx_ui.send(format!("line|The tool `{}` failed: {}", tool_name, reasons));
-          let _ = tx_ui.send("line|".to_string());
-        } else {
-          // Record success output
-          tool_outputs.push(format!(
-            "Tool result [{}#{}]: {}.\n\nIf this result contains what you need, use this tool result to produce your text response for the user, otherwise make a different tool call.",
-            tool_name, tool_id, output
-          ));
-          // Display the tool result in the UI
-          let _ = tx_ui.send(format!("line|{}", output.trim()));
-          let _ = tx_ui.send("line|".to_string());
-        }
-        // Notify UI of tool call
-        let _ = tx_ui.send("line|\n\x1b[32m".to_string());
-      }
-    }
+          .and_then(|v| v.get("reasons"))
+          .and_then(|r| r.as_array())
+          .map(|arr| {
+            arr
+              .iter()
+              .filter_map(|r| r.as_str().map(|s| s.to_string()))
+              .collect::<Vec<_>>()
+              .join(", ")
+          })
+          .unwrap_or_default();
+        // Display the tool failure in the UI
+        let _ = tx_ui.send(format!("line|The tool `{}` failed: {}", call.name, reasons));
+        let _ = tx_ui.send("line|".to_string());
+        format!("Tool error: {}. Try a different approach.", reasons)
+      } else {
+        // Display the tool result in the UI
+        let _ = tx_ui.send(format!("line|{}", output.trim()));
+        let _ = tx_ui.send("line|".to_string());
+        output
+      };
+      // Notify UI of tool call
+      let _ = tx_ui.send("line|\n\x1b[32m".to_string());
 
-    // Accumulate tool outputs in react_messages for next iteration
-    let output_text = tool_outputs.join("\n");
-    if !output_text.is_empty() {
       react_messages.push(ChatMessage {
-        role: "assistant".to_string(),
-        content: output_text.clone(),
-        agent_name: Some(settings.name.clone()),
+        role: "tool".to_string(),
+        content,
+        agent_name: None,
+        tool_call_id: Some(call.id.clone()),
+        tool_name: Some(call.name.clone()),
+        ..Default::default()
       });
     }
 
-    // No user message for next iteration; react_messages already carries full context
-    user_msg.clear();
-
     // Loop: send updated messages back to LLM
-    thread::sleep(Duration::from_millis(100));
   }
+}
+
+/// A tool call requested by the model, normalized to a single shape regardless of how
+/// the provider reported it.
+struct ToolCallSpec {
+  id: String,
+  name: String,
+  /// Parsed argument object (never a JSON string).
+  arguments: serde_json::Value,
+}
+
+impl ToolCallSpec {
+  /// OpenAI-shaped tool call as stored on the assistant turn that requested it.
+  fn to_json(&self) -> serde_json::Value {
+    serde_json::json!({
+      "id": self.id,
+      "type": "function",
+      "function": {
+        "name": self.name,
+        "arguments": self.arguments
+      }
+    })
+  }
+}
+
+/// Normalize a raw tool call. OpenAI-style servers send `arguments` as a JSON string and
+/// always provide an `id`; Ollama's native API sends an object and no id, so a stable id
+/// is synthesized to pair the result message with the call.
+fn normalize_tool_call(tc: &serde_json::Value, iteration: i32, index: usize) -> ToolCallSpec {
+  let func = tc
+    .get("function")
+    .cloned()
+    .unwrap_or(serde_json::Value::Null);
+  let name = func
+    .get("name")
+    .and_then(|n| n.as_str())
+    .unwrap_or("unknown")
+    .to_string();
+  let id = tc
+    .get("id")
+    .and_then(|v| v.as_str())
+    .filter(|s| !s.is_empty())
+    .map(str::to_string)
+    .unwrap_or_else(|| format!("call_{}_{}", iteration, index));
+  let args_value = func
+    .get("arguments")
+    .or_else(|| func.get("parameters"))
+    .cloned()
+    .unwrap_or(serde_json::Value::Null);
+  let arguments = match args_value {
+    serde_json::Value::String(s) => serde_json::from_str(&s).ok(),
+    serde_json::Value::Object(o) => Some(serde_json::Value::Object(o)),
+    _ => None,
+  }
+  .filter(|v| v.is_object())
+  .unwrap_or_else(|| serde_json::json!({}));
+  ToolCallSpec {
+    id,
+    name,
+    arguments,
+  }
+}
+
+/// Display a completed phrase, hand it to TTS immediately and persist it in history.
+fn speak_phrase(
+  tx_ui: &Sender<String>,
+  tts_tx: &Sender<(String, u64, String)>,
+  tts_done_rx: &Receiver<()>,
+  conversation_history: &ConversationHistory,
+  phrase: &str,
+  assistant_name: &str,
+  my_interrupt: u64,
+  voice: &str,
+) {
+  let _ = tx_ui.send(format!("stream|{}", phrase));
+  let _ = tx_ui.send("line|".to_string());
+  let spoken = crate::util::strip_special_chars(phrase);
+  if !spoken.trim().is_empty() {
+    let _ = tts_tx.send((spoken, my_interrupt, voice.to_string()));
+    let _ = tts_done_rx.recv();
+  }
+  push_or_update_last_assistant(conversation_history, phrase, assistant_name);
 }
 
 /// Split text into phrases for TTS (used in debate mode)
@@ -1126,6 +1158,7 @@ fn push_user_message(history: &ConversationHistory, text: &str) {
     role: "user".to_string(),
     content: text.to_string(),
     agent_name: None,
+    ..Default::default()
   });
 }
 
@@ -1135,9 +1168,14 @@ fn wait_for_playback(
   my_interrupt: u64,
 ) {
   let playback_active = state.playback.playback_active.clone();
-  // Wait until playback starts if it hasn't already
+  // Wait until playback starts if it hasn't already. Give up after a grace period so a
+  // turn that produced no audio (error, empty reply) cannot block forever.
+  let started_waiting = std::time::Instant::now();
   while !playback_active.load(Ordering::SeqCst) {
     if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
+      return;
+    }
+    if started_waiting.elapsed() > Duration::from_secs(3) {
       return;
     }
     thread::sleep(Duration::from_millis(10));
@@ -1182,18 +1220,25 @@ fn create_full_context_messages(
     role: "system".to_string(),
     content: system_prompt,
     agent_name: None,
+    ..Default::default()
   });
   // history messages
   let hist = conversation_history.lock().unwrap();
   for m in hist.iter() {
     messages.push(m.clone());
   }
-  // user message
-  messages.push(ChatMessage {
-    role: "user".to_string(),
-    content: user_msg,
-    agent_name: None,
-  });
+  // user message, unless the caller already appended it to the history
+  let already_last = hist
+    .last()
+    .map_or(false, |m| m.role == "user" && m.content == user_msg);
+  if !already_last {
+    messages.push(ChatMessage {
+      role: "user".to_string(),
+      content: user_msg,
+      agent_name: None,
+      ..Default::default()
+    });
+  }
   messages
 }
 
