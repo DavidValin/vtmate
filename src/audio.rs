@@ -26,48 +26,6 @@ pub fn f32_to_i16(samples: &[f32]) -> Vec<i16> {
     .collect()
 }
 
-/// The Linux builds link ALSA statically, which bakes ALSA_PLUGIN_DIR in as
-/// the build container's path (e.g. /opt/alsa-static/lib/alsa-lib). That path
-/// doesn't exist on the machine actually running the binary, so loading the
-/// PCM plugin behind "default" (commonly the pulse/pipewire bridge) fails and
-/// cpal reports no usable input/output device - even though the ALSA config
-/// itself resolves fine. Point ALSA at whichever real plugin directory this
-/// distro actually uses, unless the user already set one.
-#[cfg(target_os = "linux")]
-pub fn ensure_alsa_plugin_dir() {
-  if std::env::var_os("ALSA_PLUGIN_DIR").is_some() {
-    return;
-  }
-  const CANDIDATES: &[&str] = &[
-    "/usr/lib/x86_64-linux-gnu/alsa-lib",
-    "/usr/lib/aarch64-linux-gnu/alsa-lib",
-    "/usr/lib/arm-linux-gnueabihf/alsa-lib",
-    "/usr/lib64/alsa-lib",
-    "/usr/lib/alsa-lib",
-    "/usr/local/lib/alsa-lib",
-  ];
-  for dir in CANDIDATES {
-    let path = Path::new(dir);
-    let has_plugin = path
-      .read_dir()
-      .map(|mut entries| {
-        entries.any(|e| {
-          e.ok()
-            .is_some_and(|e| e.file_name().to_string_lossy().starts_with("libasound_module_"))
-        })
-      })
-      .unwrap_or(false);
-    if has_plugin {
-      // SAFETY: called once at startup before any thread is spawned or reads the environment.
-      unsafe { std::env::set_var("ALSA_PLUGIN_DIR", dir) };
-      return;
-    }
-  }
-}
-
-#[cfg(not(target_os = "linux"))]
-pub fn ensure_alsa_plugin_dir() {}
-
 pub fn pick_input_stream(host: &cpal::Host) -> Result<(cpal::Device, cpal::Stream), String> {
   let err = || {
     "No usable microphone stream could be opened.\n".to_string()

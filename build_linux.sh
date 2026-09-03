@@ -1362,11 +1362,20 @@ DOCKERFILE
 # ("Dynamic loading not supported"), and dynamically the glibc .so fails to
 # relocate ("__strncpy_chk: symbol not found"). So the GPU variants are built
 # against glibc, with everything of ours still linked statically - only libc,
-# the GPU loaders, and ONNX Runtime stay dynamic.
+# the GPU loaders and libasound.so.2 stay dynamic.
 #
 # ONNX Runtime is built from source and linked statically, so the binary ships
 # alone. Its CUDA execution provider is left off - that build overruns CI time
 # limits - and ggml/whisper supplies the GPU acceleration for these variants.
+#
+# ALSA is deliberately NOT static here. On every desktop "default" is the
+# pulse/pipewire bridge, an ALSA plugin module the distro ships as a shared
+# object built against - and NEEDing - the system libasound.so.2. An embedded
+# ALSA that dlopens it ends up with two ALSA versions in one process, which
+# segfaulted (0.4.7); exporting the embedded copy's symbols so the plugin
+# binds to it did not cure it either. libasound.so.2 is present on every
+# machine that has a sound server at all, so it joins the GPU loaders as a
+# runtime dependency, the way 0.4.3 was built.
 # ==========================================================
 build_linux_glibc_variant() {
   local arch="$1" variant="$2"
@@ -1555,46 +1564,10 @@ ENV ONNXRUNTIME_INCLUDE_DIR=/onnxruntime-src/include
 # "-lopenblas" that whisper-rs-sys emits would otherwise resolve to the shared
 # one. A -L path is searched before the default directories, so this keeps
 # OpenBLAS statically linked.
-# ALSA, built static: cpal links libasound, and apt ships only libasound.so.
-# Only the GPU libraries are allowed to stay dynamic in these variants.
-# --with-configdir bakes the runtime PCM config lookup path into the binary;
-# left unset it defaults to $prefix/share/alsa, which only exists inside this
-# build container. Point it at /usr/share/alsa so it resolves "default" on
-# the end user's machine instead (else: "Unknown PCM default").
 #
-# The archive is installed under a different name and an EMPTY libasound.a is
-# left in its place. The plain -lasound that cpal emits must find *something*
-# in this directory (so it never falls through to the system .so), but the
-# real code is linked from RUSTFLAGS with --whole-archive, and the same
-# archive cannot appear both lazily and whole on one link line (duplicate
-# definitions). Why whole: the distro's ALSA plugin modules ("default" is the
-# pulse/pipewire bridge on every desktop) are shared objects that NEED
-# libasound.so.2 and call back into it - ioplug/extplug APIs cpal never
-# references. Unless the executable exports its embedded ALSA (see
-# --export-dynamic-symbol=snd_* in RUSTFLAGS) AND actually contains every
-# snd_* function, the plugin binds to the system libasound.so.2 instead, two
-# ALSA versions share one process, and it segfaults (0.4.7 regression).
-RUN set -eux; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends autoconf automake libtool; \
-    rm -rf /var/lib/apt/lists/*; \
-    curl -sL -o /tmp/alsa.tar.gz \
-      "https://github.com/alsa-project/alsa-lib/archive/refs/tags/v1.2.12.tar.gz"; \
-    tar xzf /tmp/alsa.tar.gz -C /tmp; \
-    cd /tmp/alsa-lib-1.2.12; \
-    autoreconf -fi; \
-    ./configure --prefix=/opt/alsa-static --enable-shared=no --enable-static=yes \
-      --with-pkg-config-plugindir=/opt/alsa-static/lib/pkgconfig \
-      --with-configdir=/usr/share/alsa; \
-    make -j"$(nproc)"; \
-    make install; \
-    cd /; rm -rf /tmp/alsa-lib-1.2.12 /tmp/alsa.tar.gz; \
-    mv /opt/alsa-static/lib/libasound.a /opt/alsa-static/lib/libasound_full.a; \
-    ar rcs /opt/alsa-static/lib/libasound.a; \
-    test -f /opt/alsa-static/lib/libasound_full.a; \
-    test -f /opt/alsa-static/lib/libasound.a; \
-    test ! -e /opt/alsa-static/lib/libasound.so
-ENV ALSA_STATIC_DIR=/opt/alsa-static
+# ALSA stays dynamic (see the header of this section): cpal's -lasound
+# resolves to the libasound.so from libasound2-dev installed above, and the
+# binary depends on the user's libasound.so.2 at runtime.
 
 ARG MULTIARCH
 RUN set -eux; \
@@ -1656,20 +1629,10 @@ DOCKERFILE
       # Not +crt-static: this binary must be able to dlopen the Vulkan/CUDA
       # loaders the user installs. Our own libraries still link statically;
       # $ORIGIN lets it find the ONNX Runtime .so shipped alongside it.
-      # Only the GPU loaders may stay dynamic. -static-libstdc++/-static-libgcc
-      # drop libstdc++.so.6 and libgcc_s.so.1 (which would otherwise pin the
-      # binary to the host GCC runtime on top of the glibc floor), and
-      # /opt/alsa-static holds an (empty) libasound.a with no .so beside it,
-      # so the -lasound that cpal emits resolves there and never to the
-      # system .so; the real ALSA code is libasound_full.a, linked whole
-      # below. ALSA must be complete and exported (--export-dynamic-symbol)
-      # because the distro pulse/pipewire plugin modules the embedded ALSA
-      # dlopens call back into snd_* - symbol lookup searches the executable
-      # first, so they bind to the embedded copy. Without the export they
-      # bind to the system libasound.so.2 the plugin NEEDs, and two ALSA
-      # versions handling one PCM object segfaults. Link-args land at the
-      # very end of the line, after every rlib, which is fine for a whole
-      # archive (no lazy extraction) and the libc/libm already ahead of it.
+      # Only the GPU loaders and libasound.so.2 stay dynamic (ALSA: see the
+      # section header). -static-libstdc++/-static-libgcc drop libstdc++.so.6
+      # and libgcc_s.so.1 (which would otherwise pin the binary to the host
+      # GCC runtime on top of the glibc floor).
       # ort-sys emits the libonnxruntime_*.a archives but not the third-party
       # ones ORT links against, so they have to be named explicitly - the same
       # thing the musl path does with its ABSL_LIBS list. Without them the link
@@ -1690,12 +1653,7 @@ DOCKERFILE
       export RUSTFLAGS="-C codegen-units=1 -C opt-level=3 \
         -L native=/opt/blas-static \
         -L native=/onnxruntime/_deps/re2-build \
-        -L native=/opt/alsa-static/lib \
         -C link-arg=-Wl,--start-group ${ORT_DEPS} -C link-arg=-Wl,--end-group \
-        -C link-arg=-Wl,--whole-archive \
-        -C link-arg=/opt/alsa-static/lib/libasound_full.a \
-        -C link-arg=-Wl,--no-whole-archive \
-        -C link-arg=-Wl,--export-dynamic-symbol=snd_* \
         -C link-arg=-static-libstdc++ \
         -C link-arg=-static-libgcc \
         -C link-arg=-lgfortran"
@@ -1761,7 +1719,7 @@ for f in dist/${BIN_NAME}-*-linux-*/${BIN_NAME}; do
   if ldd "$f" 2>&1 | grep -q "not a dynamic"; then
     echo "✔ Statically linked (ldd says not a dynamic ELF)"
   else
-    echo "ldd output (libvulkan.so.1 is expected/allowed on vulkan builds):"
+    echo "ldd output (glibc GPU builds: libasound.so.2 plus the Vulkan/CUDA loaders are expected):"
     ldd "$f" || true
   fi
 
