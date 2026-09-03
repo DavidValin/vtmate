@@ -1740,7 +1740,14 @@ if (-not (Test-Path $SRC_BIN)) {
     $SRC_BIN = Join-Path $env:CARGO_TARGET_DIR "release\$BIN_BASE.exe"
 }
 
-$DST_BIN = Join-Path $TARGET_DIR "$VARIANT\$BIN_BASE-$VARIANT.exe"
+# Artifact naming: <bin>-<version>-windows-x86_64-<variant>/vtmate.exe, same
+# convention as the Linux/macOS artifacts. The release workflow zips the
+# directory contents (exe plus any DLLs bundled below), so the archive
+# extracts to vtmate.exe directly. $VERSION comes from Cargo.toml.
+$VERSION = (Select-String -Path (Join-Path $PROJECT_ROOT "Cargo.toml") -Pattern '^\s*version\s*=\s*"([^"]+)"' |
+    Select-Object -First 1).Matches[0].Groups[1].Value
+if (-not $VERSION) { Write-Error "Failed to read version from Cargo.toml"; exit 1 }
+$DST_BIN = Join-Path $TARGET_DIR "$BIN_BASE-$VERSION-windows-x86_64-$VARIANT\$BIN_BASE.exe"
 
 if (-not (Test-Path $SRC_BIN)) {
     Write-Error "ERROR: Built binary not found."
@@ -1835,7 +1842,7 @@ if (-not $dumpbin) {
 
 if ($UPLOAD_ENABLED) {
     Write-Host "Uploading artifact for $VARIANT..."
-    gh run upload-artifact "$BIN_BASE-$VARIANT" $DST_BIN
+    gh run upload-artifact "$BIN_BASE-$VERSION-windows-x86_64-$VARIANT" (Split-Path -Parent $DST_BIN)
 }
 
 Write-Host "`nSUCCESS: $DST_BIN"

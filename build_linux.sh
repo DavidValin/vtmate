@@ -65,7 +65,7 @@ usage() {
 Usage:
   ./build_linux.sh [--arch <list>] [--variant <list>] [--skip-package] [--cache|--no-cache]
 
---arch    comma-separated: amd64,arm64,all
+--arch    comma-separated: amd64,arm64,all  (x86_64/aarch64 accepted as aliases)
 --variant comma-separated: cpu,vulkan,cuda,all  (cuda is amd64 only)
           When given, it overrides the WITH_* env toggles below. CI uses
           this to build one arch+variant per runner.
@@ -96,7 +96,12 @@ want_arch() { [[ "${SEL_ARCH}" == "all" ]] && return 0; list_has "${SEL_ARCH}" "
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --arch) SEL_ARCH="$(normalize_list "${2-}")"; shift 2 ;;
+    # Accept the artifact spelling (x86_64/aarch64) as aliases of the Docker
+    # spelling (amd64/arm64) used internally, so CI can pass the same value
+    # it uses for the artifact path.
+    --arch) SEL_ARCH="$(normalize_list "${2-}")"
+            SEL_ARCH="${SEL_ARCH//x86_64/amd64}"; SEL_ARCH="${SEL_ARCH//aarch64/arm64}"
+            shift 2 ;;
     --variant) SEL_VARIANT="$(normalize_list "${2-}")"; shift 2 ;;
     --skip-package) DO_PACKAGE=0; shift ;;
     --cache) DOCKER_NO_CACHE=0; shift ;;
@@ -149,33 +154,25 @@ FEATURES_CUDA="${FEATURES_COMMON},whisper-cuda,ort-cuda"
 # -----------------------------
 # Packaging helpers
 # -----------------------------
-sha256_file() {
-  local file="$1" out="$2"
-  if command -v shasum >/dev/null 2>&1; then
-    (cd "$(dirname "$file")" && shasum -a 256 "$(basename "$file")") > "$out"
-    return 0
-  fi
-  if command -v openssl >/dev/null 2>&1; then
-    local line hash
-    line="$(openssl dgst -sha256 "$file")"
-    hash="${line##* }"
-    echo "${hash}  $(basename "$file")" > "$out"
-    return 0
-  fi
-  echo "ERROR: No SHA256 tool found."
-  exit 1
+# Artifact naming: <bin>-<version>-<os>-<arch>-<variant>, e.g.
+# vtmate-0.4.8-linux-x86_64-cuda (.tgz once packaged). No libc suffix. The
+# arch uses the target-triple spelling (x86_64/aarch64) rather than Docker's
+# amd64/arm64, which the rest of this script keeps using internally.
+artifact_arch() {
+  case "$1" in
+    amd64) echo "x86_64" ;;
+    arm64) echo "aarch64" ;;
+    *) echo "$1" ;;
+  esac
 }
-make_tgz() { local src="$1" tgz="$2"; tar -C "$(dirname "$src")" -czf "$tgz" "$(basename "$src")"; }
+# Every artifact is a directory holding the binary (plus, for the glibc GPU
+# variants, whatever must ship beside it). The tarball carries the directory
+# *contents* at top level, so extracting yields ./vtmate directly.
+make_tgz() { local src="$1" tgz="$2"; (cd "$src" && tar -czf "$tgz" -- *); }
 package_one() {
   local src="$1"
-  # -e so a directory artifact is packaged too; make_tgz handles both.
-  [[ -e "$src" ]] || return 0
-  local base tgz sha
-  base="$(basename "$src")"
-  tgz="${PKG_DIR}/${base}.tar.gz"
-  sha="${PKG_DIR}/${base}.tar.gz.sha256"
-  make_tgz "$src" "$tgz"
-  sha256_file "$tgz" "$sha"
+  [[ -d "$src" ]] || return 0
+  make_tgz "$src" "${PKG_DIR}/$(basename "$src").tgz"
 }
 
 # -----------------------------
@@ -246,12 +243,13 @@ add_artifact() { [[ -e "$1" ]] && ARTIFACTS+=("$1"); return 0; }
 linux_copy_out() {
   local arch="$1" target="$2" variant="$3"
   local src_dir="${PROJECT_ROOT}/target-cross/linux-${arch}-${variant}/${target}/release"
-  local out="${DIST_DIR}/${BIN_NAME}-${VERSION}-linux-${arch}-${variant}"
+  local out_dir="${DIST_DIR}/${BIN_NAME}-${VERSION}-linux-$(artifact_arch "${arch}")-${variant}"
   [[ -f "${src_dir}/${BIN_NAME}" ]] || return 0
-  cp "${src_dir}/${BIN_NAME}" "$out"
-  chmod +x "$out" || true
-  add_artifact "$out"
-  echo "✔ Built: $out"
+  rm -rf "${out_dir}"; mkdir -p "${out_dir}"
+  cp "${src_dir}/${BIN_NAME}" "${out_dir}/"
+  chmod +x "${out_dir}/${BIN_NAME}" || true
+  add_artifact "${out_dir}"
+  echo "✔ Built: ${out_dir}/${BIN_NAME}"
 }
 
 # ==========================================================
@@ -1563,6 +1561,19 @@ ENV ONNXRUNTIME_INCLUDE_DIR=/onnxruntime-src/include
 # left unset it defaults to $prefix/share/alsa, which only exists inside this
 # build container. Point it at /usr/share/alsa so it resolves "default" on
 # the end user's machine instead (else: "Unknown PCM default").
+#
+# The archive is installed under a different name and an EMPTY libasound.a is
+# left in its place. The plain -lasound that cpal emits must find *something*
+# in this directory (so it never falls through to the system .so), but the
+# real code is linked from RUSTFLAGS with --whole-archive, and the same
+# archive cannot appear both lazily and whole on one link line (duplicate
+# definitions). Why whole: the distro's ALSA plugin modules ("default" is the
+# pulse/pipewire bridge on every desktop) are shared objects that NEED
+# libasound.so.2 and call back into it - ioplug/extplug APIs cpal never
+# references. Unless the executable exports its embedded ALSA (see
+# --export-dynamic-symbol=snd_* in RUSTFLAGS) AND actually contains every
+# snd_* function, the plugin binds to the system libasound.so.2 instead, two
+# ALSA versions share one process, and it segfaults (0.4.7 regression).
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends autoconf automake libtool; \
@@ -1578,7 +1589,11 @@ RUN set -eux; \
     make -j"$(nproc)"; \
     make install; \
     cd /; rm -rf /tmp/alsa-lib-1.2.12 /tmp/alsa.tar.gz; \
-    test -f /opt/alsa-static/lib/libasound.a
+    mv /opt/alsa-static/lib/libasound.a /opt/alsa-static/lib/libasound_full.a; \
+    ar rcs /opt/alsa-static/lib/libasound.a; \
+    test -f /opt/alsa-static/lib/libasound_full.a; \
+    test -f /opt/alsa-static/lib/libasound.a; \
+    test ! -e /opt/alsa-static/lib/libasound.so
 ENV ALSA_STATIC_DIR=/opt/alsa-static
 
 ARG MULTIARCH
@@ -1644,8 +1659,17 @@ DOCKERFILE
       # Only the GPU loaders may stay dynamic. -static-libstdc++/-static-libgcc
       # drop libstdc++.so.6 and libgcc_s.so.1 (which would otherwise pin the
       # binary to the host GCC runtime on top of the glibc floor), and
-      # /opt/alsa-static holds libasound.a with no .so beside it, so the
-      # -lasound that cpal emits resolves to the archive.
+      # /opt/alsa-static holds an (empty) libasound.a with no .so beside it,
+      # so the -lasound that cpal emits resolves there and never to the
+      # system .so; the real ALSA code is libasound_full.a, linked whole
+      # below. ALSA must be complete and exported (--export-dynamic-symbol)
+      # because the distro pulse/pipewire plugin modules the embedded ALSA
+      # dlopens call back into snd_* - symbol lookup searches the executable
+      # first, so they bind to the embedded copy. Without the export they
+      # bind to the system libasound.so.2 the plugin NEEDs, and two ALSA
+      # versions handling one PCM object segfaults. Link-args land at the
+      # very end of the line, after every rlib, which is fine for a whole
+      # archive (no lazy extraction) and the libc/libm already ahead of it.
       # ort-sys emits the libonnxruntime_*.a archives but not the third-party
       # ones ORT links against, so they have to be named explicitly - the same
       # thing the musl path does with its ABSL_LIBS list. Without them the link
@@ -1668,6 +1692,10 @@ DOCKERFILE
         -L native=/onnxruntime/_deps/re2-build \
         -L native=/opt/alsa-static/lib \
         -C link-arg=-Wl,--start-group ${ORT_DEPS} -C link-arg=-Wl,--end-group \
+        -C link-arg=-Wl,--whole-archive \
+        -C link-arg=/opt/alsa-static/lib/libasound_full.a \
+        -C link-arg=-Wl,--no-whole-archive \
+        -C link-arg=-Wl,--export-dynamic-symbol=snd_* \
         -C link-arg=-static-libstdc++ \
         -C link-arg=-static-libgcc \
         -C link-arg=-lgfortran"
@@ -1683,13 +1711,13 @@ DOCKERFILE
   # ONNX Runtime is linked statically, so the binary stands alone: only the
   # GPU loaders the user installs stay dynamic.
   local src_dir="${PROJECT_ROOT}/target-cross/linux-${arch}-${variant}/${target}/release"
-  local out_dir="${DIST_DIR}/${BIN_NAME}-${VERSION}-linux-${arch}-${variant}-glibc"
+  local out_dir="${DIST_DIR}/${BIN_NAME}-${VERSION}-linux-$(artifact_arch "${arch}")-${variant}"
   if [[ -f "${src_dir}/${BIN_NAME}" ]]; then
     rm -rf "${out_dir}"; mkdir -p "${out_dir}"
     cp "${src_dir}/${BIN_NAME}" "${out_dir}/"
     chmod +x "${out_dir}/${BIN_NAME}" || true
     add_artifact "${out_dir}"
-    echo "✔ Built: ${out_dir}"
+    echo "✔ Built: ${out_dir}/${BIN_NAME}"
   else
     echo "ERROR: ${src_dir}/${BIN_NAME} not produced"
     return 1
@@ -1726,7 +1754,7 @@ true
 # -----------------------------
 # Check static build
 # -----------------------------
-for f in dist/${BIN_NAME}-*-linux-*; do
+for f in dist/${BIN_NAME}-*-linux-*/${BIN_NAME}; do
   [[ -f "$f" ]] || continue
   echo "Checking $f"
 
@@ -1750,7 +1778,7 @@ done
 # Packaging
 # -----------------------------
 if [[ "${DO_PACKAGE}" -eq 1 ]]; then
-  echo "== Packaging tar.gz + SHA256 =="
+  echo "== Packaging .tgz =="
   for f in "${ARTIFACTS[@]}"; do
     package_one "$f"
   done

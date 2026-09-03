@@ -180,6 +180,93 @@ fn init_expected_hashes() -> HashMap<&'static str, &'static str> {
 
 static EXPECTED_HASHES: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(init_expected_hashes);
 
+// espeak-rs-sys builds the vendored espeak-ng with CMake, whose config
+// auto-detects optional system libraries (libpcaudio for audio output,
+// libsonic for fast speech rates) and compiles espeak-ng against them when
+// present. espeak-rs-sys never emits link directives for those, so on a
+// host that has them installed (e.g. Arch with pcaudiolib/libsonic) the
+// final link fails with undefined `audio_object_*` / `sonic*` symbols.
+//
+// Dependency build scripts run before ours, so the CMake cache already
+// exists as a sibling of our OUT_DIR. Read it and link exactly the
+// libraries espeak-ng was configured with. When a lib was not found (or
+// was fetched and compiled into libespeak-ng.a, as sonic is), the cache
+// holds NOTFOUND / no file, and nothing is emitted.
+fn link_espeak_optional_libs(out_dir: &Path) {
+  // OUT_DIR = <profile>/build/vtmate-<hash>/out  ->  <profile>/build
+  let Some(build_dir) = out_dir.parent().and_then(Path::parent) else {
+    return;
+  };
+  let Ok(entries) = fs::read_dir(build_dir) else {
+    return;
+  };
+  let mut caches: Vec<(std::time::SystemTime, std::path::PathBuf)> = entries
+    .flatten()
+    .filter(|e| e.file_name().to_string_lossy().starts_with("espeak-rs-sys-"))
+    .map(|e| e.path().join("out").join("build").join("CMakeCache.txt"))
+    .filter(|p| p.is_file())
+    .filter_map(|p| {
+      let mtime = fs::metadata(&p).and_then(|m| m.modified()).ok()?;
+      Some((mtime, p))
+    })
+    .collect();
+  // Prefer the most recent configuration if several stale ones linger.
+  caches.sort_by(|a, b| b.0.cmp(&a.0));
+  let Some((_, cache_path)) = caches.into_iter().next() else {
+    return;
+  };
+  let Ok(cache) = fs::read_to_string(&cache_path) else {
+    return;
+  };
+  println!("cargo:rerun-if-changed={}", cache_path.display());
+
+  let value = |key: &str| -> Option<String> {
+    cache.lines().find_map(|line| {
+      let (k, v) = line.split_once('=')?;
+      let (name, _ty) = k.split_once(':')?;
+      (name == key).then(|| v.trim().to_string())
+    })
+  };
+
+  for (use_flag, lib_key) in [
+    ("USE_LIBPCAUDIO", "PCAUDIO_LIB"),
+    ("USE_LIBSONIC", "SONIC_LIB"),
+  ] {
+    let enabled = value(use_flag).is_some_and(|v| v.eq_ignore_ascii_case("ON"));
+    if !enabled {
+      continue;
+    }
+    let Some(lib) = value(lib_key) else { continue };
+    if lib.ends_with("-NOTFOUND") {
+      continue;
+    }
+    let lib_path = Path::new(&lib);
+    if !lib_path.is_file() {
+      continue;
+    }
+    // Not `rustc-link-lib`: rustc places a bin crate's own -l flags *before*
+    // the dependency rlibs, and with --as-needed the linker drops a shared
+    // library it has not yet seen any undefined symbol for. A raw link-arg
+    // is appended at the very end of the command line, after the rlib that
+    // holds espeak-ng's objects, so the references are pending by then.
+    // -L/-l rather than the full path: a library without a SONAME (libsonic)
+    // would otherwise get its absolute build-host path recorded as NEEDED.
+    let Some(dir) = lib_path.parent() else { continue };
+    let Some(stem) = lib_path.file_stem().and_then(|s| s.to_str()) else {
+      continue;
+    };
+    // libfoo.so / libfoo.so.0 / libfoo.a -> foo
+    let name = stem.strip_prefix("lib").unwrap_or(stem);
+    let name = name.split(".so").next().unwrap_or(name);
+    println!("cargo:rustc-link-arg=-L{}", dir.display());
+    println!("cargo:rustc-link-arg=-l{}", name);
+    println!(
+      "cargo:warning=espeak-ng was configured with {} ({}); linking it",
+      lib_key, lib
+    );
+  }
+}
+
 fn main() {
 
   // -----------------------------
@@ -266,6 +353,9 @@ fn main() {
   }
 
   let out_dir = env::var("OUT_DIR").expect("OUT_DIR not set");
+  if cfg!(unix) {
+    link_espeak_optional_libs(Path::new(&out_dir));
+  }
   let is_release = env::var("PROFILE").unwrap_or_default() == "release";
   let dest = Path::new(&out_dir).join("embedded");
   fs::create_dir_all(&dest).expect("Failed to create embedded dir");
