@@ -514,11 +514,13 @@ pub fn conversation_thread(
               acc.push_str(&phrase);
               acc.push(' ');
             }
-            // send the complete phrase to tts
-            let mut cleaned = crate::util::strip_special_chars(&phrase);
-            cleaned.push(' ');
-            crate::log::log("info", &format!("Sending phrase to TTS: '{}' (original: '{}'), interrupt={}", cleaned, phrase, my_interrupt));
-            let _ = tts_tx_cloned_for_closure.send((cleaned, my_interrupt, voice_for_tts_inner.clone()));
+            // send the complete phrase to tts (source code inside ``` is never spoken)
+            let mut cleaned = speaker_arc_cloned_for_closure.lock().unwrap().tts_text(&phrase);
+            if !cleaned.trim().is_empty() {
+              cleaned.push(' ');
+              crate::log::log("info", &format!("Sending phrase to TTS: '{}' (original: '{}'), interrupt={}", cleaned, phrase, my_interrupt));
+              let _ = tts_tx_cloned_for_closure.send((cleaned, my_interrupt, voice_for_tts_inner.clone()));
+            }
           }
 
           // send raw piece immediately
@@ -574,10 +576,12 @@ pub fn conversation_thread(
             acc.push_str(&last_phrase);
             acc.push(' ');
           }
-        // send to TTS
-          let mut cleaned = crate::util::strip_special_chars(&last_phrase);
-          cleaned.push(' ');
-          let _ = tts_tx_for_after.send((cleaned, my_interrupt, voice_for_tts_for_after.clone()));
+          // send to TTS (source code inside ``` is never spoken)
+          let mut cleaned = speaker_arc_for_after.lock().unwrap().tts_text(&last_phrase);
+          if !cleaned.trim().is_empty() {
+            cleaned.push(' ');
+            let _ = tts_tx_for_after.send((cleaned, my_interrupt, voice_for_tts_for_after.clone()));
+          }
         }
         // Persist conversation after streaming (same as handle_reply does at line 970)
         perform_save(&conversation_history, &settings_clone);
@@ -715,10 +719,17 @@ fn maybe_setup_and_save(
 /// Emits phrases when punctuation/newline/length threshold happens.
 struct PhraseSpeaker {
   buf: String,
+  /// true while inside a ``` fenced code block; code is displayed but never spoken
+  in_code: bool,
 }
 impl PhraseSpeaker {
   fn new() -> Self {
-    Self { buf: String::new() }
+    Self { buf: String::new(), in_code: false }
+  }
+  /// Text to send to TTS for a phrase emitted by this speaker (fenced code
+  /// removed, special chars stripped). Empty when the phrase was all code.
+  fn tts_text(&mut self, phrase: &str) -> String {
+    crate::util::tts_text(phrase, &mut self.in_code)
   }
   fn push_text(&mut self, s: &str) -> Option<String> {
     self.buf.push_str(s);
@@ -869,9 +880,12 @@ fn handle_reply(
       if let Some(ref phrase) = phrase {
         let _ = tx_ui.send(format!("stream|{}", phrase));
         let _ = tx_ui.send("line|".to_string());
-        // TTS
-        let _ = tts_tx.send((phrase.clone(), my_interrupt, voice.clone()));
-        let _ = tts_done_rx.recv();
+        // TTS (source code inside ``` is never spoken)
+        let cleaned = speaker_arc.lock().unwrap().tts_text(phrase);
+        if !cleaned.trim().is_empty() {
+          let _ = tts_tx.send((cleaned, my_interrupt, voice.clone()));
+          let _ = tts_done_rx.recv();
+        }
       }
       if interrupt_counter_clone.load(Ordering::SeqCst) != my_interrupt_clone {
         if let Some(rem) = speaker_arc.lock().unwrap().flush() {
@@ -910,7 +924,10 @@ fn handle_reply(
 
   // Flush remaining phrase
   if let Some(last_phrase) = speaker_arc.lock().unwrap().flush() {
-    let _ = tts_tx.send((last_phrase.clone(), my_interrupt, settings.voice.clone()));
+    let cleaned = speaker_arc.lock().unwrap().tts_text(&last_phrase);
+    if !cleaned.trim().is_empty() {
+      let _ = tts_tx.send((cleaned, my_interrupt, settings.voice.clone()));
+    }
     let _ = tx_ui.send(format!("stream|{}", last_phrase));
     let _ = tx_ui.send("line|".to_string());
     // Add the final, un‑puncuated fragment to the history
@@ -1020,11 +1037,16 @@ fn process_tts_phrases(
   my_interrupt: u64,
 ) {
   let phrases = split_into_phrases(reply);
+  let mut in_code = false;
   for phrase in phrases {
     if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
       break;
     }
-    let cleaned = crate::util::strip_special_chars(&phrase);
+    // source code inside ``` is never spoken
+    let cleaned = crate::util::tts_text(&phrase, &mut in_code);
+    if cleaned.trim().is_empty() {
+      continue;
+    }
     let _ = tts_tx.send((cleaned, my_interrupt, voice.clone()));
     let _ = tts_done_rx.recv();
   }

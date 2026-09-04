@@ -316,6 +316,17 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       phrases
     };
 
+    // What TTS gets for each phrase: fenced ``` source code is displayed but
+    // never spoken. Computed up front, in order, so the fence state survives
+    // the user jumping between phrases.
+    let tts_texts: Vec<String> = {
+      let mut in_code = false;
+      phrases
+        .iter()
+        .map(|p| crate::util::tts_text(p, &mut in_code))
+        .collect()
+    };
+
     println!("📖 Reading {} phrases from '{}'", phrases.len(), filename);
 
     // State for phrase navigation
@@ -433,11 +444,11 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       let phrase = &phrases[idx];
 
       if !phrase.is_empty() {
-        // Strip special characters before TTS
-        let cleaned = crate::util::strip_special_chars(phrase);
-        if cleaned.is_empty() {
-          // Nothing left to speak (e.g. a punctuation-only line) - skip without
-          // waiting on TTS, otherwise the loop would spin on this index forever.
+        // Text for TTS: code blocks removed, special characters stripped
+        let cleaned = tts_texts[idx].clone();
+        if cleaned.trim().is_empty() {
+          // Nothing left to speak (e.g. a punctuation-only line or source code) -
+          // skip without waiting on TTS, otherwise the loop would spin on this index forever.
           if current_phrase.load(Ordering::SeqCst) == idx {
             current_phrase.fetch_add(1, Ordering::SeqCst);
           }
