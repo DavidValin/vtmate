@@ -55,7 +55,7 @@ https://github.com/user-attachments/assets/8b9e982c-ba97-4aeb-8e55-1db6a92bc164
 - 📌 Integrated `whisper` speech recognition system (no external intallation required)
 - 📌 Integrated `kokoro TTS` and `supersonic 2 TTS` systems (no external intallation required)
 - 📌 Interface with `OpenTTS` system (requires external docker service)
-- 📌 Use any gguf model from huggingface.com (using llama-server) or any ollama model
+- 📌 Use any gguf model from huggingface.com (using llama-server), any ollama model, or a hosted provider (OpenAI, Anthropic, Google, Groq, Mistral, OpenRouter, DeepSeek, xAI)
 
 ## How it works
 
@@ -72,10 +72,18 @@ https://github.com/user-attachments/assets/8b9e982c-ba97-4aeb-8e55-1db6a92bc164
 
 ## LLM integration
 
-- ✅ ollama (default)
-- ✅ llama-server
+Local servers (no api key needed):
 
-You can run the models locally (by default) or remotely by configuring the base urls via cli option.
+- ✅ ollama (default, version 0.13 or newer)
+- ✅ llama-server
+- ✅ any OpenAI-compatible server such as LM Studio or vLLM (`provider = openai-compatible`)
+
+Hosted providers (api key needed, set `api_key` in the agent or the provider's environment variable):
+
+- ✅ openai, anthropic, google, groq, mistral, openrouter, deepseek, xai
+
+You can run the models locally (by default) or remotely by configuring the base url of each agent.
+Thinking / reasoning is disabled on local servers so replies start speaking right away.
 
 ## TTS engine support
 
@@ -99,6 +107,16 @@ Option A- ollama (the default)
 Option B- llama-server support.
 - Install llama.cpp: `https://github.com/ggml-org/llama.cpp`.
 - Download a gguf model: `https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q8_0.gguf?download=true`.
+
+Option C- hosted provider (no local install).
+- Get an api key from the provider and set `provider`, `model` and `api_key` in the agent, for instance:
+
+```
+provider = anthropic
+baseurl =
+model = claude-sonnet-5
+api_key = sk-ant-...
+```
 
 ### 📌 3. **(Windows only) Install supported terminal**
 
@@ -146,6 +164,7 @@ The first agent defined in `~/vtmate/settings` will always be selected agent whe
 
 Before running vtmate make sure ollama is running: `ollama serve`.
 Optionally, if you want to use llama.cpp make sure llama-server is running.
+With a hosted provider nothing needs to run locally, only the `api_key` must be set.
 
 All cli options:
 

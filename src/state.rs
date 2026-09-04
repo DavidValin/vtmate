@@ -42,6 +42,7 @@ pub struct AppState {
   pub provider: Arc<Mutex<String>>,
   pub baseurl: Arc<Mutex<String>>,
   pub model: Arc<Mutex<String>>,
+  pub api_key: Arc<Mutex<String>>,
   pub system_prompt: Arc<Mutex<String>>,
   pub playback: PlaybackState,
   pub status_line: Arc<Mutex<String>>,
@@ -76,6 +77,7 @@ impl AppState {
       provider: Arc::new(Mutex::new(String::new())),
       baseurl: Arc::new(Mutex::new(String::new())),
       model: Arc::new(Mutex::new(String::new())),
+      api_key: Arc::new(Mutex::new(String::new())),
       system_prompt: Arc::new(Mutex::new(String::new())),
       ui: UiState {
         thinking: Arc::new(AtomicBool::new(false)),
@@ -132,6 +134,7 @@ impl AppState {
     *state.provider.lock().unwrap() = settings.provider.clone();
     *state.baseurl.lock().unwrap() = settings.baseurl.clone();
     *state.model.lock().unwrap() = settings.model.clone();
+    *state.api_key.lock().unwrap() = settings.api_key.clone();
     *state.system_prompt.lock().unwrap() = settings.system_prompt.clone();
     state.ptt.store(settings.ptt, Ordering::Relaxed);
     *state.sound_threshold_peak.lock().unwrap() = settings.sound_threshold_peak;
