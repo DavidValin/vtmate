@@ -127,7 +127,7 @@ pub fn tts_thread(
         } else {
           state.baseurl.lock().unwrap().clone()
         };
-
+        let synth_started = std::time::Instant::now();
         let outcome = crate::tts::speak(
           &phrase,
           &tts_val,
@@ -139,7 +139,14 @@ pub fn tts_thread(
           interrupt_counter.clone(),
           expected_interrupt,
         );
-
+        crate::log::log(
+          "debug",
+          &format!(
+            "TTS synthesized phrase ({} chars) in {:.2}s",
+            phrase.chars().count(),
+            synth_started.elapsed().as_secs_f32()
+          ),
+        );
         match outcome {
           Ok(o) => {
             if o == crate::tts::SpeakOutcome::Interrupted {
