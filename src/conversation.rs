@@ -533,61 +533,33 @@ pub fn conversation_thread(
         };
 
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-        let ollama_url = state.baseurl.lock().unwrap().clone();
         let interrupt_counter_cloned = interrupt_counter.clone();
-        let llama_url = state.baseurl.lock().unwrap().clone();
-        let model = state.model.lock().unwrap().clone();
-        let engine_type = state.provider.lock().unwrap().clone();
-
-        if *state.provider.lock().unwrap() == "llama-server" {
-          let on_piece_cloned = std::sync::Arc::new(std::sync::Mutex::new(on_piece));
-          let handle = std::thread::spawn(move || {
-            rt.block_on(async {
-              match crate::llm::llama_server_stream_response_into (
-                &messages,
-                llama_url.as_str(),
-                model.as_str(),
-                engine_type.as_str(),
-                interrupt_counter_cloned.clone(),
-                my_interrupt,
-                &mut *on_piece_cloned.lock().unwrap()
-              ).await {
-                Ok(_) => Ok(()),
-                Err(e) => {
-                  crate::log::log("error", &format!("llama server error: {e}. Make sure llama-server / llamafile is running"));
-                  Err(e)
-                }
+        let target = crate::llm::LlmTarget::from_state(state);
+        let on_piece_cloned = std::sync::Arc::new(std::sync::Mutex::new(on_piece));
+        let handle = std::thread::spawn(move || {
+          rt.block_on(async {
+            match crate::llm::stream_response_into(
+              &messages,
+              &target,
+              interrupt_counter_cloned.clone(),
+              my_interrupt,
+              &mut *on_piece_cloned.lock().unwrap(),
+            )
+            .await
+            {
+              Ok(_) => Ok(()),
+              Err(e) => {
+                crate::log::log(
+                  "error",
+                  &format!("llm error ({}): {}. {}", target.provider, e, target.hint()),
+                );
+                Err(e)
               }
-            })
-          });
-          // ignore join result to prevent panic on llama server error
-          let _join_result = handle.join();
-        } else {
-          let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-          let on_piece_cloned = std::sync::Arc::new(std::sync::Mutex::new(on_piece));
-          let handle = std::thread::spawn(move || {
-            rt.block_on(async {
-              match crate::llm::llama_server_stream_response_into (
-                &messages,
-                ollama_url.as_str(),
-                model.as_str(),
-                engine_type.as_str(),
-
-                interrupt_counter_cloned.clone(),
-                my_interrupt,
-                &mut *on_piece_cloned.lock().unwrap()
-              ).await {
-                Ok(_) => Ok(()),
-                Err(e) => {
-                  crate::log::log("error", &format!("ollama error. {}. Make sure ollama is running and model '{}' is available", e, model.as_str()));
-                  Err(e)
-                }
-              }
-            })
-          });
-          // ignore join result to prevent panic on llama server error
-          let _join_result = handle.join();
-        }
+            }
+          })
+        });
+        // ignore join result to prevent panic on llm error
+        let _join_result = handle.join();
         ui_thinking_cloned_for_closure.store(false, Ordering::Relaxed);
         // Prepare clones for post-closure use
         let speaker_arc_for_after = speaker_arc.clone();
@@ -628,11 +600,9 @@ async fn get_response(
   let mut on_piece = |piece: &str| {
     result.push_str(piece);
   };
-  crate::llm::llama_server_stream_response_into(
+  crate::llm::stream_response_into(
     &messages,
-    &agent.baseurl,
-    &agent.model,
-    &agent.provider,
+    &crate::llm::LlmTarget::from_settings(agent),
     interrupt_counter.clone(),
     0,
     &mut on_piece,
@@ -912,11 +882,9 @@ fn handle_reply(
     }
   };
 
-  let stream_result = rt.block_on(crate::llm::llama_server_stream_response_into(
+  let stream_result = rt.block_on(crate::llm::stream_response_into(
     &messages,
-    &settings.baseurl,
-    &settings.model,
-    &settings.provider,
+    &crate::llm::LlmTarget::from_settings(settings),
     interrupt_counter.clone(),
     my_interrupt,
     &mut on_piece,
