@@ -58,6 +58,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   // make sure the user has the whisper + tts models unpacked
   assets::ensure_assets_env();
   assets::ensure_supersonic2_assets();
+  assets::ensure_supertonic_assets();
 
   // ---------------------------------------------------
   // setup thread communication channels

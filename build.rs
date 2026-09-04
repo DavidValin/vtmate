@@ -180,6 +180,104 @@ fn init_expected_hashes() -> HashMap<&'static str, &'static str> {
 
 static EXPECTED_HASHES: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(init_expected_hashes);
 
+// ---------------------------------------------------------------------------
+// Supertonic 3 (multilingual TTS) - fetched file by file from Hugging Face
+// into $HOME/.vtmate/tts/supertonic-model and copied into OUT_DIR/embedded so
+// assets.rs can include_bytes! them, the same way the supersonic2 model is.
+// ---------------------------------------------------------------------------
+const SUPERTONIC_HF_BASE: &str = "https://huggingface.co/Supertone/supertonic-3/resolve/main";
+
+// (relative path inside the model dir, sha256)
+const SUPERTONIC_FILES: &[(&str, &str)] = &[
+  ("config.json", "4099082b107a9d4029849ac76b89eca65e03732660969c2babe5bf308c7357f2"),
+  ("onnx/duration_predictor.onnx", "c3eb91414d5ff8a7a239b7fe9e34e7e2bf8a8140d8375ffb14718b1c639325db"),
+  ("onnx/text_encoder.onnx", "c7befd5ea8c3119769e8a6c1486c4edc6a3bc8365c67621c881bbb774b9902ff"),
+  ("onnx/tts.json", "42078d3aef1cd43ab43021f3c54f47d2d75ceb4e75f627f118890128b06a0d09"),
+  ("onnx/unicode_indexer.json", "9bf7346e43883a81f8645c81224f786d43c5b57f3641f6e7671a7d6c493cb24f"),
+  ("onnx/vector_estimator.onnx", "883ac868ea0275ef0e991524dc64f16b3c0376efd7c320af6b53f5b780d7c61c"),
+  ("onnx/vocoder.onnx", "085de76dd8e8d5836d6ca66826601f615939218f90e519f70ee8a36ed2a4c4ba"),
+  ("voice_styles/F1.json", "bbdec6ee00231c2c742ad05483df5334cab3b52fda3ba38e6a07059c4563dbc2"),
+  ("voice_styles/F2.json", "7c722c6a72707b1a77f035d67f0d1351ba187738e06f7683e8c72b1df3477fc6"),
+  ("voice_styles/F3.json", "12f6ef2573baa2defa1128069cb59f203e3ab67c92af77b42df8a0e3a2f7c6ab"),
+  ("voice_styles/F4.json", "c2fa764c1225a76dfc3e2c73e8aa4f70d9ee48793860eb34c295fff01c2e032b"),
+  ("voice_styles/F5.json", "45966e73316415626cf41a7d1c6f3b4c70dbc1ba2bee5c1978ef0ce33244fc8d"),
+  ("voice_styles/M1.json", "e35604687f5d23694b8e91593a93eec0e4eca6c0b02bb8ed69139ab2ea6b0a5b"),
+  ("voice_styles/M2.json", "b76cbf62bac707c710cf0ae5aba5e31eea1a6339a9734bfae33ab98499534a50"),
+  ("voice_styles/M3.json", "ea1ac35ccb91b0d7ecad533a2fbd0eec10c91513d8951e3b25fbba99954e159b"),
+  ("voice_styles/M4.json", "ca8eefad4fcd989c9379032ff3e50738adc547eeb5e221b82593a6d7b3bac303"),
+  ("voice_styles/M5.json", "dd22b92740314321f8ae11c5e87f8dd60d060f15dd3a632b5adf77f471f77af2"),
+];
+
+// SHA-256 of a file as lowercase hex.
+fn sha256_hex(path: &Path) -> Result<String, String> {
+  let mut file =
+    fs::File::open(path).map_err(|e| format!("unable to open {}: {}", path.display(), e))?;
+  let mut hasher = Sha256::new();
+  std::io::copy(&mut file, &mut hasher)
+    .map_err(|e| format!("copy failed for {}: {}", path.display(), e))?;
+  Ok(hex::encode(hasher.finalize()))
+}
+
+fn download_to(url: &str, dest: &Path) {
+  println!("cargo:warning=Downloading {} from {}", dest.display(), url);
+  fs::create_dir_all(dest.parent().unwrap()).expect("Failed to create download dir");
+  let output = Command::new("curl")
+    .args(&["-fL", "-o", dest.to_str().unwrap(), url])
+    .output()
+    .expect("Failed to run curl");
+  if !output.status.success() {
+    panic!("Failed to download {}: {:?}", url, output);
+  }
+}
+
+// Make sure every Supertonic 3 file is present in $HOME (downloading and
+// checksum-verifying missing or corrupt ones) and copy the model into the
+// embedded dir.
+fn ensure_supertonic_model(home: &str, embedded_dest: &Path, is_release: bool) {
+  let model_dir = Path::new(home)
+    .join(".vtmate")
+    .join("tts")
+    .join("supertonic-model");
+
+  for &(rel, expected) in SUPERTONIC_FILES {
+    let path = model_dir.join(rel);
+    let url = format!("{}/{}", SUPERTONIC_HF_BASE, rel);
+
+    // Existing files are trusted in debug builds (fast iteration); release
+    // builds verify them and re-download on mismatch.
+    let mut needs_download = !path.exists();
+    if !needs_download && is_release {
+      match sha256_hex(&path) {
+        Ok(h) if h == expected => {}
+        Ok(h) => {
+          println!(
+            "cargo:warning=Checksum mismatch for {} (expected {}, got {}), re-downloading",
+            rel, expected, h
+          );
+          needs_download = true;
+        }
+        Err(e) => panic!("{}", e),
+      }
+    }
+    if needs_download {
+      download_to(&url, &path);
+      let got = sha256_hex(&path).expect("hash after download");
+      if got != expected {
+        panic!(
+          "Checksum mismatch for supertonic file {}: expected {}, got {}",
+          rel, expected, got
+        );
+      }
+    }
+
+    let dest_path = embedded_dest.join("supertonic-model").join(rel);
+    fs::create_dir_all(dest_path.parent().unwrap()).expect("Failed to create embedded model dir");
+    fs::copy(&path, &dest_path).expect("failed to copy supertonic asset");
+    println!("cargo:rerun-if-changed={}", path.display());
+  }
+  println!("cargo:warning=Supertonic 3 model embedded from {}", model_dir.display());
+}
+
 // espeak-rs-sys builds the vendored espeak-ng with CMake, whose config
 // auto-detects optional system libraries (libpcaudio for audio output,
 // libsonic for fast speech rates) and compiles espeak-ng against them when
@@ -438,6 +536,9 @@ fn main() {
       }
     }
   }
+
+  // Supertonic 3 model (multilingual TTS)
+  ensure_supertonic_model(&home, &dest, is_release);
 
   for &(src_rel, name) in &needed_files {
     if name == tarball_name {

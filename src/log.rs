@@ -38,6 +38,13 @@ pub fn log(msg_type: &str, msg: &str) {
   };
   let formatted = format!("\r\x1b[K{}  \x1b[90m{}\x1b[0m\n", emoji, msg);
   if let Some(sender) = TX_UI.get() {
-    let _ = sender.send(format!("line|{}", formatted));
+    // The UI channel is bounded(1) and is only drained by the conversation-mode
+    // UI loop. In read-file mode (or while the UI is busy) a blocking send would
+    // park the caller forever - e.g. the TTS thread on its second log line -
+    // so wait briefly and drop the line rather than deadlock.
+    let _ = sender.send_timeout(
+      format!("line|{}", formatted),
+      std::time::Duration::from_millis(200),
+    );
   }
 }

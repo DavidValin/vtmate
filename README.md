@@ -1,6 +1,6 @@
 ## vtmate
 
-The final AI voice conversational system all running in your terminal! vtmate is a Powerful terminal-based voice ai toolkit with many realistic voices, extremely low latency, 28 languages supported. Allows you to voice conversate with local ai models, pipe data and save into files. 
+The final AI voice conversational system all running in your terminal! vtmate is a Powerful terminal-based voice ai toolkit with many realistic voices, extremely low latency, 41 languages supported. Allows you to voice conversate with local ai models, pipe data and save into files. 
 
 The program self contains (1.2GB) all TTS models and voices and necessary files to recognize speech and speak with voice with no external intallations ensuring maximum portability.
 
@@ -53,7 +53,7 @@ https://github.com/user-attachments/assets/8b9e982c-ba97-4aeb-8e55-1db6a92bc164
 - 📌 Save audio speech of a text file or STDIN content
 - 📌 Load separate settings file with different agents
 - 📌 Integrated `whisper` speech recognition system (no external intallation required)
-- 📌 Integrated `kokoro TTS` and `supersonic 2 TTS` systems (no external intallation required)
+- 📌 Integrated `kokoro TTS`, `supersonic 2 TTS` and `supertonic TTS` (Supertonic 3, 31 languages) systems (no external intallation required)
 - 📌 Interface with `OpenTTS` system (requires external docker service)
 - 📌 Use any gguf model from huggingface.com (using llama-server), any ollama model, or a hosted provider (OpenAI, Anthropic, Google, Groq, Mistral, OpenRouter, DeepSeek, xAI)
 
@@ -89,6 +89,7 @@ Thinking / reasoning is disabled on local servers so replies start speaking righ
 
 - ✅ Kokoro (integrated)
 - ✅ Supersonic 2 (integrated)
+- ✅ Supertonic 3 (integrated, 31 languages)
 - ✅ OpenTTS (requires external docker service)
 
 
@@ -136,7 +137,7 @@ Example of agent definition:
 [agent]
 name = explainer
 language = en
-tts = supersonic2
+tts = supertonic
 voice = F1
 voice_speed = 1.1
 provider = ollama
@@ -150,7 +151,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 ```
 
 * By default all agents are set in `PTT` mode, you have to keep `SPACE` pressed to talk. If you want to use `LIVE` mode, make sure you adjust your microphone levels correctly and adjust `sound_threshold_peak` and `end_silence_ms` settings to your need
-* ⚠️ Currently you cannot mix kokoro and supersonic tts systems (pick one).
+* ⚠️ Currently you cannot mix kokoro with the supertonic/supersonic tts systems (pick one).
 * Voice mixing is supported for kokoro TTS system only, you can create a voice by mixing 2 kokoro voices by percentage. Example mixing 50% of bm_daniel and 50% of am_puck: set voice name to `bm_daniel.5+am_puck.5`
 
 To see explanation of each field:
@@ -332,7 +333,7 @@ vtmate -c philosophers.txt --debate "Aristoteles" "Ptahhotep" "how to achieve ha
 
 ###  Model files
 
-vtmate self contains (no need for manual installation) espeak-ng-data, the whisper tiny & small models, kokoro model and voices and supersonic2 model and voices which will be autoextracted from the binary when running vtmate if they are not found in next locations:
+vtmate self contains (no need for manual installation) espeak-ng-data, the whisper tiny & small models, kokoro model and voices, supersonic2 model and voices and supertonic (Supertonic 3) model and voices which will be autoextracted from the binary when running vtmate if they are not found in next locations:
 
 whisper models:
 ```
@@ -371,6 +372,26 @@ supersonic2 files:
 ~/.vtmate/tts/supersonic2-model/voice_styles/F5.json
 ```
 
+supertonic files (Supertonic 3, https://huggingface.co/Supertone/supertonic-3):
+```
+~/.vtmate/tts/supertonic-model/onnx/duration_predictor.onnx
+~/.vtmate/tts/supertonic-model/onnx/text_encoder.onnx
+~/.vtmate/tts/supertonic-model/onnx/tts.json
+~/.vtmate/tts/supertonic-model/onnx/unicode_indexer.json
+~/.vtmate/tts/supertonic-model/onnx/vector_estimator.onnx
+~/.vtmate/tts/supertonic-model/onnx/vocoder.onnx
+~/.vtmate/tts/supertonic-model/voice_styles/M1.json
+~/.vtmate/tts/supertonic-model/voice_styles/M2.json
+~/.vtmate/tts/supertonic-model/voice_styles/M3.json
+~/.vtmate/tts/supertonic-model/voice_styles/M4.json
+~/.vtmate/tts/supertonic-model/voice_styles/M5.json
+~/.vtmate/tts/supertonic-model/voice_styles/F1.json
+~/.vtmate/tts/supertonic-model/voice_styles/F2.json
+~/.vtmate/tts/supertonic-model/voice_styles/F3.json
+~/.vtmate/tts/supertonic-model/voice_styles/F4.json
+~/.vtmate/tts/supertonic-model/voice_styles/F5.json
+```
+
 * If you want to avoid sound interruptions you can use `ptt` mode or increase the `sound_threshold_peak` for your microphone levels.
 * If you want to use OpenTTS, start the docker service first: `docker run --rm --platform=linux/amd64 -p 5500:5500 synesthesiam/opentts:all` (it will pull the image the first time). Adjust the platform as needed depending on your hardware.
 * If you have problems starting vtmate you can remove `~/vtmate/settings` so it recreates the default configuration
@@ -384,36 +405,53 @@ vtmate --help
 
 ## Language support
 
-| ID |           Language       |      Support       |        TTS supported   |   Number of voices  |
-|----|--------------------------|--------------------|---------------------------------------------------|-------------|
-| en |   🇬🇧  English            |  🏆 Best support   |    ✅ SS2    ✅ Kokoro    ✅ OpenTTS     | > 38 voices
-| es |   🇪🇸  Spanish            |  🏆 Best support   |    ✅ SS2    ✅ Kokoro    ✅ OpenTTS     | > 14 voices
-| fr |   🇫🇷  French             |  🏆 Best support   |    ✅ SS2    ✅ Kokoro    ✅ OpenTTS     | > 12 voices
-| zh |   🇨🇳  Mandarin Chinese   |  🥈 Good support   |    ❌ SS2    ✅ Kokoro    ✅ OpenTTS     | > 9 voices
-| ja |   🇯🇵  Japanese           |  🥈 Good support   |    ❌ SS2    ✅ Kokoro    ✅ OpenTTS     | > 6 voices
-| pt |   🇵🇹  Portuguese         |  🥈 Good support   |    ✅ SS2    ✅ Kokoro    ❌ OpenTTS     | > 13 voices
-| ko |   🇰🇷  Korean             |  🥈 Good support   |    ✅ SS2    ❌ Kokoro    ✅ OpenTTS     | 11 voices
-| it |   🇮🇹  Italian            |  🥈 Good support   |    ❌ SS2    ✅ Kokoro    ✅ OpenTTS     | > 3 voices
-| hi |   🇮🇳  Hindi              |  🥈 Good support   |    ❌ SS2    ✅ Kokoro    ✅ OpenTTS     | > 4 voices
-| ar |   🇸🇦  Arabic             |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| bn |   🇧🇩  Bengali            |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| ca |   🇪🇸  Catalan            |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| cs |   🇨🇿  Czech              |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| de |   🇩🇪  German             |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| el |   🇬🇷  Greek              |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| fi |   🇫🇮  Finnish            |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| gu |   🇮🇳  Gujarati           |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| hu |   🇭🇺  Hungarian          |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| kn |   🇮🇳  Kannada            |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| mr |   🇮🇳  Marathi            |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| nl |   🇳🇱  Dutch              |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| pa |   🇮🇳  Punjabi            |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| ru |   🇷🇺  Russian            |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| sv |   🇸🇪  Swedish            |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| sw |   🇰🇪  Swahili            |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| ta |   🇮🇳  Tamil              |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| te |   🇮🇳  Telugu             |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
-| tr |   🇹🇷  Turkish            |     Supported      |    ❌ SS2    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+SS2 is Supersonic 2 (5 languages, 10 voices: M1-M5, F1-F5). ST3 is Supertonic 3 (31 languages, its own 10 voices: M1-M5, F1-F5, usable in every one of its languages).
+
+| ID |           Language       |      Support       |        TTS supported                                    |   Number of voices  |
+|----|--------------------------|--------------------|-----------------------------------------------------------------|-------------|
+| en |   🇬🇧  English            |  🏆 Best support   |    ✅ SS2    ✅ ST3    ✅ Kokoro    ✅ OpenTTS     | > 48 voices
+| es |   🇪🇸  Spanish            |  🏆 Best support   |    ✅ SS2    ✅ ST3    ✅ Kokoro    ✅ OpenTTS     | > 24 voices
+| fr |   🇫🇷  French             |  🏆 Best support   |    ✅ SS2    ✅ ST3    ✅ Kokoro    ✅ OpenTTS     | > 22 voices
+| ja |   🇯🇵  Japanese           |  🏆 Best support   |    ❌ SS2    ✅ ST3    ✅ Kokoro    ✅ OpenTTS     | > 16 voices
+| pt |   🇵🇹  Portuguese         |  🏆 Best support   |    ✅ SS2    ✅ ST3    ✅ Kokoro    ❌ OpenTTS     | > 23 voices
+| ko |   🇰🇷  Korean             |  🏆 Best support   |    ✅ SS2    ✅ ST3    ❌ Kokoro    ✅ OpenTTS     | 21 voices
+| it |   🇮🇹  Italian            |  🏆 Best support   |    ❌ SS2    ✅ ST3    ✅ Kokoro    ✅ OpenTTS     | > 13 voices
+| hi |   🇮🇳  Hindi              |  🏆 Best support   |    ❌ SS2    ✅ ST3    ✅ Kokoro    ✅ OpenTTS     | > 14 voices
+| zh |   🇨🇳  Mandarin Chinese   |  🥈 Good support   |    ❌ SS2    ❌ ST3    ✅ Kokoro    ✅ OpenTTS     | > 9 voices
+| ar |   🇸🇦  Arabic             |  🥈 Good support   |    ❌ SS2    ✅ ST3    ❌ Kokoro    ✅ OpenTTS     | 11 voices
+| cs |   🇨🇿  Czech              |  🥈 Good support   |    ❌ SS2    ✅ ST3    ❌ Kokoro    ✅ OpenTTS     | 11 voices
+| de |   🇩🇪  German             |  🥈 Good support   |    ❌ SS2    ✅ ST3    ❌ Kokoro    ✅ OpenTTS     | 11 voices
+| el |   🇬🇷  Greek              |  🥈 Good support   |    ❌ SS2    ✅ ST3    ❌ Kokoro    ✅ OpenTTS     | 11 voices
+| fi |   🇫🇮  Finnish            |  🥈 Good support   |    ❌ SS2    ✅ ST3    ❌ Kokoro    ✅ OpenTTS     | 11 voices
+| hu |   🇭🇺  Hungarian          |  🥈 Good support   |    ❌ SS2    ✅ ST3    ❌ Kokoro    ✅ OpenTTS     | 11 voices
+| nl |   🇳🇱  Dutch              |  🥈 Good support   |    ❌ SS2    ✅ ST3    ❌ Kokoro    ✅ OpenTTS     | 11 voices
+| ru |   🇷🇺  Russian            |  🥈 Good support   |    ❌ SS2    ✅ ST3    ❌ Kokoro    ✅ OpenTTS     | 11 voices
+| sv |   🇸🇪  Swedish            |  🥈 Good support   |    ❌ SS2    ✅ ST3    ❌ Kokoro    ✅ OpenTTS     | 11 voices
+| tr |   🇹🇷  Turkish            |  🥈 Good support   |    ❌ SS2    ✅ ST3    ❌ Kokoro    ✅ OpenTTS     | 11 voices
+| bn |   🇧🇩  Bengali            |  Supported        |    ❌ SS2    ❌ ST3    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| ca |   🇪🇸  Catalan            |  Supported        |    ❌ SS2    ❌ ST3    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| gu |   🇮🇳  Gujarati           |  Supported        |    ❌ SS2    ❌ ST3    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| kn |   🇮🇳  Kannada            |  Supported        |    ❌ SS2    ❌ ST3    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| mr |   🇮🇳  Marathi            |  Supported        |    ❌ SS2    ❌ ST3    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| pa |   🇮🇳  Punjabi            |  Supported        |    ❌ SS2    ❌ ST3    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| sw |   🇰🇪  Swahili            |  Supported        |    ❌ SS2    ❌ ST3    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| ta |   🇮🇳  Tamil              |  Supported        |    ❌ SS2    ❌ ST3    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| te |   🇮🇳  Telugu             |  Supported        |    ❌ SS2    ❌ ST3    ❌ Kokoro    ✅ OpenTTS     | 1 voice
+| bg |   🇧🇬  Bulgarian          |  Supported        |    ❌ SS2    ✅ ST3    ❌ Kokoro    ❌ OpenTTS     | 10 voices
+| hr |   🇭🇷  Croatian           |  Supported        |    ❌ SS2    ✅ ST3    ❌ Kokoro    ❌ OpenTTS     | 10 voices
+| da |   🇩🇰  Danish             |  Supported        |    ❌ SS2    ✅ ST3    ❌ Kokoro    ❌ OpenTTS     | 10 voices
+| et |   🇪🇪  Estonian           |  Supported        |    ❌ SS2    ✅ ST3    ❌ Kokoro    ❌ OpenTTS     | 10 voices
+| id |   🇮🇩  Indonesian         |  Supported        |    ❌ SS2    ✅ ST3    ❌ Kokoro    ❌ OpenTTS     | 10 voices
+| lv |   🇱🇻  Latvian            |  Supported        |    ❌ SS2    ✅ ST3    ❌ Kokoro    ❌ OpenTTS     | 10 voices
+| lt |   🇱🇹  Lithuanian         |  Supported        |    ❌ SS2    ✅ ST3    ❌ Kokoro    ❌ OpenTTS     | 10 voices
+| pl |   🇵🇱  Polish             |  Supported        |    ❌ SS2    ✅ ST3    ❌ Kokoro    ❌ OpenTTS     | 10 voices
+| ro |   🇷🇴  Romanian           |  Supported        |    ❌ SS2    ✅ ST3    ❌ Kokoro    ❌ OpenTTS     | 10 voices
+| sk |   🇸🇰  Slovak             |  Supported        |    ❌ SS2    ✅ ST3    ❌ Kokoro    ❌ OpenTTS     | 10 voices
+| sl |   🇸🇮  Slovenian          |  Supported        |    ❌ SS2    ✅ ST3    ❌ Kokoro    ❌ OpenTTS     | 10 voices
+| uk |   🇺🇦  Ukrainian          |  Supported        |    ❌ SS2    ✅ ST3    ❌ Kokoro    ❌ OpenTTS     | 10 voices
+| vi |   🇻🇳  Vietnamese         |  Supported        |    ❌ SS2    ✅ ST3    ❌ Kokoro    ❌ OpenTTS     | 10 voices
+
+Run `vtmate --list-voices` to print every voice for every language and TTS system.
 
 ## Acceleration support
 

@@ -251,7 +251,7 @@ jobs:
       # ----------------------
       # build_macos.sh gates whisper-metal on arm64 (ggml's Metal backend is
       # not useful on Intel GPUs) and builds the CPU path on x86_64.
-      # build.rs fetches the whisper/kokoro/supersonic2 models into $HOME
+      # build.rs fetches the whisper/kokoro/supersonic2/supertonic models into $HOME
       # itself, so no model-prep step is needed here.
       - name: Build macOS (${{ matrix.arch }})
         run: |
