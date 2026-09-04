@@ -53,7 +53,7 @@ https://github.com/user-attachments/assets/8b9e982c-ba97-4aeb-8e55-1db6a92bc164
 - 📌 Save audio speech of a text file or STDIN content
 - 📌 Load separate settings file with different agents
 - 📌 Integrated `whisper` speech recognition system (no external intallation required)
-- 📌 Integrated `kokoro TTS` and `supersonic 2 TTS` systems (no external intallation required)
+- 📌 Integrated `kokoro TTS`, `supersonic 2 TTS` and `supertonic TTS` (Supertonic 3, 31 languages) systems (no external intallation required)
 - 📌 Interface with `OpenTTS` system (requires external docker service)
 - 📌 Use any gguf model from huggingface.com (using llama-server) or any ollama model
 
@@ -313,7 +313,7 @@ vtmate -c philosophers.txt --debate "Aristoteles" "Ptahhotep" "how to achieve ha
 
 ###  Model files
 
-vtmate self contains (no need for manual installation) espeak-ng-data, the whisper tiny & small models, kokoro model and voices and supersonic2 model and voices which will be autoextracted from the binary when running vtmate if they are not found in next locations:
+vtmate self contains (no need for manual installation) espeak-ng-data, the whisper tiny & small models, kokoro model and voices, supersonic2 model and voices and supertonic (Supertonic 3) model and voices which will be autoextracted from the binary when running vtmate if they are not found in next locations:
 
 whisper models:
 ```
@@ -350,6 +350,26 @@ supersonic2 files:
 ~/.vtmate/tts/supersonic2-model/voice_styles/F3.json
 ~/.vtmate/tts/supersonic2-model/voice_styles/F4.json
 ~/.vtmate/tts/supersonic2-model/voice_styles/F5.json
+```
+
+supertonic files (Supertonic 3, https://huggingface.co/Supertone/supertonic-3):
+```
+~/.vtmate/tts/supertonic-model/onnx/duration_predictor.onnx
+~/.vtmate/tts/supertonic-model/onnx/text_encoder.onnx
+~/.vtmate/tts/supertonic-model/onnx/tts.json
+~/.vtmate/tts/supertonic-model/onnx/unicode_indexer.json
+~/.vtmate/tts/supertonic-model/onnx/vector_estimator.onnx
+~/.vtmate/tts/supertonic-model/onnx/vocoder.onnx
+~/.vtmate/tts/supertonic-model/voice_styles/M1.json
+~/.vtmate/tts/supertonic-model/voice_styles/M2.json
+~/.vtmate/tts/supertonic-model/voice_styles/M3.json
+~/.vtmate/tts/supertonic-model/voice_styles/M4.json
+~/.vtmate/tts/supertonic-model/voice_styles/M5.json
+~/.vtmate/tts/supertonic-model/voice_styles/F1.json
+~/.vtmate/tts/supertonic-model/voice_styles/F2.json
+~/.vtmate/tts/supertonic-model/voice_styles/F3.json
+~/.vtmate/tts/supertonic-model/voice_styles/F4.json
+~/.vtmate/tts/supertonic-model/voice_styles/F5.json
 ```
 
 * If you want to avoid sound interruptions you can use `ptt` mode or increase the `sound_threshold_peak` for your microphone levels.

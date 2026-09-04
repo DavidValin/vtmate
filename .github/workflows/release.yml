@@ -1,0 +1,113 @@
+name: Release
+
+# Triggers when a tag is pushed. A guard job verifies the tagged
+# commit is reachable from the main branch before building.
+on:
+  push:
+    tags:
+      - '*'
+
+permissions:
+  contents: write
+
+jobs:
+  guard:
+    name: Verify tag is on main
+    runs-on: ubuntu-latest
+    outputs:
+      ok: ${{ steps.check.outputs.ok }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: check
+        run: |
+          if git branch -r --contains "$GITHUB_REF" | grep -qE '(^|/)main$'; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Tag $GITHUB_REF is not reachable from main. Skipping release." >&2
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Reuses build.yml rather than restating the matrix. Every platform quirk -
+  # the musl toolchain image, the CUDA component overlay, the prebuilt ONNX
+  # Runtime, the arm64 runner - lives in one place and cannot drift between
+  # the CI and release paths.
+  build:
+    name: Build
+    needs: guard
+    if: needs.guard.outputs.ok == 'true'
+    uses: ./.github/workflows/build.yml
+
+  release:
+    name: Create release & upload assets
+    needs: [guard, build]
+    if: needs.guard.outputs.ok == 'true' && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      # No merge-multiple: each artifact keeps its own directory. The Windows
+      # CUDA variant ships DLLs alongside the exe, and flattening everything
+      # into one directory would collide those.
+      # Checked out only to read the version from Cargo.toml, so every asset
+      # is named from the same source build_linux.sh uses.
+      - uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Show what was built
+        run: find artifacts -type f | sort
+
+      # Asset naming: vtmate-<version>-<os>-<arch>[-<variant>].<tgz|zip>, with
+      # the binary (plus any bundled DLLs on Windows) at the archive's top
+      # level. The CI artifact name is the <os>-<arch>[-<variant>] part.
+      - name: Package one asset per variant
+        run: |
+          set -euo pipefail
+          VERSION="$(awk -F'"' '$1 ~ /^[[:space:]]*version[[:space:]]*=/ { print $2; exit }' Cargo.toml)"
+          [ -n "$VERSION" ] || { echo "Failed to read version from Cargo.toml" >&2; exit 1; }
+          if [ "$VERSION" != "${GITHUB_REF_NAME}" ]; then
+            echo "warning: tag ${GITHUB_REF_NAME} differs from Cargo.toml version ${VERSION}; assets use ${VERSION}" >&2
+          fi
+          mkdir -p assets
+
+          for dir in artifacts/*/; do
+            name="$(basename "$dir")"
+
+            # Linux: build_linux.sh already packaged the .tgz - take it as is.
+            if find "$dir" -name '*.tgz' | grep -q .; then
+              find "$dir" -name '*.tgz' -exec cp {} assets/ \;
+              echo "packaged (pre-built archive): $name"
+              continue
+            fi
+
+            # Windows: a directory holding the exe, plus the ONNX Runtime,
+            # cuDNN and cuBLAS DLLs for the CUDA variant.
+            if find "$dir" -name '*.exe' | grep -q .; then
+              ( cd "$dir" && zip -qr "${GITHUB_WORKSPACE}/assets/vtmate-${VERSION}-${name}.zip" . )
+              echo "packaged (zip): $name"
+              continue
+            fi
+
+            # macOS: a bare binary.
+            ( cd "$dir" && tar -czf "${GITHUB_WORKSPACE}/assets/vtmate-${VERSION}-${name}.tgz" -- * )
+            echo "packaged (tgz): $name"
+          done
+
+          echo "--- assets ---"
+          ls -lh assets
+
+      - name: Fail if no assets were produced
+        run: |
+          count=$(find assets -type f | wc -l)
+          echo "asset count: $count"
+          [ "$count" -gt 0 ] || { echo "No assets to publish" >&2; exit 1; }
+
+      - name: Create release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: assets/*

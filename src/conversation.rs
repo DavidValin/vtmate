@@ -12,7 +12,6 @@ use crossbeam_channel::{Receiver, Sender, select};
 use hound;
 use std::fs;
 use std::path::Path;
-use std::sync::OnceLock;
 use std::sync::{
   Arc, Mutex,
   atomic::{AtomicU64, Ordering},
@@ -21,8 +20,6 @@ use std::thread;
 use std::time::Duration;
 use tokio::runtime::Builder as TokioBuilder;
 use uuid::Uuid;
-
-static WHISPER_CTX: OnceLock<whisper_rs::WhisperContext> = OnceLock::new();
 
 // API
 // ------------------------------------------------------------------
@@ -41,17 +38,6 @@ pub enum Command {
   Undo,
 }
 
-/// Initialise the Whisper context once, performing a warm‑up.
-pub fn init_whisper_context(model_path: &str) -> &'static whisper_rs::WhisperContext {
-  WHISPER_CTX.get_or_init(|| {
-    let ctx = whisper_rs::WhisperContext::new_with_params(model_path, Default::default())
-      .expect("Failed to create WhisperContext");
-    // Perform warm‑up to load the model into memory
-    crate::stt::whisper_warmup(model_path).expect("Whisper warm‑up failed");
-    ctx
-  })
-}
-
 pub fn conversation_thread(
   rx_utt: Receiver<crate::audio::AudioChunk>,
   interrupt_counter: Arc<AtomicU64>,
@@ -68,7 +54,7 @@ pub fn conversation_thread(
   quiet: bool,
   save: bool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-  let ctx = init_whisper_context(&model_path);
+  let whisper = crate::stt::init(&model_path)?;
 
   // WAV writer thread: activated when -s option is used
   // WAV writer will be started lazily when the first save path is created.
@@ -250,14 +236,15 @@ pub fn conversation_thread(
               let debate_agents = state.debate_agents.lock().unwrap().clone();
               let turn = state.debate_turn.load(Ordering::SeqCst) as usize;
               let agent_count = debate_agents.len();
-              let next_agent = &debate_agents[turn % agent_count];
-              let _ = apply_agent_settings(state, next_agent);
+              if agent_count > 0 {
+                let next_agent = &debate_agents[turn % agent_count];
+                let _ = apply_agent_settings(state, next_agent);
+              }
 
               let _pcm_f32: Vec<f32> = utt.data.clone();
               let mono_f32 = crate::audio::convert_to_mono(&utt);
 
-              let user_text = crate::stt::whisper_transcribe_with_ctx(
-                &ctx,
+              let user_text = whisper.transcribe(
                 &mono_f32,
                 utt.sample_rate,
                 &state.language.lock().unwrap(),
@@ -426,7 +413,7 @@ pub fn conversation_thread(
         crate::log::log("debug", &format!("Received mono f32 pcm len {}", pcm_f32.len()));
         crate::log::log("debug", "Transcribing utterance...");
         let state = GLOBAL_STATE.get().expect("AppState not initialized");
-        let user_text = crate::stt::whisper_transcribe_with_ctx(&ctx, &mono_f32, utt.sample_rate, &state.language.lock().unwrap())?;
+        let user_text = whisper.transcribe(&mono_f32, utt.sample_rate, &state.language.lock().unwrap())?;
         crate::log::log("info", &format!("Transcribed: '{}'", user_text));
         let system_prompt = {
           let state = GLOBAL_STATE.get().expect("AppState not initialized");
@@ -770,7 +757,7 @@ impl PhraseSpeaker {
     if trigger { self.flush() } else { None }
   }
   fn flush(&mut self) -> Option<String> {
-    let out = self.buf.trim().to_string();
+    let out = self.buf.trim_end().to_string();
     self.buf.clear();
     if out.is_empty() { None } else { Some(out) }
   }
@@ -936,6 +923,17 @@ fn handle_reply(
   ));
   if let Err(e) = stream_result {
     crate::log::log("error", &format!("Streaming error: {}", e));
+    // Drop the assistant placeholder if the request failed before any content
+    // was streamed — some backends reject empty-content messages, which would
+    // otherwise break every subsequent turn until the user manually undoes.
+    {
+      let mut h = conversation_history.lock().unwrap();
+      if let Some(last) = h.last() {
+        if last.role == "assistant" && last.content.is_empty() {
+          h.pop();
+        }
+      }
+    }
     restore_agent_settings(state, originals);
     // Persist conversation on interruption
     perform_save(&conversation_history, settings);

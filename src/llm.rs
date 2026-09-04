@@ -145,11 +145,41 @@ pub async fn llama_server_stream_response_into(
     // inside your endpoint loop
     let mut stream = resp.bytes_stream();
 
-    while let Some(chunk_result) = stream.next().await {
-      // check stop signal mid-stream
+    // Bound how long we wait for the next chunk: without this, a server that accepts
+    // the connection but stops sending bytes mid-stream (no close, no data) hangs here
+    // forever and is deaf to Esc/Undo, since those are only checked between chunks.
+    let stall_timeout = std::time::Duration::from_secs(120);
+    let poll_interval = std::time::Duration::from_millis(250);
+    let mut since_last_chunk = std::time::Duration::ZERO;
+
+    loop {
+      // check stop signal, polled regardless of whether data is arriving
       if interrupt_counter.load(std::sync::atomic::Ordering::SeqCst) != expected_interrupt {
         return Ok(());
       }
+
+      let chunk_result = match tokio::time::timeout(poll_interval, stream.next()).await {
+        Ok(Some(r)) => {
+          since_last_chunk = std::time::Duration::ZERO;
+          r
+        }
+        Ok(None) => break, // stream ended normally
+        Err(_) => {
+          since_last_chunk += poll_interval;
+          if since_last_chunk >= stall_timeout {
+            crate::log::log(
+              "error",
+              &format!(
+                "Streaming stalled (no data for {}s) at {}",
+                stall_timeout.as_secs(),
+                url
+              ),
+            );
+            break; // fallback to next endpoint
+          }
+          continue;
+        }
+      };
 
       let chunk: Bytes = match chunk_result {
         Ok(b) => b,

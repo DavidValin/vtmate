@@ -12,7 +12,6 @@ use std::sync::{
   Arc, Mutex,
   atomic::{AtomicBool, AtomicU64, Ordering},
 };
-use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -304,13 +303,27 @@ pub fn playback_thread(
           }
           let channels = out_channels as usize;
           let max_samples = crate::tts::QUEUE_CAP_FRAMES * channels;
+          let mut stopped_while_waiting = false;
           loop {
             let q = queue.lock().unwrap();
-            if q.len() + chunk.data.len() <= max_samples {
+            // Also break on an empty queue so a single chunk larger than the
+            // cap can't wait forever for room that will never free up.
+            if q.is_empty() || q.len() + chunk.data.len() <= max_samples {
               break;
             }
             drop(q);
-            thread::sleep(Duration::from_millis(5));
+            select! {
+              recv(stop_play_rx) -> _ => {
+                while let Ok(_) = rx_audio.try_recv() {}
+                queue.lock().unwrap().clear();
+                stopped_while_waiting = true;
+                break;
+              }
+              default(Duration::from_millis(5)) => {}
+            }
+          }
+          if stopped_while_waiting {
+            break;
           }
 
           if GLOBAL_STATE.get().unwrap().processing_response.load(Ordering::Relaxed) || *volume.lock().unwrap() == 0.0 {

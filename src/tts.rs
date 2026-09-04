@@ -41,9 +41,8 @@ static SUPERTONIC_ENGINE: OnceLock<Arc<Mutex<crate::tts::supertonic_tts::TextToS
 
 // Supported languages for Supersonic2 TTS
 static SUPSONIC_LANGS: &[&str] = &["en", "es", "fr", "ko", "pt"];
-// Supported languages for Supertonic TTS
-// NOTE: Current model is opensource-en (English only)
-static SUPERTONIC_LANGS: &[&str] = &["en"];
+// Supported languages for Supertonic TTS (Supertonic 3, multilingual)
+static SUPERTONIC_LANGS: &[&str] = crate::tts::supertonic_tts::SUPPORTED_LANGS;
 
 pub fn speak(
   text: &str,
@@ -160,9 +159,12 @@ pub fn tts_thread(
           }
           Err(_e) => {
             crate::log::log("error", &format!("TTS error. Can't play audio speech. Make sure OpenTTS is running: docker run --rm -p 5500:5500 synesthesiam/opentts:all"));
-            // Signal completion before breaking
+            // Signal completion so callers waiting on this phrase don't hang, but keep
+            // the thread alive — a transient failure (e.g. OpenTTS briefly unreachable)
+            // shouldn't permanently kill voice output or drop rx_tts, which would make
+            // read-file mode's tx_tts.send(...).unwrap() panic on the next phrase.
             let _ = tx_tts_done.try_send(());
-            break;
+            continue;
           }
         }
       }

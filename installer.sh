@@ -37,9 +37,10 @@ case "$OS" in
   *) echo "Unsupported OS: $OS"; exit 1 ;;
 esac
 
+# Release assets use the target-triple spelling: x86_64 / aarch64.
 case "$ARCH" in
-  x86_64|amd64) ARCH_NAME="amd64" ;;
-  arm64|aarch64) ARCH_NAME="arm64" ;;
+  x86_64|amd64) ARCH_NAME="x86_64" ;;
+  arm64|aarch64) ARCH_NAME="aarch64" ;;
   *) echo "Unsupported arch: $ARCH"; exit 1 ;;
 esac
 
@@ -113,54 +114,45 @@ echo "CUDA=$CUDA VULKAN=$VULKAN"
 # -------------------------
 # Candidate selection
 # -------------------------
+# Assets are named ${APP}-<version>-<os>-<arch>[-<variant>].<tgz|zip> and
+# hold the binary (plus any bundled DLLs on Windows) at top level.
 CANDIDATES=""
+PREFIX="${APP}-${VERSION}-${OS_NAME}-${ARCH_NAME}"
 
 if [ "$OS_NAME" = "macos" ]; then
-  CANDIDATES="${APP}-${VERSION}-macos-arm64"
+  CANDIDATES="${PREFIX}.tgz"
 fi
 
 # -------------------------
-# Linux amd64
+# Linux (x86_64 / aarch64): cuda -> vulkan -> cpu, best available first
 # -------------------------
-if [ "$OS_NAME" = "linux" ] && [ "$ARCH_NAME" = "amd64" ]; then
+if [ "$OS_NAME" = "linux" ]; then
 
   if [ "$CUDA" -eq 1 ]; then
-    CANDIDATES="${APP}-${VERSION}-linux-amd64-cuda ${APP}-${VERSION}-linux-amd64"
+    CANDIDATES="${PREFIX}-cuda.tgz"
   fi
 
   if [ "$VULKAN" -eq 1 ]; then
-    CANDIDATES="${CANDIDATES} ${APP}-${VERSION}-linux-amd64-vulkan ${APP}-${VERSION}-linux-amd64"
+    CANDIDATES="${CANDIDATES} ${PREFIX}-vulkan.tgz"
   fi
 
-  CANDIDATES="${CANDIDATES} ${APP}-${VERSION}-linux-amd64"
-fi
-
-# -------------------------
-# Linux arm64
-# -------------------------
-if [ "$OS_NAME" = "linux" ] && [ "$ARCH_NAME" = "arm64" ]; then
-
-  if [ "$CUDA" -eq 1 ]; then
-    CANDIDATES="${APP}-${VERSION}-linux-arm64-cuda ${APP}-${VERSION}-linux-arm64"
-  fi
-
-  CANDIDATES="${CANDIDATES} ${APP}-${VERSION}-linux-arm64"
+  CANDIDATES="${CANDIDATES} ${PREFIX}-cpu.tgz"
 fi
 
 # -------------------------
 # Windows x86_64
 # -------------------------
-if [ "$OS_NAME" = "windows" ] && [ "$ARCH_NAME" = "amd64" ]; then
+if [ "$OS_NAME" = "windows" ] && [ "$ARCH_NAME" = "x86_64" ]; then
 
   if [ "$CUDA" -eq 1 ]; then
-    CANDIDATES="${APP}-${VERSION}-windows-x86_64-cuda.exe ${APP}-${VERSION}-windows-x86_64.exe"
+    CANDIDATES="${PREFIX}-cuda.zip"
   fi
 
   if [ "$VULKAN" -eq 1 ]; then
-    CANDIDATES="${CANDIDATES} ${APP}-${VERSION}-windows-x86_64-vulkan.exe ${APP}-${VERSION}-windows-x86_64.exe"
+    CANDIDATES="${CANDIDATES} ${PREFIX}-vulkan.zip"
   fi
 
-  CANDIDATES="${CANDIDATES} ${APP}-${VERSION}-windows-x86_64.exe"
+  CANDIDATES="${CANDIDATES} ${PREFIX}-cpu.zip"
 fi
 
 [ -z "$CANDIDATES" ] && { echo "No candidates built"; exit 1; }
@@ -202,7 +194,7 @@ echo "Selected: $FOUND_BIN"
 # -------------------------
 # Download
 # -------------------------
-TMP_FILE="/tmp/$APP"
+TMP_FILE="/tmp/$FOUND_BIN"
 
 if command -v curl >/dev/null 2>&1; then
   curl -fL -o "$TMP_FILE" "$FOUND_URL"
@@ -233,21 +225,54 @@ echo "Download sanity check passed ($FILE_SIZE bytes)"
 # -------------------------
 # Install
 # -------------------------
+# The asset is an archive with the binary at top level (Windows: vtmate.exe
+# plus the DLLs the CUDA/ORT variants need beside it), so unpack it into a
+# scratch directory first.
+EXTRACT_DIR="/tmp/${APP}-extract.$$"
+rm -rf "$EXTRACT_DIR"
+mkdir -p "$EXTRACT_DIR"
+
+case "$FOUND_BIN" in
+  *.tgz)
+    tar -xzf "$TMP_FILE" -C "$EXTRACT_DIR"
+    ;;
+  *.zip)
+    if command -v unzip >/dev/null 2>&1; then
+      unzip -q -o "$TMP_FILE" -d "$EXTRACT_DIR"
+    elif command -v powershell.exe >/dev/null 2>&1; then
+      powershell.exe -NoProfile -Command \
+        "Expand-Archive -Force -LiteralPath '$(cygpath -w "$TMP_FILE" 2>/dev/null || echo "$TMP_FILE")' -DestinationPath '$(cygpath -w "$EXTRACT_DIR" 2>/dev/null || echo "$EXTRACT_DIR")'"
+    else
+      echo "❌ Need unzip or powershell to extract $FOUND_BIN"
+      exit 1
+    fi
+    ;;
+  *)
+    echo "❌ Unknown archive type: $FOUND_BIN"
+    exit 1
+    ;;
+esac
+
 case "$OS_NAME" in
   windows)
     INSTALL_DIR="$HOME/bin"
     mkdir -p "$INSTALL_DIR"
-    cp "$TMP_FILE" "$INSTALL_DIR/$APP.exe"
+    [ -f "$EXTRACT_DIR/$APP.exe" ] || { echo "❌ $APP.exe not found in archive"; exit 1; }
+    # Everything in the archive: the exe and the DLLs it must sit next to.
+    cp "$EXTRACT_DIR"/* "$INSTALL_DIR/"
     ;;
   *)
     INSTALL_DIR="/usr/local/bin"
     [ -w "$INSTALL_DIR" ] || INSTALL_DIR="$HOME/.local/bin"
     mkdir -p "$INSTALL_DIR"
 
-    cp "$TMP_FILE" "$INSTALL_DIR/$APP"
+    [ -f "$EXTRACT_DIR/$APP" ] || { echo "❌ $APP not found in archive"; exit 1; }
+    cp "$EXTRACT_DIR/$APP" "$INSTALL_DIR/$APP"
     chmod +x "$INSTALL_DIR/$APP"
     ;;
 esac
+
+rm -rf "$EXTRACT_DIR" "$TMP_FILE"
 
 echo "Installed to: $INSTALL_DIR"
 echo "Done."
