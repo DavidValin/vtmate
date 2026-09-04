@@ -1,8 +1,8 @@
 ## vtmate
 
-The final AI voice conversational system all running in your terminal! vtmate is a Powerful terminal-based voice ai toolkit with many realistic voices, extremely low latency, 41 languages supported. Allows you to voice conversate with local ai models, pipe data and save into files. 
+The final AI voice conversational system all running in your terminal! vtmate is a Powerful terminal-based voice ai toolkit with many realistic voices, extremely low latency, 41 languages supported. Allows you to voice conversate with local ai models (or cloud based), pipe data and save into files. 
 
-The program self contains (1.5GB) all TTS models and voices and necessary files to recognize speech and speak with voice with no external intallations ensuring maximum portability.
+The program self contains (1.5GB) all TTS models and voices and necessary files to recognize speech and speak with voice with no external installations ensuring maximum portability.
 
 * [⬇️ Download](https://github.com/DavidValin/vtmate/releases) (⭐ MacOS ⭐ Linux and ⭐ Windows supported)
 * [🤠 Quicksheet (PDF)](https://raw.githubusercontent.com/DavidValin/vtmate/refs/heads/main/docs/en/quicksheet.pdf) (🖨️ print ready for easy access)
@@ -87,9 +87,8 @@ Thinking / reasoning is disabled on local servers so replies start speaking righ
 
 - ✅ Kokoro (integrated)
 - ✅ Supersonic 2 (integrated)
-- ✅ Supertonic 3 (integrated, 31 languages)
+- ✅ Supertonic 3 (integrated)
 - ✅ OpenTTS (requires external docker service)
-
 
 ## Installation
 
@@ -466,27 +465,15 @@ Linux (arm64):    ✅ CPU    ❌ CUDA     ✅ Vulkan
 Windows (x86_64)  ✅ CPU    ✅ CUDA     ✅ Vulkan
 ```
 
-⚠️ Currently working on full static builds for all OS with Openblas + CUDA + Vulkan support. In the meantime, pick a release available from [Releases list](https://github.com/DavidValin/vtmate/releases) or build one yourself.
-
 ## Build vtmate from source code
 
-**Simplest way:**
-```
-cargo install vtmate
-```
-**From git repository:**
-```
-git clone https://github.com/DavidValin/vtmate
-cargo build --release
-```
-
-**Full configurable builds (OS, arch and gpu acceleration)**
+**Full configurable builds (OS, arch and GPU acceleration)**
 
 see:
 ```
 build_linux.sh
 build_macos.sh
-build_windows.sh
+build_windows.ps1
 ```
 
 Have fun o:)
