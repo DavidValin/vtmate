@@ -23,16 +23,33 @@ mod util {
   pub fn get_user_home_path() -> Option<PathBuf> {
     Some(PathBuf::from("/tmp"))
   }
+  pub fn terminate(exit_code: i32) -> ! {
+    std::process::exit(exit_code)
+  }
 }
 
 mod log {
   pub fn log(_level: &str, _msg: &str) {}
 }
 
+mod tools {
+  pub mod http_request {
+    pub struct HttpToolDefinition {
+      pub name: String,
+    }
+    pub struct HttpRequestDefinition {
+      pub tool_definition: HttpToolDefinition,
+    }
+    pub fn load_http_request_definitions() -> Vec<HttpRequestDefinition> {
+      vec![]
+    }
+  }
+}
+
 #[path = "../src/config.rs"]
 mod config;
 
-use config::{AgentSettings, Args, load_settings};
+use config::{Args, load_settings};
 
 #[test]
 fn test_load_settings_with_double_quotes() {
@@ -61,6 +78,7 @@ end_silence_ms = "2000"
 ptt = "false"
 whisper_model_path = "~/.whisper-models/ggml-tiny.bin"
 voice_speed = 5.0
+tools = web_fetch
 "#;
 
   let mut file = File::create(&path).expect("Failed to create temp config file");
@@ -102,6 +120,7 @@ voice_speed = 5.0
   assert_eq!(agent.end_silence_ms, 2000);
   assert_eq!(agent.voice_speed, 5.0);
   assert_eq!(agent.whisper_model_path, "~/.whisper-models/ggml-tiny.bin");
+  assert_eq!(agent.tools, vec!["web_fetch".to_string()]);
 }
 
 #[test]
@@ -131,6 +150,7 @@ end_silence_ms = 2000
 ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 voice_speed = 5.0
+tools = web_fetch
 "#;
 
   let mut file = File::create(&path).expect("Failed to create temp config file");
@@ -172,4 +192,5 @@ voice_speed = 5.0
   assert_eq!(agent.end_silence_ms, 2000);
   assert_eq!(agent.voice_speed, 5.0);
   assert_eq!(agent.whisper_model_path, "~/.whisper-models/ggml-tiny.bin");
+  assert_eq!(agent.tools, vec!["web_fetch".to_string()]);
 }

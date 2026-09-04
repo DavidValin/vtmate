@@ -8,22 +8,135 @@ use reqwest::StatusCode;
 use serde_json::json;
 use std::sync::{Arc, atomic::AtomicU64};
 
-/// Stream response from Llama/Ollama endpoints, fallback if one fails, and mid-stream cancellation support
+/// Stream response from Llama/Ollama endpoints, fallback if one fails, and mid-stream cancellation support.
+/// When `include_tools` is true, the LLM may return tool_calls which are delivered via `on_tool_call`.
+/// Reasoning tokens (from models like Gemma 4) are delivered via `on_reasoning`.
 pub async fn llama_server_stream_response_into(
   messages: &Vec<crate::conversation::ChatMessage>,
   llama_host: &str,
   llama_model: &str,
   server_type: &str,
-
   interrupt_counter: Arc<AtomicU64>,
   expected_interrupt: u64,
   on_piece: &mut dyn FnMut(&str),
+  include_tools: bool,
+  tools: &[String],
+  mut on_tool_call: Option<&mut dyn FnMut(&serde_json::Value)>,
+  mut on_reasoning: Option<&mut dyn FnMut(&str)>,
+  think: bool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  crate::log::log(
+    "debug",
+    &format!(
+      "llama_server_stream_response_into called with include_tools: {} tools: {:?}",
+      include_tools, tools
+    ),
+  );
   #[derive(Clone, Copy, Debug)]
   enum ApiKind {
     OaiChat,
-    OllamaGenerate,
     OllamaChat,
+  }
+
+  /// Accumulates one streamed tool call across SSE chunks, keyed by `index`.
+  #[derive(Default, Clone)]
+  struct ToolCallBuilder {
+    id: String,
+    name: String,
+    arguments: String,
+  }
+
+  /// Turn accumulated builders into complete tool_call JSON values, draining the buffer.
+  fn finalize_tool_calls(builders: &mut Vec<Option<ToolCallBuilder>>) -> Vec<serde_json::Value> {
+    builders
+      .drain(..)
+      .flatten()
+      .filter(|b| !b.name.is_empty())
+      .map(|b| {
+        json!({
+          "id": b.id,
+          "type": "function",
+          "function": {
+            "name": b.name,
+            "arguments": b.arguments
+          }
+        })
+      })
+      .collect()
+  }
+
+  /// Finalize and dispatch any pending tool calls, if there are any and a callback is set.
+  fn flush_tool_calls(
+    builders: &mut Vec<Option<ToolCallBuilder>>,
+    on_tool_call: &mut Option<&mut dyn FnMut(&serde_json::Value)>,
+  ) {
+    if builders.is_empty() {
+      return;
+    }
+    let calls = finalize_tool_calls(builders);
+    if let Some(cb) = on_tool_call.as_mut() {
+      for tc in &calls {
+        let name = tc
+          .get("function")
+          .and_then(|f| f.get("name"))
+          .and_then(|n| n.as_str())
+          .unwrap_or("");
+        let args = tc
+          .get("function")
+          .and_then(|f| f.get("arguments"))
+          .and_then(|a| a.as_str())
+          .unwrap_or("");
+        crate::log::send_line(&format!("\n\x1b[32m {} called with {}", name, args));
+        cb(tc);
+      }
+    }
+  }
+
+  /// Serialize one chat message for the wire, including tool calls on assistant turns
+  /// and the call id on `tool` results.
+  fn message_to_json(m: &crate::conversation::ChatMessage, kind: ApiKind) -> serde_json::Value {
+    let mut obj = json!({ "role": m.role, "content": m.content });
+    if let Some(calls) = m.tool_calls.as_ref().filter(|c| !c.is_empty()) {
+      let calls: Vec<serde_json::Value> = calls
+        .iter()
+        .map(|tc| {
+          let mut tc = tc.clone();
+          if let Some(args) = tc.pointer_mut("/function/arguments") {
+            match kind {
+              // OpenAI-compatible endpoints expect `arguments` as a JSON-encoded string.
+              ApiKind::OaiChat => {
+                if !args.is_string() {
+                  *args = serde_json::Value::String(args.to_string());
+                }
+              }
+              // Ollama's native API expects an object.
+              ApiKind::OllamaChat => {
+                if let Some(parsed) = args
+                  .as_str()
+                  .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                {
+                  *args = parsed;
+                }
+              }
+            }
+          }
+          tc
+        })
+        .collect();
+      obj["tool_calls"] = serde_json::Value::Array(calls);
+    }
+    if m.role == "tool" {
+      if let Some(id) = &m.tool_call_id {
+        obj["tool_call_id"] = json!(id);
+      }
+      if let Some(name) = &m.tool_name {
+        match kind {
+          ApiKind::OaiChat => obj["name"] = json!(name),
+          ApiKind::OllamaChat => obj["tool_name"] = json!(name),
+        }
+      }
+    }
+    obj
   }
 
   fn should_fallback_status(code: StatusCode) -> bool {
@@ -53,18 +166,12 @@ pub async fn llama_server_stream_response_into(
       }
       "ollama" => {
         out.push((
-          format!("http://{}/v1/generate", base),
-          ApiKind::OllamaGenerate,
-        ));
-        out.push((format!("http://{}/api/chat", base), ApiKind::OllamaChat));
-      }
-      _ => {
-        out.push((
           format!("http://{}/v1/chat/completions", base),
           ApiKind::OaiChat,
         ));
         out.push((format!("http://{}/api/chat", base), ApiKind::OllamaChat));
       }
+      _ => {}
     }
     out
   }
@@ -80,41 +187,35 @@ pub async fn llama_server_stream_response_into(
 
     crate::log::log("info", &format!("Trying endpoint: {}", url));
 
-    let req = match kind {
-      ApiKind::OaiChat => {
-        let payload = json!({
-          "model": llama_model,
-          "messages": messages.iter().map(|m| json!({ "role": m.role, "content": m.content })).collect::<Vec<_>>(),
-          "think": false,
-          "stream": true
-        });
-        client.post(&url).json(&payload)
-      }
-      ApiKind::OllamaGenerate => {
-        let prompt_str = messages
-          .iter()
-          .map(|m| m.content.as_str())
-          .collect::<Vec<&str>>()
-          .join("\n");
-        let payload = json!({
-          "model": llama_model,
-          "prompt": prompt_str,
-          "think": false,
-          "stream": true,
-          "max_tokens": 1024
-        });
-        client.post(&url).json(&payload)
-      }
-      ApiKind::OllamaChat => {
-        let payload = json!({
-          "model": llama_model,
-          "messages": messages.iter().map(|m| json!({ "role": m.role, "content": m.content })).collect::<Vec<_>>(),
-          "think": false,
-          "stream": true
-        });
-        client.post(&url).json(&payload)
-      }
+    let tools_payload = if include_tools {
+      Some(crate::tools::tools_schemas(tools).unwrap_or_default())
+    } else {
+      None
     };
+    crate::log::log(
+      "debug",
+      &format!(
+        "{:?} payload tools: {:?}",
+        kind,
+        tools_payload.as_ref().map(|v| v
+          .iter()
+          .filter_map(|t| t.get("name").and_then(|n| n.as_str()))
+          .collect::<Vec<_>>())
+      ),
+    );
+    let payload = json!({
+      "model": llama_model,
+      "messages": messages.iter().map(|m| message_to_json(m, kind)).collect::<Vec<_>>(),
+      "think": think,
+      "stream": true,
+      "tools": tools_payload,
+      "tool_choice": if include_tools { Some("auto") } else { None::<&str> },
+      "parallel_tool_calls": if include_tools { Some(false) } else { None::<bool> },
+      "options": {
+        "think": think
+      },
+    });
+    let req = client.post(&url).json(&payload);
 
     let resp = match tokio::time::timeout(std::time::Duration::from_secs(120), req.send()).await {
       Ok(Ok(r)) => r,
@@ -144,6 +245,8 @@ pub async fn llama_server_stream_response_into(
     crate::log::log("info", &format!("Streaming response from: {}", url));
     // inside your endpoint loop
     let mut stream = resp.bytes_stream();
+    // Accumulates fragmented tool_calls (see ToolCallBuilder) for this endpoint attempt.
+    let mut tool_call_builders: Vec<Option<ToolCallBuilder>> = Vec::new();
 
     // Bound how long we wait for the next chunk: without this, a server that accepts
     // the connection but stops sending bytes mid-stream (no close, no data) hangs here
@@ -194,6 +297,7 @@ pub async fn llama_server_stream_response_into(
         for line in text.lines() {
           let payload = line.trim().strip_prefix("data:").unwrap_or(line).trim();
           if payload == "[DONE]" {
+            flush_tool_calls(&mut tool_call_builders, &mut on_tool_call);
             return Ok(());
           }
 
@@ -206,9 +310,32 @@ pub async fn llama_server_stream_response_into(
                   on_piece(content);
                 }
               }
+              // Check for tool_calls in message (non-streaming response)
+              if let Some(tcs) = message.get("tool_calls").and_then(|t| t.as_array()) {
+                if !tcs.is_empty() {
+                  if let Some(ref mut cb) = on_tool_call {
+                    for tc in tcs {
+                      // Extract name and arguments from inside "function" wrapper
+                      if let Some(func) = tc.get("function") {
+                        if let Some(name) = func.get("name").and_then(|v| v.as_str()) {
+                          let args = func.get("arguments").and_then(|v| v.as_str()).unwrap_or("");
+                          let msg = format!("\n\x1b[32m {} called with {}", name, args);
+                          crate::log::send_line(&msg);
+                        }
+                      }
+                      cb(tc);
+                    }
+                  }
+                }
+              }
+              // End-of-stream signal from Ollama chat API
+              if v.get("done").and_then(|x| x.as_bool()) == Some(true) {
+                flush_tool_calls(&mut tool_call_builders, &mut on_tool_call);
+                return Ok(());
+              }
             } else {
               match kind {
-                ApiKind::OaiChat | ApiKind::OllamaChat | ApiKind::OllamaGenerate => {
+                ApiKind::OaiChat | ApiKind::OllamaChat => {
                   if let Some(choices) = v.get("choices").and_then(|c| c.as_array()) {
                     for choice in choices {
                       if let Some(delta) = choice.get("delta") {
@@ -217,8 +344,44 @@ pub async fn llama_server_stream_response_into(
                             on_piece(content);
                           }
                         }
+                        // Extract reasoning tokens (Gemma 4, DeepSeek, etc.)
+                        if let Some(reasoning) = delta.get("reasoning").and_then(|r| r.as_str()) {
+                          if !reasoning.is_empty() {
+                            if let Some(ref mut cb) = on_reasoning {
+                              cb(reasoning);
+                            }
+                          }
+                        }
+                        // Accumulate by index — arguments arrive as partial JSON text.
+                        if let Some(tcs) = delta.get("tool_calls").and_then(|t| t.as_array()) {
+                          for tc in tcs {
+                            let idx = tc.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
+                            if tool_call_builders.len() <= idx {
+                              tool_call_builders.resize_with(idx + 1, || None);
+                            }
+                            let builder =
+                              tool_call_builders[idx].get_or_insert_with(ToolCallBuilder::default);
+                            if let Some(id) = tc.get("id").and_then(|v| v.as_str()) {
+                              if !id.is_empty() {
+                                builder.id = id.to_string();
+                              }
+                            }
+                            if let Some(func) = tc.get("function") {
+                              if let Some(name) = func.get("name").and_then(|v| v.as_str()) {
+                                if !name.is_empty() {
+                                  builder.name = name.to_string();
+                                }
+                              }
+                              if let Some(args) = func.get("arguments").and_then(|v| v.as_str()) {
+                                builder.arguments.push_str(args);
+                              }
+                            }
+                          }
+                        }
                       }
-                      if choice.get("finish_reason").and_then(|r| r.as_str()) == Some("stop") {
+                      let finish_reason = choice.get("finish_reason").and_then(|r| r.as_str());
+                      if finish_reason == Some("stop") || finish_reason == Some("tool_calls") {
+                        flush_tool_calls(&mut tool_call_builders, &mut on_tool_call);
                         return Ok(());
                       }
                     }
@@ -226,6 +389,7 @@ pub async fn llama_server_stream_response_into(
                   if v.get("done").and_then(|x| x.as_bool()) == Some(true)
                     || v.get("status").and_then(|x| x.as_str()) == Some("completed")
                   {
+                    flush_tool_calls(&mut tool_call_builders, &mut on_tool_call);
                     return Ok(());
                   }
                 }
@@ -236,7 +400,9 @@ pub async fn llama_server_stream_response_into(
       }
     }
 
-    // success streaming completed
+    // Stream ended (closed or stalled) without an explicit finish signal —
+    // still flush any tool call fragments accumulated so far.
+    flush_tool_calls(&mut tool_call_builders, &mut on_tool_call);
     return Ok(());
   }
 
