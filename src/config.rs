@@ -30,6 +30,8 @@ pub struct AgentSettings {
   pub provider: String,
   pub baseurl: String,
   pub model: String,
+  #[serde(default)]
+  pub api_key: String,
   pub system_prompt: String,
   #[serde(deserialize_with = "bool_from_str_or_bool")]
   pub ptt: bool,
@@ -69,16 +71,39 @@ Explanation on the fields:
   * voice_speed:          the voice speed from 1.0 to 9.0
   ------------------------------------------------------------
   * provider:             the system it will use to query
-                          the llm, it can be 'ollama' or
-                          'llama-server'
+                          the llm.
+
+                          Local servers (no api key needed):
+                            'ollama' (0.13 or newer),
+                            'llama-server',
+                            'openai-compatible' (LM Studio,
+                            vLLM or any server exposing
+                            /v1/chat/completions)
+
+                          Hosted providers (api key needed):
+                            'openai', 'anthropic', 'google',
+                            'groq', 'mistral', 'openrouter',
+                            'deepseek', 'xai'
   ------------------------------------------------------------
   * baseurl:              the base url used to contact the
-                          provider (it needs to be without path)
+                          provider. For local servers it is
+                          the host and port without path, e.g.
+                          http://127.0.0.1:11434
+                          For hosted providers leave it empty
+                          to use the provider's default url.
   ------------------------------------------------------------
-  * model:                the model name to use in ollama
+  * model:                the model name to use
                           (some llama-server versions will
                           ignore this option as llama-server
                           runs for a single model)
+  ------------------------------------------------------------
+  * api_key:              the api key for hosted providers.
+                          Optional: when empty, the provider's
+                          environment variable is used instead
+                          (OPENAI_API_KEY, ANTHROPIC_API_KEY,
+                          GOOGLE_API_KEY, GROQ_API_KEY,
+                          MISTRAL_API_KEY, OPENROUTER_API_KEY,
+                          DEEPSEEK_API_KEY, XAI_API_KEY)
   ------------------------------------------------------------
   * system_prompt:        the system prompt to be sent to
                           the llm when querying it.
@@ -307,8 +332,14 @@ pub fn load_settings(
       errors.push(format!("Agent {}: {}", agent.name, e));
     }
 
-    if let Err(e) =
-      validate_baseurl(&agent.baseurl).map_err(|e: std::io::Error| -> Error { Error::new(e) })
+    if let Err(e) = validate_baseurl(&agent.baseurl, &agent.provider)
+      .map_err(|e: std::io::Error| -> Error { Error::new(e) })
+    {
+      errors.push(format!("Agent {}: {}", agent.name, e));
+    }
+
+    if let Err(e) = validate_api_key(&agent.api_key, &agent.provider)
+      .map_err(|e: std::io::Error| -> Error { Error::new(e) })
     {
       errors.push(format!("Agent {}: {}", agent.name, e));
     }
@@ -693,26 +724,60 @@ fn validate_voice_value(
 }
 
 fn validate_provider(provider: &str) -> Result<(), std::io::Error> {
-  if provider != "ollama" && provider != "llama-server" {
+  if !crate::llm::is_supported_provider(provider) {
     return Err(std::io::Error::new(
       std::io::ErrorKind::Other,
       format!(
-        "Invalid provider '{}' . Must be 'ollama' or 'llama-server'",
-        provider
+        "Invalid provider '{}' . Must be one of {}",
+        provider,
+        crate::llm::supported_providers_list()
       ),
     ));
   }
   Ok(())
 }
 
-fn validate_baseurl(baseurl: &str) -> Result<(), std::io::Error> {
+fn validate_api_key(api_key: &str, provider: &str) -> Result<(), std::io::Error> {
+  if crate::llm::is_cloud_provider(provider)
+    && crate::llm::resolve_api_key(provider, api_key).is_none()
+  {
+    return Err(std::io::Error::new(
+      std::io::ErrorKind::Other,
+      format!(
+        "provider '{}' needs an api_key (set it in the settings file or via the {} environment variable)",
+        provider,
+        crate::llm::api_key_env_var(provider).unwrap_or("provider")
+      ),
+    ));
+  }
+  Ok(())
+}
+
+fn validate_baseurl(baseurl: &str, provider: &str) -> Result<(), std::io::Error> {
+  if baseurl.trim().is_empty() {
+    // hosted providers have a default endpoint, local servers must be addressed
+    if crate::llm::is_cloud_provider(provider) {
+      return Ok(());
+    }
+    return Err(std::io::Error::new(
+      std::io::ErrorKind::Other,
+      format!("baseurl is required for provider '{}'", provider),
+    ));
+  }
   let url = Url::parse(baseurl).map_err(|e| {
     std::io::Error::new(
       std::io::ErrorKind::Other,
       format!("Invalid baseurl '{}' : {}", baseurl, e),
     )
   })?;
-  if url.path() != "/" || !url.has_host() {
+  if !url.has_host() {
+    return Err(std::io::Error::new(
+      std::io::ErrorKind::Other,
+      format!("baseurl must have a host: {}", baseurl),
+    ));
+  }
+  // local servers are addressed by host and port, vtmate appends /v1 itself
+  if crate::llm::is_local_provider(provider) && url.path() != "/" && url.path() != "/v1" {
     return Err(std::io::Error::new(
       std::io::ErrorKind::Other,
       format!("baseurl must have a host and no path: {}", baseurl),
@@ -799,6 +864,7 @@ fn sanitize_agent_settings(agent: &mut AgentSettings) {
   agent.provider = agent.provider.trim_matches('"').to_string();
   agent.baseurl = agent.baseurl.trim_matches('"').to_string();
   agent.model = agent.model.trim_matches('"').to_string();
+  agent.api_key = agent.api_key.trim_matches('"').to_string();
   agent.system_prompt = agent.system_prompt.trim_matches('"').to_string();
   // agent.ptt is a bool; no trimming needed
   agent.whisper_model_path = agent.whisper_model_path.trim_matches('"').to_string();

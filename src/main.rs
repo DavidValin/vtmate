@@ -694,10 +694,10 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   log::log("info", &format!("TTS voice: {}", settings.voice));
   log::log("info", &format!("LLM provider: {}", settings.provider));
 
-  if settings.provider == "ollama" {
-    log::log("info", &format!("ollama base url: {}", settings.baseurl));
+  if settings.baseurl.trim().is_empty() {
+    log::log("info", "LLM base url: (provider default)");
   } else {
-    log::log("info", &format!("llama-server url: {}", settings.baseurl));
+    log::log("info", &format!("LLM base url: {}", settings.baseurl));
   }
   log::log(
     "info",
