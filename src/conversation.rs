@@ -17,7 +17,7 @@ use std::sync::{
   atomic::{AtomicU64, Ordering},
 };
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::runtime::Builder as TokioBuilder;
 use uuid::Uuid;
 
@@ -503,7 +503,9 @@ pub fn conversation_thread(
             got_any_token = true;
             ui_thinking_for_closure.store(false, Ordering::Relaxed);
           }
-          if let Some(phrase) = speaker_arc_cloned_for_closure.lock().unwrap().push_text(piece) {
+          // Short-lived lock: the guard is dropped at the end of this statement.
+          let phrase = speaker_arc_cloned_for_closure.lock().unwrap().push_text(piece);
+          if let Some(phrase) = phrase {
             if !first_phrase_logged {
               let elapsed_ms = crate::util::now_ms(&START_INSTANT) - speech_end_ms;
               crate::log::log("info", &format!("Time from speech end to first phrase playback: {:.2?}", elapsed_ms));
@@ -511,14 +513,14 @@ pub fn conversation_thread(
             }
               // accumulate reply for single ChatMessage
             if let Ok(mut acc) = reply_accum_cloned.lock() {
-              acc.push_str(&phrase);
+              acc.push_str(&phrase.text);
               acc.push(' ');
             }
             // send the complete phrase to tts (source code inside ``` is never spoken)
-            let mut cleaned = speaker_arc_cloned_for_closure.lock().unwrap().tts_text(&phrase);
+            let mut cleaned = phrase.tts.clone();
             if !cleaned.trim().is_empty() {
               cleaned.push(' ');
-              crate::log::log("info", &format!("Sending phrase to TTS: '{}' (original: '{}'), interrupt={}", cleaned, phrase, my_interrupt));
+              crate::log::log("info", &format!("Sending phrase to TTS: '{}' (original: '{}'), interrupt={}", cleaned, phrase.text, my_interrupt));
               let _ = tts_tx_cloned_for_closure.send((cleaned, my_interrupt, voice_for_tts_inner.clone()));
             }
           }
@@ -570,14 +572,15 @@ pub fn conversation_thread(
         let voice_for_tts_for_after = voice_for_tts.clone();
 
         // Flush any remaining phrase from the speaker when stream ends
-        if let Some(last_phrase) = speaker_arc_for_after.lock().unwrap().flush() {
+        let last_phrase = speaker_arc_for_after.lock().unwrap().flush();
+        if let Some(last_phrase) = last_phrase {
           // accumulate reply
           if let Ok(mut acc) = reply_accum_for_after.lock() {
-            acc.push_str(&last_phrase);
+            acc.push_str(&last_phrase.text);
             acc.push(' ');
           }
           // send to TTS (source code inside ``` is never spoken)
-          let mut cleaned = speaker_arc_for_after.lock().unwrap().tts_text(&last_phrase);
+          let mut cleaned = last_phrase.tts.clone();
           if !cleaned.trim().is_empty() {
             cleaned.push(' ');
             let _ = tts_tx_for_after.send((cleaned, my_interrupt, voice_for_tts_for_after.clone()));
@@ -716,7 +719,19 @@ fn maybe_setup_and_save(
   Ok(())
 }
 
+/// A phrase emitted by `PhraseSpeaker`.
+struct SpokenPhrase {
+  /// The phrase as displayed and stored in the history.
+  text: String,
+  /// What TTS gets: fenced ``` code removed, special chars stripped. Empty when
+  /// the phrase was only code and must not be spoken.
+  tts: String,
+}
+
 /// Emits phrases when punctuation/newline/length threshold happens.
+///
+/// Shared between threads behind a `Mutex`; each emitted phrase carries both
+/// its display text and its TTS text, computed together in one call.
 struct PhraseSpeaker {
   buf: String,
   /// true while inside a ``` fenced code block; code is displayed but never spoken
@@ -726,21 +741,20 @@ impl PhraseSpeaker {
   fn new() -> Self {
     Self { buf: String::new(), in_code: false }
   }
-  /// Text to send to TTS for a phrase emitted by this speaker (fenced code
-  /// removed, special chars stripped). Empty when the phrase was all code.
-  fn tts_text(&mut self, phrase: &str) -> String {
-    crate::util::tts_text(phrase, &mut self.in_code)
-  }
-  fn push_text(&mut self, s: &str) -> Option<String> {
+  fn push_text(&mut self, s: &str) -> Option<SpokenPhrase> {
     self.buf.push_str(s);
     // cap phrases by new lines or dots
     let trigger = self.buf.contains('\n') || self.buf.ends_with('.');
     if trigger { self.flush() } else { None }
   }
-  fn flush(&mut self) -> Option<String> {
-    let out = self.buf.trim_end().to_string();
+  fn flush(&mut self) -> Option<SpokenPhrase> {
+    let text = self.buf.trim_end().to_string();
     self.buf.clear();
-    if out.is_empty() { None } else { Some(out) }
+    if text.is_empty() {
+      return None;
+    }
+    let tts = crate::util::tts_text(&text, &mut self.in_code);
+    Some(SpokenPhrase { text, tts })
   }
 }
 
@@ -878,19 +892,20 @@ fn handle_reply(
         speaker.push_text(piece)
       };
       if let Some(ref phrase) = phrase {
-        let _ = tx_ui.send(format!("stream|{}", phrase));
+        let _ = tx_ui.send(format!("stream|{}", phrase.text));
         let _ = tx_ui.send("line|".to_string());
         // TTS (source code inside ``` is never spoken)
-        let cleaned = speaker_arc.lock().unwrap().tts_text(phrase);
+        let cleaned = phrase.tts.clone();
         if !cleaned.trim().is_empty() {
           let _ = tts_tx.send((cleaned, my_interrupt, voice.clone()));
           let _ = tts_done_rx.recv();
+        } else {
         }
       }
       if interrupt_counter_clone.load(Ordering::SeqCst) != my_interrupt_clone {
         if let Some(rem) = speaker_arc.lock().unwrap().flush() {
           // Prevents the partially‑generated text from being lost when the user interrupts
-          push_or_update_last_assistant(&conversation_history, &rem, &assistant_name);
+          push_or_update_last_assistant(&conversation_history, &rem.text, &assistant_name);
         }
       }
     }
@@ -923,18 +938,18 @@ fn handle_reply(
   }
 
   // Flush remaining phrase
-  if let Some(last_phrase) = speaker_arc.lock().unwrap().flush() {
-    let cleaned = speaker_arc.lock().unwrap().tts_text(&last_phrase);
-    if !cleaned.trim().is_empty() {
-      let _ = tts_tx.send((cleaned, my_interrupt, settings.voice.clone()));
+  let last_phrase = speaker_arc.lock().unwrap().flush();
+  if let Some(last_phrase) = last_phrase {
+    if !last_phrase.tts.trim().is_empty() {
+      let _ = tts_tx.send((last_phrase.tts.clone(), my_interrupt, settings.voice.clone()));
     }
-    let _ = tx_ui.send(format!("stream|{}", last_phrase));
+    let _ = tx_ui.send(format!("stream|{}", last_phrase.text));
     let _ = tx_ui.send("line|".to_string());
     // Add the final, un‑puncuated fragment to the history
     // (handles replies that end without a punctuation mark or newline)
     push_or_update_last_assistant(
       &conversation_history,
-      &last_phrase,
+      &last_phrase.text,
       &assistant_name_for_closure,
     );
   }
@@ -953,7 +968,7 @@ fn handle_reply(
       // after streaming but before the conversation was saved
       // (covers the edge‑case where the user hits Esc right after the stream ends
       // but before the conversation file is written )
-      push_or_update_last_assistant(&conversation_history, &rem, &assistant_name_for_closure);
+      push_or_update_last_assistant(&conversation_history, &rem.text, &assistant_name_for_closure);
     }
   }
 
@@ -1012,9 +1027,16 @@ fn wait_for_playback(
   my_interrupt: u64,
 ) {
   let playback_active = state.playback.playback_active.clone();
-  // Wait until playback starts if it hasn't already
+  // Wait until playback starts if it hasn't already. The last phrase has been
+  // synthesized and handed to the playback thread by now, so audio starts within
+  // milliseconds. Give up after two seconds: a reply with nothing to speak
+  // (e.g. only a ``` code block) never starts playback.
+  let start_deadline = Instant::now() + Duration::from_millis(2000);
   while !playback_active.load(Ordering::SeqCst) {
     if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
+      return;
+    }
+    if Instant::now() >= start_deadline {
       return;
     }
     thread::sleep(Duration::from_millis(10));
