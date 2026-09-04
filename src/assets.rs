@@ -279,6 +279,136 @@ fn embedded_supersonic2_file(rel: &str) -> &'static [u8] {
   }
 }
 
+// SUPERTONIC (Supertonic 3, multilingual)
+// ------------------------------------------------------------------
+
+const SUPERTONIC_FILES: &[&str] = &[
+  "onnx/duration_predictor.onnx",
+  "onnx/text_encoder.onnx",
+  "onnx/tts.json",
+  "onnx/unicode_indexer.json",
+  "onnx/vector_estimator.onnx",
+  "onnx/vocoder.onnx",
+  "config.json",
+  "voice_styles/F1.json",
+  "voice_styles/F2.json",
+  "voice_styles/F3.json",
+  "voice_styles/F4.json",
+  "voice_styles/F5.json",
+  "voice_styles/M1.json",
+  "voice_styles/M2.json",
+  "voice_styles/M3.json",
+  "voice_styles/M4.json",
+  "voice_styles/M5.json",
+];
+
+pub fn ensure_supertonic_assets() {
+  // Respect user override
+  if std::env::var_os("SUPERTONIC_DATA_DIRECTORY").is_some() {
+    return;
+  }
+  let home = match get_user_home_path() {
+    Some(h) => h,
+    None => return,
+  };
+  let model_dir = home.join(".vtmate").join("tts").join("supertonic-model");
+
+  let all_exist = SUPERTONIC_FILES
+    .iter()
+    .all(|rel| model_dir.join(rel).exists());
+  if !all_exist {
+    // Extract supertonic files from the embedded binary
+    let _ = fs::remove_dir_all(&model_dir);
+    if fs::create_dir_all(&model_dir).is_ok() {
+      for rel in SUPERTONIC_FILES {
+        let path = model_dir.join(rel);
+        if let Some(parent) = path.parent() {
+          let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::write(path, embedded_supertonic_file(rel));
+      }
+    }
+  }
+
+  unsafe {
+    std::env::set_var("SUPERTONIC_DATA_DIRECTORY", model_dir.as_os_str());
+  }
+}
+
+fn embedded_supertonic_file(rel: &str) -> &'static [u8] {
+  match rel {
+    "onnx/duration_predictor.onnx" => include_bytes!(concat!(
+      env!("OUT_DIR"),
+      "/embedded/supertonic-model/onnx/duration_predictor.onnx"
+    )),
+    "onnx/text_encoder.onnx" => include_bytes!(concat!(
+      env!("OUT_DIR"),
+      "/embedded/supertonic-model/onnx/text_encoder.onnx"
+    )),
+    "onnx/tts.json" => include_bytes!(concat!(
+      env!("OUT_DIR"),
+      "/embedded/supertonic-model/onnx/tts.json"
+    )),
+    "onnx/unicode_indexer.json" => include_bytes!(concat!(
+      env!("OUT_DIR"),
+      "/embedded/supertonic-model/onnx/unicode_indexer.json"
+    )),
+    "onnx/vector_estimator.onnx" => include_bytes!(concat!(
+      env!("OUT_DIR"),
+      "/embedded/supertonic-model/onnx/vector_estimator.onnx"
+    )),
+    "onnx/vocoder.onnx" => include_bytes!(concat!(
+      env!("OUT_DIR"),
+      "/embedded/supertonic-model/onnx/vocoder.onnx"
+    )),
+    "config.json" => include_bytes!(concat!(
+      env!("OUT_DIR"),
+      "/embedded/supertonic-model/config.json"
+    )),
+    "voice_styles/F1.json" => include_bytes!(concat!(
+      env!("OUT_DIR"),
+      "/embedded/supertonic-model/voice_styles/F1.json"
+    )),
+    "voice_styles/F2.json" => include_bytes!(concat!(
+      env!("OUT_DIR"),
+      "/embedded/supertonic-model/voice_styles/F2.json"
+    )),
+    "voice_styles/F3.json" => include_bytes!(concat!(
+      env!("OUT_DIR"),
+      "/embedded/supertonic-model/voice_styles/F3.json"
+    )),
+    "voice_styles/F4.json" => include_bytes!(concat!(
+      env!("OUT_DIR"),
+      "/embedded/supertonic-model/voice_styles/F4.json"
+    )),
+    "voice_styles/F5.json" => include_bytes!(concat!(
+      env!("OUT_DIR"),
+      "/embedded/supertonic-model/voice_styles/F5.json"
+    )),
+    "voice_styles/M1.json" => include_bytes!(concat!(
+      env!("OUT_DIR"),
+      "/embedded/supertonic-model/voice_styles/M1.json"
+    )),
+    "voice_styles/M2.json" => include_bytes!(concat!(
+      env!("OUT_DIR"),
+      "/embedded/supertonic-model/voice_styles/M2.json"
+    )),
+    "voice_styles/M3.json" => include_bytes!(concat!(
+      env!("OUT_DIR"),
+      "/embedded/supertonic-model/voice_styles/M3.json"
+    )),
+    "voice_styles/M4.json" => include_bytes!(concat!(
+      env!("OUT_DIR"),
+      "/embedded/supertonic-model/voice_styles/M4.json"
+    )),
+    "voice_styles/M5.json" => include_bytes!(concat!(
+      env!("OUT_DIR"),
+      "/embedded/supertonic-model/voice_styles/M5.json"
+    )),
+    _ => panic!("Unknown supertonic file {}", rel),
+  }
+}
+
 /// Returns the embedded espeak-ng data archive (tar.gz) as raw bytes.
 ///
 /// The archive file is embedded at compile time.

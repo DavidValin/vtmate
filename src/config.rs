@@ -122,7 +122,8 @@ Explanation on the fields:
                           to be released to submit the audio.
   ------------------------------------------------------------
   * tts:                  the tts system to use, it can be
-                          'kokoro' or 'opentts'.
+                          'supertonic' (default, 31 languages),
+                          'supersonic2', 'kokoro' or 'opentts'.
 
                             - opentts requires opentts docker
                             container to be running:
@@ -442,7 +443,7 @@ pub fn ensure_settings_file() -> Result<(), Error> {
 [agent]
 name = main agent
 language = en
-tts = supersonic2
+tts = supertonic
 voice = M1
 voice_speed = 1.1
 provider = ollama
@@ -457,7 +458,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 [agent]
 name = explainer
 language = en
-tts = supersonic2
+tts = supertonic
 voice = F1
 voice_speed = 1.1
 provider = ollama
@@ -472,7 +473,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 [agent]
 name = planner
 language = en
-tts = supersonic2
+tts = supertonic
 voice = F3
 voice_speed = 1.1
 provider = ollama
@@ -487,7 +488,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 [agent]
 name = Ptahhotep
 language = en
-tts = supersonic2
+tts = supertonic
 voice = M2
 voice_speed = 1.1
 provider = ollama
@@ -502,7 +503,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 [agent]
 name = Aristoteles
 language = en
-tts = supersonic2
+tts = supertonic
 voice = M3
 voice_speed = 1.1
 provider = ollama
@@ -517,7 +518,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 [agent]
 name = Budda
 language = en
-tts = supersonic2
+tts = supertonic
 voice = M4
 voice_speed = 1.1
 provider = ollama
@@ -532,7 +533,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 [agent]
 name = Jesus Christ
 language = en
-tts = supersonic2
+tts = supertonic
 voice = M5
 voice_speed = 1.1
 provider = ollama
@@ -650,11 +651,11 @@ fn validate_voice(voice: &str, language: &str, tts: &str) -> Result<(), std::io:
 }
 
 fn validate_tts(tts: &str) -> Result<(), std::io::Error> {
-  if tts != "kokoro" && tts != "opentts" && tts != "supersonic2" {
+  if tts != "kokoro" && tts != "opentts" && tts != "supersonic2" && tts != "supertonic" {
     return Err(std::io::Error::new(
       std::io::ErrorKind::Other,
       format!(
-        "Invalid tts '{}' . Must be 'kokoro', 'opentts', or 'supersonic2'",
+        "Invalid tts '{}' . Must be 'kokoro', 'opentts', 'supersonic2', or 'supertonic'",
         tts
       ),
     ));
