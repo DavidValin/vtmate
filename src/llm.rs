@@ -482,12 +482,15 @@ mod tests {
         &mut on_piece,
       ))
       .expect("stream must succeed");
-    println!(
-      "[{}] first piece after {:?}, total {:?}, reply={:?}",
-      target.model,
-      first_piece_at,
-      started.elapsed(),
-      out
+    crate::log::log(
+      "debug",
+      &format!(
+        "[{}] first piece after {:?}, total {:?}, reply={:?}",
+        target.model,
+        first_piece_at,
+        started.elapsed(),
+        out
+      ),
     );
     assert!(
       out.to_lowercase().contains("paris"),
@@ -534,11 +537,14 @@ mod tests {
         &mut on_piece,
       ))
       .expect("interrupted stream returns Ok");
-    println!(
-      "[{}] interrupted after {} pieces in {:?}",
-      target.model,
-      pieces,
-      started.elapsed()
+    crate::log::log(
+      "debug",
+      &format!(
+        "[{}] interrupted after {} pieces in {:?}",
+        target.model,
+        pieces,
+        started.elapsed()
+      ),
     );
     assert!(
       pieces >= 5 && pieces < 20,
