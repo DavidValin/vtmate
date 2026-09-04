@@ -1,6 +1,6 @@
 ## vtmate
 
-The final AI voice conversational system all running in your terminal! vtmate is a Powerful terminal-based voice ai toolkit with many realistic voices, extremely low latency, 28 languages supported. Allows you to voice conversate with local ai models, pipe data and save into files. 
+The final AI voice conversational system all running in your terminal! vtmate is a Powerful terminal-based voice ai toolkit with many realistic voices, extremely low latency, 41 languages supported. Allows you to voice conversate with local ai models, pipe data and save into files. 
 
 The program self contains (1.2GB) all TTS models and voices and necessary files to recognize speech and speak with voice with no external intallations ensuring maximum portability.
 
