@@ -194,50 +194,59 @@ pub fn convert_to_mono(utt: &crate::audio::AudioChunk) -> Vec<f32> {
   }
 }
 
-/// Initialise a WAV writer thread that writes incoming audio chunks to a wav file.
+/// Downmix a chunk to mono and resample it to `target_sr`, so chunks from
+/// different sources (mic input vs. TTS playback) can share one WAV file.
+pub fn normalize_to_mono(chunk: &AudioChunk, target_sr: u32) -> Vec<f32> {
+  let mono = convert_to_mono(chunk);
+  resample_to(&mono, 1, chunk.sample_rate, target_sr)
+}
+
+/// Initialise a WAV writer thread that writes incoming audio chunks to a
+/// mono wav file. The sample rate is taken from the first chunk; every chunk
+/// (whatever its channel count or rate) is normalised to that format before
+/// being written. `gap_ms` of silence is appended after each chunk.
 /// Returns a channel sender that can be used to forward audio chunks.
-pub fn init_wav_writer(path: &Path) -> crossbeam_channel::Sender<AudioChunk> {
-  let (tx, rx) = crossbeam_channel::bounded::<AudioChunk>(1);
+pub fn init_wav_writer(path: &Path, gap_ms: u32) -> crossbeam_channel::Sender<AudioChunk> {
+  let (tx, rx) = crossbeam_channel::unbounded::<AudioChunk>();
   let out_path = path.to_path_buf();
   std::thread::spawn(move || {
     use std::fs::File;
-    let mut writer_opt: Option<hound::WavWriter<File>> = None;
+    use std::io::BufWriter;
+    let mut writer_opt: Option<hound::WavWriter<BufWriter<File>>> = None;
+    let mut target_sr = 0u32;
     for chunk in rx.iter() {
       if writer_opt.is_none() {
+        target_sr = chunk.sample_rate;
         let spec = hound::WavSpec {
-          channels: chunk.channels,
-          sample_rate: chunk.sample_rate,
+          channels: 1,
+          sample_rate: target_sr,
           bits_per_sample: 16,
           sample_format: hound::SampleFormat::Int,
         };
-        let f = match File::create(&out_path) {
-          Ok(f) => f,
+        writer_opt = match hound::WavWriter::create(&out_path, spec) {
+          Ok(w) => Some(w),
           Err(e) => {
             eprintln!("Failed to create wav file {:?}: {}", out_path, e);
             return;
           }
         };
-        writer_opt = match hound::WavWriter::new(f, spec) {
-          Ok(w) => Some(w),
-          Err(e) => {
-            eprintln!("Failed to create wav writer: {}", e);
-            return;
-          }
-        };
       }
-      if let Some(writer) = &mut writer_opt {
-        let samples = f32_to_i16(&chunk.data);
-        for s in samples {
-          if writer.write_sample(s).is_err() {
-            eprintln!("Failed to write sample to wav file");
-            break;
-          }
-        }
+      let Some(writer) = &mut writer_opt else { break };
+      let samples = f32_to_i16(&normalize_to_mono(&chunk, target_sr));
+      let silence = (target_sr as u64 * gap_ms as u64 / 1000) as usize;
+      let write = samples
+        .into_iter()
+        .chain(std::iter::repeat(0_i16).take(silence))
+        .try_for_each(|s| writer.write_sample(s))
+        .and_then(|_| writer.flush());
+      if let Err(e) = write {
+        eprintln!("Failed to write to wav file {:?}: {}", out_path, e);
+        break;
       }
     }
-    if let Some(mut writer) = writer_opt {
-      if writer.flush().is_err() {
-        eprintln!("Failed to flush wav writer");
+    if let Some(writer) = writer_opt {
+      if let Err(e) = writer.finalize() {
+        eprintln!("Failed to finalize wav file: {}", e);
       }
     }
   });
@@ -247,4 +256,60 @@ pub fn init_wav_writer(path: &Path) -> crossbeam_channel::Sender<AudioChunk> {
 /// Write plain text to a file.
 pub fn write_txt(path: &Path, text: &str) -> Result<(), std::io::Error> {
   std::fs::write(path, text)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn normalize_to_mono_downmixes_and_resamples() {
+    // 4 stereo frames at 48 kHz -> 2 mono frames at 24 kHz
+    let chunk = AudioChunk {
+      data: vec![0.2, 0.4, 0.2, 0.4, 0.2, 0.4, 0.2, 0.4],
+      channels: 2,
+      sample_rate: 48_000,
+    };
+    let out = normalize_to_mono(&chunk, 24_000);
+    assert_eq!(out.len(), 2);
+    for v in out {
+      assert!((v - 0.3).abs() < 1e-6, "expected downmixed 0.3, got {v}");
+    }
+  }
+
+  #[test]
+  fn normalize_to_mono_is_identity_for_matching_mono() {
+    let chunk = AudioChunk { data: vec![0.1, -0.5, 0.9], channels: 1, sample_rate: 16_000 };
+    assert_eq!(normalize_to_mono(&chunk, 16_000), chunk.data);
+  }
+
+  #[test]
+  fn wav_writer_produces_mono_file_at_first_chunk_rate() {
+    let dir = std::env::temp_dir().join(format!("vtmate_wav_test_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("out.wav");
+    let tx = init_wav_writer(&path, 0);
+    // first chunk: mono 16 kHz, 1600 frames (100 ms)
+    tx.send(AudioChunk { data: vec![0.1; 1600], channels: 1, sample_rate: 16_000 }).unwrap();
+    // second chunk: stereo 48 kHz, 4800 frames (100 ms) -> must become 1600 mono frames
+    tx.send(AudioChunk { data: vec![0.2; 9600], channels: 2, sample_rate: 48_000 }).unwrap();
+    drop(tx);
+    // wait for the writer thread to finalize
+    let mut reader = None;
+    for _ in 0..200 {
+      std::thread::sleep(std::time::Duration::from_millis(10));
+      if let Ok(r) = hound::WavReader::open(&path) {
+        if r.len() == 3200 {
+          reader = Some(r);
+          break;
+        }
+      }
+    }
+    let reader = reader.expect("wav file not finalized with expected length");
+    let spec = reader.spec();
+    assert_eq!(spec.channels, 1);
+    assert_eq!(spec.sample_rate, 16_000);
+    assert_eq!(reader.len(), 3200);
+    std::fs::remove_dir_all(&dir).ok();
+  }
 }

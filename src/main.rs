@@ -251,7 +251,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       .to_string_lossy();
     let wav_path = read_dir.join(format!("{}.wav", base_name));
     let txt_path = read_dir.join(format!("{}.txt", base_name));
-    let wav_tx = audio::init_wav_writer(&wav_path);
+    let wav_tx = audio::init_wav_writer(&wav_path, 0);
     playback::set_wav_tx(wav_tx.clone());
 
     let _play_handle = thread::spawn({
