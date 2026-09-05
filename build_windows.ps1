@@ -1452,6 +1452,9 @@ $env:ESPEAK_RS_STATIC_CRT    = "1"
 # Forces /MT inside espeak-rs-sys / whisper-rs-sys, which build their own
 # C deps and otherwise default to /MD (see cmake/static-msvc.toolchain.cmake).
 $env:CMAKE_TOOLCHAIN_FILE    = Join-Path $PROJECT_ROOT "cmake\static-msvc.toolchain.cmake"
+# Pins ggml to x86-64-v3 (/arch:AVX2) instead of the runner's own CPU, which
+# whisper-rs-sys would otherwise detect via GGML_NATIVE (see cmake/ggml-portable.cmake).
+$env:CMAKE_PROJECT_INCLUDE   = Join-Path $PROJECT_ROOT "cmake\ggml-portable.cmake"
 $env:CFLAGS                  = "/MT /D_CRT_SECURE_NO_WARNINGS /D_CRT_NONSTDC_NO_DEPRECATE"
 $env:ESPEAK_NG_DIR           = $ESPEAK_INSTALL
 
