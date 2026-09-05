@@ -752,6 +752,9 @@ DOCKERFILE
         export CARGO_PROFILE_RELEASE_INCREMENTAL=false
         export CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=x86_64-linux-musl-g++
         export RUSTC_LINKER=x86_64-linux-musl-g++
+        # Pin ggml to x86-64-v3 instead of -march=native, so the binary does
+        # not inherit the CI runner CPU (see cmake/ggml-portable.cmake).
+        export CMAKE_PROJECT_INCLUDE=/work/cmake/ggml-portable.cmake
 
         ABSL_LIBS=""
         for f in /usr/local/lib/libabsl_*.a; do
@@ -1705,6 +1708,10 @@ DOCKERFILE
 
       export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
       export CARGO_PROFILE_RELEASE_INCREMENTAL=false
+      # Pin ggml to x86-64-v3 instead of -march=native, so the binary does
+      # not inherit the CI runner CPU (see cmake/ggml-portable.cmake).
+      # No-op on arm64: the include only acts on x86_64.
+      export CMAKE_PROJECT_INCLUDE=/work/cmake/ggml-portable.cmake
       if [ "${DEBUG_SYMBOLS}" = "1" ]; then
         # Diagnostic build: keep symbol names and line tables so a gdb/coredumpctl
         # backtrace of a crash names Rust and C++ frames instead of "??".
