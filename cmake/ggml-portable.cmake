@@ -17,6 +17,17 @@
 #
 # Arm is left alone: it has no AMX, and GGML_NATIVE=OFF there would drop NEON
 # dotprod/fp16 without a replacement baseline.
+#
+# CUDA: with GGML_NATIVE=OFF ggml-cuda no longer asks for "native" GPU
+# architectures and falls back to its built-in CUDA 12 list, which starts at
+# compute_50 (Maxwell). CUDA 13 dropped Maxwell/Pascal/Volta, so nvcc fails
+# with "Unsupported gpu architecture 'compute_50'" on the Windows runner.
+# Pin the same set the ONNX Runtime CUDA build in build_windows.ps1 uses:
+# Turing and Ampere as PTX (newer GPUs JIT from it), Ampere/Ada as real code.
+
+if (GGML_CUDA AND NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+  set(CMAKE_CUDA_ARCHITECTURES "75-virtual;80-virtual;86-real;89-real")
+endif()
 
 if (CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
   set(GGML_NATIVE OFF CACHE BOOL "ggml: optimize the build for the current system" FORCE)
