@@ -9,7 +9,6 @@ use crate::state::GLOBAL_STATE;
 use crate::util::terminate;
 use chrono::Local;
 use crossbeam_channel::{Receiver, Sender, select};
-use hound;
 use std::fs;
 use std::path::Path;
 use std::sync::{
@@ -668,31 +667,8 @@ fn maybe_setup_and_save(
 
     if let Some(txt_path) = state.save_path.lock().unwrap().clone() {
       let wav_path = txt_path.with_extension("wav");
-      let (wav_tx, wav_rx) = crossbeam_channel::unbounded::<crate::audio::AudioChunk>();
+      let wav_tx = crate::audio::init_wav_writer(&wav_path, 500);
       set_wav_tx(wav_tx.clone());
-      std::thread::spawn(move || {
-        let mut writer: Option<hound::WavWriter<std::io::BufWriter<std::fs::File>>> = None;
-        while let Ok(chunk) = wav_rx.recv() {
-          if writer.is_none() {
-            let spec = hound::WavSpec {
-              channels: chunk.channels,
-              sample_rate: chunk.sample_rate,
-              bits_per_sample: 16,
-              sample_format: hound::SampleFormat::Int,
-            };
-            writer = Some(hound::WavWriter::create(&wav_path, spec).unwrap());
-          }
-          let samples = crate::audio::f32_to_i16(&chunk.data);
-          for s in samples {
-            writer.as_mut().unwrap().write_sample(s).unwrap();
-          }
-          let silence_samples = (chunk.sample_rate * 500 / 1000) as usize * chunk.channels as usize;
-          for _ in 0..silence_samples {
-            writer.as_mut().unwrap().write_sample(0_i16).unwrap();
-          }
-          writer.as_mut().unwrap().flush().unwrap();
-        }
-      });
       *wav_tx_opt = Some(wav_tx);
     }
   }

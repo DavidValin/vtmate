@@ -282,24 +282,9 @@ pub fn playback_thread(
         }
         recv(rx_audio) -> msg => {
           let Ok(chunk) = msg else { break };
-          // Forward to wav writer if set
+          // Forward to wav writer if set (it normalises format itself)
           if let Some(tx) = WAV_TX.get() {
-            // Determine data that will actually be played
-            let mut out_data = if chunk.channels != out_channels {
-              convert_channels(&chunk.data, chunk.channels, out_channels)
-            } else {
-              chunk.data.clone()
-            };
-            if chunk.sample_rate != config.sample_rate.0 {
-              let resampled = crate::audio::resample_to(&out_data, out_channels, chunk.sample_rate, config.sample_rate.0);
-              out_data = resampled;
-            }
-            let writer_chunk = crate::audio::AudioChunk {
-              data: out_data,
-              channels: out_channels,
-              sample_rate: config.sample_rate.0,
-            };
-            tx.send(writer_chunk).unwrap_or(());
+            tx.send(chunk.clone()).unwrap_or(());
           }
           let channels = out_channels as usize;
           let max_samples = crate::tts::QUEUE_CAP_FRAMES * channels;
