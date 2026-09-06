@@ -191,6 +191,7 @@ impl StreamingTts {
             speed,
             gain,
             Some(&language),
+            None,
           )) {
             Ok(mut samples) => {
               // sanitize output samples (prevents nasty noise if NaN/Inf/out-of-range)

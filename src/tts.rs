@@ -37,7 +37,7 @@ pub enum SpeakOutcome {
 
 static KOKORO_ENGINE: OnceLock<Arc<Mutex<TtsEngine>>> = OnceLock::new();
 static SUPSONIC_ENGINE: OnceLock<Arc<Mutex<SupersonicTtsEngine>>> = OnceLock::new();
-static SUPERTONIC_ENGINE: OnceLock<Arc<Mutex<crate::tts::supertonic_tts::TextToSpeech>>> = OnceLock::new();
+static SUPERTONIC_ENGINE: OnceLock<Arc<supertonic3_tts::TtsEngine>> = OnceLock::new();
 
 // Supported languages for Supersonic2 TTS
 static SUPSONIC_LANGS: &[&str] = &["en", "es", "fr", "ko", "pt"];

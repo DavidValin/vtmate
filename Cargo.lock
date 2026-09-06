@@ -2797,9 +2797,9 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "supersonic2-tts"
-version = "1.0.2"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e85d39e25d0ece0239e42ac609d79e1b2d6cdbc04e3c7d70c0ea874170c642fb"
+checksum = "853890b855eb3b9b8b70084dc147a9580572a3c23902fa0c0fce2b3f618f17c6"
 dependencies = [
  "anyhow",
  "clap",
@@ -2811,6 +2811,28 @@ dependencies = [
  "rand 0.8.6",
  "rand_distr",
  "rayon",
+ "regex",
+ "rustfft",
+ "serde",
+ "serde_json",
+ "tokio",
+ "unicode-normalization",
+]
+
+[[package]]
+name = "supertonic3-tts"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e379b6638adda7aba937ce058025058a7bd0073a0e6c2e2e9260f0a2d4e97fb"
+dependencies = [
+ "anyhow",
+ "clap",
+ "cpal",
+ "hound",
+ "ndarray",
+ "ort",
+ "rand 0.8.6",
+ "rand_distr",
  "regex",
  "rustfft",
  "serde",
@@ -3367,21 +3389,17 @@ dependencies = [
  "kokoro-micro",
  "llm",
  "log",
- "ndarray",
  "once_cell",
  "ort",
- "rand 0.8.6",
- "rand_distr",
- "regex",
  "reqwest",
  "serde",
  "serde_ini",
  "serde_json",
  "sha2",
  "supersonic2-tts",
+ "supertonic3-tts",
  "tar",
  "tokio",
- "unicode-normalization",
  "url",
  "urlencoding",
  "uuid",
