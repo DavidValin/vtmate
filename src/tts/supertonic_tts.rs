@@ -54,9 +54,9 @@ pub fn is_valid_lang(lang: &str) -> bool {
   AVAILABLE_LANGS.contains(&lang)
 }
 
-/// Number of flow-matching denoising steps. Upstream default is 8; 4 trades
-/// some clarity for roughly half the vector-estimator time.
-const TOTAL_STEPS: usize = 4;
+/// Number of flow-matching denoising steps. Upstream default is 8; 5 trades
+/// a little clarity for noticeably less vector-estimator time.
+const TOTAL_STEPS: usize = 5;
 
 // Speak via Supertonic
 pub fn speak_via_supertonic(
