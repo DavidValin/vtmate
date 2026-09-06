@@ -146,6 +146,10 @@ fn get_or_init_engine() -> Result<Arc<TtsEngine>, Box<dyn std::error::Error + Se
       crate::log::log("error", &msg);
       msg
     })?;
+  crate::log::log(
+    "info",
+    &format!("[supertonic_tts] running on {}", engine.backend()),
+  );
   let _ = SUPERTONIC_ENGINE.set(Arc::new(engine));
   Ok(SUPERTONIC_ENGINE.get().expect("engine just set").clone())
 }

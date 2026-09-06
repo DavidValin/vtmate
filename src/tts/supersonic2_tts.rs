@@ -14,7 +14,7 @@ use std::time::Duration;
 use tokio::runtime::Runtime;
 extern crate supersonic2_tts as supersonic2_tts_crate;
 use super::{SUPSONIC_ENGINE, SpeakOutcome};
-use supersonic2_tts_crate::TtsEngine;
+use supersonic2_tts_crate::{Device, TtsEngine, gpu_support_compiled};
 
 // API
 // ------------------------------------------------------------------
@@ -32,17 +32,45 @@ pub struct StreamingTts {
 
 // Engine initialization
 pub fn start_supersonic_engine() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  let engine = load_engine()?;
+  SUPSONIC_ENGINE.set(Arc::new(Mutex::new(engine))).ok();
+  Ok(())
+}
+
+/// Load the Supersonic 2 model. Uses the GPU when this build carries a GPU
+/// execution provider (`ort-cuda` feature) and it can be initialised,
+/// otherwise the CPU. `TtsEngine::new` alone is CPU only.
+fn load_engine() -> Result<TtsEngine, Box<dyn std::error::Error + Send + Sync>> {
   let rt = tokio::runtime::Builder::new_current_thread()
     .enable_all()
     .build()?;
-
   let home = crate::util::get_user_home_path().expect("Could not determine home directory");
   let onnx = home.join(".vtmate/tts/supersonic2-model/onnx");
   let base = home.join(".vtmate/tts/supersonic2-model");
-  let engine = rt.block_on(TtsEngine::new(onnx, base, false))?;
 
-  SUPSONIC_ENGINE.set(Arc::new(Mutex::new(engine))).ok();
-  Ok(())
+  if gpu_support_compiled() {
+    match rt.block_on(TtsEngine::new_with_device(
+      onnx.clone(),
+      base.clone(),
+      false,
+      Device::Gpu { device_id: 0 },
+    )) {
+      Ok(e) => {
+        crate::log::log("info", "[supersonic2_tts] running on GPU");
+        return Ok(e);
+      }
+      Err(e) => crate::log::log(
+        "warning",
+        &format!(
+          "[supersonic2_tts] GPU unavailable, falling back to CPU: {}",
+          e
+        ),
+      ),
+    }
+  }
+  let engine = rt.block_on(TtsEngine::new(onnx, base, false))?;
+  crate::log::log("info", "[supersonic2_tts] running on CPU");
+  Ok(engine)
 }
 
 // Speak via Supersonic2
@@ -59,16 +87,14 @@ pub fn speak_via_supersonic2(
   if text.is_empty() {
     return Ok(SpeakOutcome::Completed);
   }
-  let rt = tokio::runtime::Builder::new_current_thread()
-    .enable_all()
-    .build()?;
-  let engine = SUPSONIC_ENGINE.get_or_init(|| {
-    let home = crate::util::get_user_home_path().expect("Could not determine home directory");
-    let onnx = home.join(".vtmate/tts/supersonic2-model/onnx");
-    let base = home.join(".vtmate/tts/supersonic2-model");
-    let e = rt.block_on(TtsEngine::new(onnx, base, false)).unwrap();
-    Arc::new(Mutex::new(e))
-  });
+  let engine = match SUPSONIC_ENGINE.get() {
+    Some(e) => e.clone(),
+    None => {
+      let e = Arc::new(Mutex::new(load_engine()?));
+      let _ = SUPSONIC_ENGINE.set(e);
+      SUPSONIC_ENGINE.get().expect("engine just set").clone()
+    }
+  };
 
   // Check early interrupt
 

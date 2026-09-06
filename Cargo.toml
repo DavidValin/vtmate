@@ -63,7 +63,10 @@ whisper-hipblas       = ["whisper-rs/hipblas"]
 whisper-metal         = ["whisper-rs/metal"]
 whisper-logs          = ["whisper-rs/log_backend", "whisper-rs/tracing_backend"]
 ort-download-binaries = ["ort/download-binaries"]
-ort-cuda              = ["ort/cuda"]
+# CUDA for every ONNX Runtime user: whisper is separate (whisper-cuda), but the
+# two TTS crates share vtmate's ort and need their own feature flipped to
+# register the CUDA execution provider.
+ort-cuda              = ["ort/cuda", "supertonic3-tts/cuda", "supersonic2-tts/cuda"]
 
 [profile.release]
 opt-level = 3
