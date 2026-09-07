@@ -113,23 +113,49 @@ pub fn pick_input_stream(host: &cpal::Host) -> Result<(cpal::Device, cpal::Strea
       + "    • Also check System Settings → Sound → Input\n"
       + "    • On Linux: no ALSA device accepted a capture stream (see the log for what was tried)\n"
   };
-  let candidates = candidate_devices(
-    host.default_input_device(),
-    host.input_devices().ok().map(|d| d.collect()),
-  );
-  for dev in candidates {
-    let Ok(cfg) = dev.default_input_config() else {
-      continue;
-    };
-    match dev.build_input_stream(&cfg.clone().into(), |_data: &[f32], _| {}, |_err| {}, None) {
-      Ok(stream) => {
-        log_picked("input", &dev);
-        return Ok((dev, stream));
+  let attempt_dev = |dev: cpal::Device,
+                     tried: &mut Vec<String>|
+   -> Option<(cpal::Device, cpal::Stream)> {
+    let cfg = match dev.default_input_config() {
+      Ok(c) => c,
+      Err(e) => {
+        tried.push(attempt(&dev, &e.to_string()));
+        return None;
       }
-      Err(e) => log_rejected("input", &dev, &e.to_string()),
+    };
+    match probe_input(&dev, &cfg) {
+      Ok(stream) => {
+        log_picked("input", &dev, &cfg);
+        Some((dev, stream))
+      }
+      Err(e) => {
+        tried.push(attempt(&dev, &e.to_string()));
+        None
+      }
+    }
+  };
+  let mut tried: Vec<String> = Vec::new();
+  let mut default_name = None;
+  if let Some(dev) = host.default_input_device() {
+    default_name = dev.name().ok();
+    if let Some(found) = attempt_dev(dev, &mut tried) {
+      return Ok(found);
     }
   }
-  Err(err())
+  crate::log::log(
+    "debug",
+    "the default microphone is unusable, looking for another device",
+  );
+  for dev in candidate_devices(
+    host.input_devices().ok().map(|d| d.collect()),
+    Direction::Input,
+    default_name,
+  ) {
+    if let Some(found) = attempt_dev(dev, &mut tried) {
+      return Ok(found);
+    }
+  }
+  Err(err() + &tried_report(&tried))
 }
 
 pub fn pick_output_stream(host: &cpal::Host) -> Result<(cpal::Device, cpal::Stream), String> {
@@ -138,39 +164,137 @@ pub fn pick_output_stream(host: &cpal::Host) -> Result<(cpal::Device, cpal::Stre
       + "   • On MacOS: System Settings → Sound → Output (select a device)"
       + "   • On Linux: no ALSA device accepted a playback stream (see the log for what was tried)"
   };
-  let candidates = candidate_devices(
-    host.default_output_device(),
-    host.output_devices().ok().map(|d| d.collect()),
-  );
-  for dev in candidates {
-    let Ok(cfg) = dev.default_output_config() else {
-      continue;
-    };
-    match dev.build_output_stream(
-      &cfg.clone().into(),
-      |data: &mut [f32], _| data.fill(0.0),
-      |_err| {},
-      None,
-    ) {
-      Ok(stream) => {
-        log_picked("output", &dev);
-        return Ok((dev, stream));
+  let attempt_dev = |dev: cpal::Device,
+                     tried: &mut Vec<String>|
+   -> Option<(cpal::Device, cpal::Stream)> {
+    let cfg = match dev.default_output_config() {
+      Ok(c) => c,
+      Err(e) => {
+        tried.push(attempt(&dev, &e.to_string()));
+        return None;
       }
-      Err(e) => log_rejected("output", &dev, &e.to_string()),
+    };
+    match probe_output(&dev, &cfg) {
+      Ok(stream) => {
+        log_picked("output", &dev, &cfg);
+        Some((dev, stream))
+      }
+      Err(e) => {
+        tried.push(attempt(&dev, &e.to_string()));
+        None
+      }
+    }
+  };
+  let mut tried: Vec<String> = Vec::new();
+  let mut default_name = None;
+  if let Some(dev) = host.default_output_device() {
+    default_name = dev.name().ok();
+    if let Some(found) = attempt_dev(dev, &mut tried) {
+      return Ok(found);
     }
   }
-  Err(err())
+  crate::log::log(
+    "debug",
+    "the default output device is unusable, looking for another device",
+  );
+  for dev in candidate_devices(
+    host.output_devices().ok().map(|d| d.collect()),
+    Direction::Output,
+    default_name,
+  ) {
+    if let Some(found) = attempt_dev(dev, &mut tried) {
+      return Ok(found);
+    }
+  }
+  Err(err() + &tried_report(&tried))
 }
 
-/// Devices to try, best first. The host default comes first, but it is not
-/// always usable: when no sound-server ALSA config is installed, `default`
-/// resolves to the raw card through dmix and fails with "device busy" while
-/// PulseAudio or PipeWire holds it, even though their own PCM works. So every
-/// other device follows, sound servers before hardware, and `null` (which
-/// would silently swallow audio) is never picked on its own.
+#[derive(Clone, Copy, PartialEq)]
+enum Direction {
+  Input,
+  Output,
+}
+
+fn unsupported(format: cpal::SampleFormat) -> cpal::BuildStreamError {
+  cpal::BuildStreamError::BackendSpecific {
+    err: cpal::BackendSpecificError {
+      description: format!("sample format {:?} is not supported by vtmate", format),
+    },
+  }
+}
+
+/// Open a silent stream in the format the device actually reports. Probing
+/// with a fixed format would reject perfectly usable devices: plain ALSA
+/// (dmix and most hardware) reports 16-bit, while sound servers report float,
+/// and playback/recording handle F32, I16 and U16 alike.
+fn probe_output(
+  dev: &cpal::Device,
+  supported: &cpal::SupportedStreamConfig,
+) -> Result<cpal::Stream, cpal::BuildStreamError> {
+  let cfg: cpal::StreamConfig = supported.clone().into();
+  let quiet = |_e: cpal::StreamError| {};
+  match supported.sample_format() {
+    cpal::SampleFormat::F32 => {
+      dev.build_output_stream(&cfg, |d: &mut [f32], _| d.fill(0.0), quiet, None)
+    }
+    cpal::SampleFormat::I16 => {
+      dev.build_output_stream(&cfg, |d: &mut [i16], _| d.fill(0), quiet, None)
+    }
+    cpal::SampleFormat::U16 => {
+      dev.build_output_stream(&cfg, |d: &mut [u16], _| d.fill(u16::MAX / 2), quiet, None)
+    }
+    other => Err(unsupported(other)),
+  }
+}
+
+fn probe_input(
+  dev: &cpal::Device,
+  supported: &cpal::SupportedStreamConfig,
+) -> Result<cpal::Stream, cpal::BuildStreamError> {
+  let cfg: cpal::StreamConfig = supported.clone().into();
+  let quiet = |_e: cpal::StreamError| {};
+  match supported.sample_format() {
+    cpal::SampleFormat::F32 => dev.build_input_stream(&cfg, |_d: &[f32], _| {}, quiet, None),
+    cpal::SampleFormat::I16 => dev.build_input_stream(&cfg, |_d: &[i16], _| {}, quiet, None),
+    cpal::SampleFormat::U16 => dev.build_input_stream(&cfg, |_d: &[u16], _| {}, quiet, None),
+    other => Err(unsupported(other)),
+  }
+}
+
+fn attempt(dev: &cpal::Device, why: &str) -> String {
+  format!(
+    "{}: {}",
+    dev.name().unwrap_or_else(|_| "<unnamed>".into()),
+    why
+  )
+}
+
+fn tried_report(tried: &[String]) -> String {
+  if tried.is_empty() {
+    return "   • no audio device was offered by the system".to_string();
+  }
+  let mut out = String::from("   • devices tried:");
+  for t in tried {
+    out.push_str("\n     - ");
+    out.push_str(t);
+  }
+  out
+}
+
+/// Fallback devices, best first, used only once the host default has failed:
+/// when no sound-server ALSA config is installed, `default` resolves to the
+/// raw card through dmix and fails with "device busy" while PulseAudio or
+/// PipeWire holds it, even though their own PCM works. Sound servers come
+/// before hardware, and `null` (which would silently swallow audio) is never
+/// picked.
+///
+/// Enumerating is itself expensive and noisy (ALSA opens every PCM it knows
+/// and logs a warning for each one that cannot serve this direction), which
+/// is why the caller only gets here when the default device did not work.
 fn candidate_devices(
-  default: Option<cpal::Device>,
   all: Option<Vec<cpal::Device>>,
+  dir: Direction,
+  already_tried: Option<String>,
 ) -> Vec<cpal::Device> {
   fn rank(name: &str) -> u8 {
     let n = name.to_ascii_lowercase();
@@ -178,52 +302,48 @@ fn candidate_devices(
       0
     } else if n.starts_with("default") || n.starts_with("sysdefault") {
       1
-    } else if n.starts_with("null") {
-      3
     } else {
       2
     }
   }
+  // ALSA lists plugins that only work one way round, and asking them for the
+  // other direction just prints a confusing error (dmix is playback only,
+  // dsnoop capture only). `null` would swallow audio silently, and the OSS
+  // bridge needs /dev/dsp, which modern kernels do not provide.
+  let skip = |name: &str| {
+    let n = name.to_ascii_lowercase();
+    n.starts_with("null")
+      || n.starts_with("oss")
+      || match dir {
+        Direction::Input => n.starts_with("dmix"),
+        Direction::Output => n.starts_with("dsnoop"),
+      }
+  };
   let mut out: Vec<cpal::Device> = Vec::new();
-  let mut seen: Vec<String> = Vec::new();
-  let push = |dev: cpal::Device, out: &mut Vec<cpal::Device>, seen: &mut Vec<String>| {
+  let mut seen: Vec<String> = already_tried.into_iter().collect();
+  let mut rest = all.unwrap_or_default();
+  rest.sort_by_key(|d| rank(&d.name().unwrap_or_default()));
+  for dev in rest {
     let name = dev.name().unwrap_or_default();
-    if name.starts_with("null") || seen.contains(&name) {
-      return;
+    if skip(&name) || seen.contains(&name) {
+      continue;
     }
     seen.push(name);
     out.push(dev);
-  };
-  if let Some(d) = default {
-    push(d, &mut out, &mut seen);
-  }
-  let mut rest = all.unwrap_or_default();
-  rest.sort_by_key(|d| rank(&d.name().unwrap_or_default()));
-  for d in rest {
-    push(d, &mut out, &mut seen);
   }
   out
 }
 
-fn log_picked(kind: &str, dev: &cpal::Device) {
+fn log_picked(kind: &str, dev: &cpal::Device, cfg: &cpal::SupportedStreamConfig) {
   crate::log::log(
     "info",
     &format!(
-      "{} device: {}",
-      kind,
-      dev.name().unwrap_or_else(|_| "<unnamed>".into())
-    ),
-  );
-}
-
-fn log_rejected(kind: &str, dev: &cpal::Device, why: &str) {
-  crate::log::log(
-    "debug",
-    &format!(
-      "{} device '{}' unusable ({}), trying the next one",
+      "{} device: {} ({} ch @ {} Hz, {:?})",
       kind,
       dev.name().unwrap_or_else(|_| "<unnamed>".into()),
-      why
+      cfg.channels(),
+      cfg.sample_rate().0,
+      cfg.sample_format()
     ),
   );
 }
