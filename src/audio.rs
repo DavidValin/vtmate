@@ -103,19 +103,84 @@ pub extern "C" fn vtmate_alsa_log(msg: *const std::ffi::c_char) {
     return;
   }
   let line = unsafe { std::ffi::CStr::from_ptr(msg) }.to_string_lossy();
+  // While looking for a device, ALSA complains about every plugin it cannot
+  // use (a missing card, dmix asked to capture, the OSS bridge...). None of
+  // it is actionable: what matters is the device finally chosen, or the
+  // report of everything tried when none works.
+  if PROBING.load(std::sync::atomic::Ordering::Relaxed) {
+    crate::log::log("debug", &line);
+    return;
+  }
   crate::log::log("warning", &line);
 }
 
-pub fn pick_input_stream(host: &cpal::Host) -> Result<(cpal::Device, cpal::Stream), String> {
+static PROBING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Keeps device probing quiet: ALSA messages are demoted to debug, and the
+/// process's stderr is sent to the void, because some backends (JACK above
+/// all) write straight to it and would scribble over the terminal UI.
+struct QuietProbe {
+  #[cfg(unix)]
+  saved_stderr: Option<i32>,
+}
+
+impl QuietProbe {
+  fn new() -> Self {
+    PROBING.store(true, std::sync::atomic::Ordering::Relaxed);
+    #[cfg(unix)]
+    {
+      let saved_stderr = unsafe {
+        let saved = libc::dup(libc::STDERR_FILENO);
+        if saved < 0 {
+          None
+        } else {
+          let devnull = libc::open(b"/dev/null\0".as_ptr() as *const libc::c_char, libc::O_WRONLY);
+          if devnull < 0 {
+            libc::close(saved);
+            None
+          } else {
+            libc::dup2(devnull, libc::STDERR_FILENO);
+            libc::close(devnull);
+            Some(saved)
+          }
+        }
+      };
+      Self { saved_stderr }
+    }
+    #[cfg(not(unix))]
+    {
+      Self {}
+    }
+  }
+}
+
+impl Drop for QuietProbe {
+  fn drop(&mut self) {
+    #[cfg(unix)]
+    if let Some(saved) = self.saved_stderr.take() {
+      unsafe {
+        libc::dup2(saved, libc::STDERR_FILENO);
+        libc::close(saved);
+      }
+    }
+    PROBING.store(false, std::sync::atomic::Ordering::Relaxed);
+  }
+}
+
+/// A microphone that can actually be opened. The stream used to test it is
+/// closed before returning: the device must not be held while the models
+/// load, recording opens it on demand.
+pub fn pick_input_stream(host: &cpal::Host) -> Result<cpal::Device, String> {
   let err = || {
     "No usable microphone stream could be opened.\n".to_string()
       + "    • On MacOS: System Settings → Privacy & Security → Microphone → allow your app/Terminal\n"
       + "    • Also check System Settings → Sound → Input\n"
       + "    • On Linux: no ALSA device accepted a capture stream (see the log for what was tried)\n"
   };
+  let _quiet = QuietProbe::new();
   let attempt_dev = |dev: cpal::Device,
                      tried: &mut Vec<String>|
-   -> Option<(cpal::Device, cpal::Stream)> {
+   -> Option<cpal::Device> {
     let cfg = match dev.default_input_config() {
       Ok(c) => c,
       Err(e) => {
@@ -126,7 +191,8 @@ pub fn pick_input_stream(host: &cpal::Host) -> Result<(cpal::Device, cpal::Strea
     match probe_input(&dev, &cfg) {
       Ok(stream) => {
         log_picked("input", &dev, &cfg);
-        Some((dev, stream))
+        drop(stream);
+        Some(dev)
       }
       Err(e) => {
         tried.push(attempt(&dev, &e.to_string()));
@@ -158,15 +224,18 @@ pub fn pick_input_stream(host: &cpal::Host) -> Result<(cpal::Device, cpal::Strea
   Err(err() + &tried_report(&tried))
 }
 
-pub fn pick_output_stream(host: &cpal::Host) -> Result<(cpal::Device, cpal::Stream), String> {
+/// A speaker that can actually be opened. As with the microphone, the test
+/// stream is closed before returning; playback opens its own.
+pub fn pick_output_stream(host: &cpal::Host) -> Result<cpal::Device, String> {
   let err = || {
     "No usable output stream could be opened.".to_string()
       + "   • On MacOS: System Settings → Sound → Output (select a device)"
       + "   • On Linux: no ALSA device accepted a playback stream (see the log for what was tried)"
   };
+  let _quiet = QuietProbe::new();
   let attempt_dev = |dev: cpal::Device,
                      tried: &mut Vec<String>|
-   -> Option<(cpal::Device, cpal::Stream)> {
+   -> Option<cpal::Device> {
     let cfg = match dev.default_output_config() {
       Ok(c) => c,
       Err(e) => {
@@ -177,7 +246,8 @@ pub fn pick_output_stream(host: &cpal::Host) -> Result<(cpal::Device, cpal::Stre
     match probe_output(&dev, &cfg) {
       Ok(stream) => {
         log_picked("output", &dev, &cfg);
-        Some((dev, stream))
+        drop(stream);
+        Some(dev)
       }
       Err(e) => {
         tried.push(attempt(&dev, &e.to_string()));

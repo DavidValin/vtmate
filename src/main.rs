@@ -193,7 +193,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // Setup audio output for TTS
     let host = cpal::default_host();
-    let (out_dev, _out_stream) = audio::pick_output_stream(&host).unwrap_or_else(|msg| {
+    let out_dev = audio::pick_output_stream(&host).unwrap_or_else(|msg| {
       crate::log::log("error", &format!("{}", msg));
       util::terminate(1)
     });

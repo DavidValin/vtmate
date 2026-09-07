@@ -112,11 +112,11 @@ pub fn start(
   log::log("info", &format!("Whisper model path: {}", whisper_path));
 
   let host = cpal::default_host();
-  let (in_dev, _in_stream) = audio::pick_input_stream(&host).unwrap_or_else(|msg| {
+  let in_dev = audio::pick_input_stream(&host).unwrap_or_else(|msg| {
     log::log("error", &format!("{}", msg));
     util::terminate(1)
   });
-  let (out_dev, _out_stream) = audio::pick_output_stream(&host).unwrap_or_else(|msg| {
+  let out_dev = audio::pick_output_stream(&host).unwrap_or_else(|msg| {
     log::log("error", &format!("{}", msg));
     util::terminate(1)
   });

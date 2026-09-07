@@ -161,6 +161,18 @@ pub fn record_thread(
   const MIC_RELEASE_AFTER: std::time::Duration = std::time::Duration::from_millis(400);
   const OPEN_RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(2);
 
+  // cpal keeps an open ALSA handle inside the `Device` from the moment its
+  // configuration is queried, so the microphone would show as in use before
+  // any recording. Building a stream takes that handle over and dropping it
+  // closes the device, leaving it free until recording really starts.
+  match build_stream() {
+    Ok(s) => drop(s),
+    Err(e) => crate::log::log(
+      "debug",
+      &format!("could not release the idle microphone handle: {}", e),
+    ),
+  }
+
   let mut stream: Option<cpal::Stream> = None;
   let mut paused_at: Option<Instant> = None;
   let mut failed_at: Option<Instant> = None;
