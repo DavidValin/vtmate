@@ -111,31 +111,121 @@ pub fn pick_input_stream(host: &cpal::Host) -> Result<(cpal::Device, cpal::Strea
     "No usable microphone stream could be opened.\n".to_string()
       + "    • On MacOS: System Settings → Privacy & Security → Microphone → allow your app/Terminal\n"
       + "    • Also check System Settings → Sound → Input\n"
+      + "    • On Linux: no ALSA device accepted a capture stream (see the log for what was tried)\n"
   };
-  let dev = host.default_input_device().ok_or_else(err)?;
-  let cfg = dev.default_input_config().map_err(|_| err())?;
-  let stream = dev
-    .build_input_stream(&cfg.clone().into(), |_data: &[f32], _| {}, |_err| {}, None)
-    .map_err(|_| err())?;
-  Ok((dev, stream))
+  let candidates = candidate_devices(
+    host.default_input_device(),
+    host.input_devices().ok().map(|d| d.collect()),
+  );
+  for dev in candidates {
+    let Ok(cfg) = dev.default_input_config() else {
+      continue;
+    };
+    match dev.build_input_stream(&cfg.clone().into(), |_data: &[f32], _| {}, |_err| {}, None) {
+      Ok(stream) => {
+        log_picked("input", &dev);
+        return Ok((dev, stream));
+      }
+      Err(e) => log_rejected("input", &dev, &e.to_string()),
+    }
+  }
+  Err(err())
 }
 
 pub fn pick_output_stream(host: &cpal::Host) -> Result<(cpal::Device, cpal::Stream), String> {
   let err = || {
     "No usable output stream could be opened.".to_string()
       + "   • On MacOS: System Settings → Sound → Output (select a device)"
+      + "   • On Linux: no ALSA device accepted a playback stream (see the log for what was tried)"
   };
-  let dev = host.default_output_device().ok_or_else(err)?;
-  let cfg = dev.default_output_config().map_err(|_| err())?;
-  let stream = dev
-    .build_output_stream(
+  let candidates = candidate_devices(
+    host.default_output_device(),
+    host.output_devices().ok().map(|d| d.collect()),
+  );
+  for dev in candidates {
+    let Ok(cfg) = dev.default_output_config() else {
+      continue;
+    };
+    match dev.build_output_stream(
       &cfg.clone().into(),
       |data: &mut [f32], _| data.fill(0.0),
       |_err| {},
       None,
-    )
-    .map_err(|_| err())?;
-  Ok((dev, stream))
+    ) {
+      Ok(stream) => {
+        log_picked("output", &dev);
+        return Ok((dev, stream));
+      }
+      Err(e) => log_rejected("output", &dev, &e.to_string()),
+    }
+  }
+  Err(err())
+}
+
+/// Devices to try, best first. The host default comes first, but it is not
+/// always usable: when no sound-server ALSA config is installed, `default`
+/// resolves to the raw card through dmix and fails with "device busy" while
+/// PulseAudio or PipeWire holds it, even though their own PCM works. So every
+/// other device follows, sound servers before hardware, and `null` (which
+/// would silently swallow audio) is never picked on its own.
+fn candidate_devices(
+  default: Option<cpal::Device>,
+  all: Option<Vec<cpal::Device>>,
+) -> Vec<cpal::Device> {
+  fn rank(name: &str) -> u8 {
+    let n = name.to_ascii_lowercase();
+    if n.starts_with("pipewire") || n.starts_with("pulse") {
+      0
+    } else if n.starts_with("default") || n.starts_with("sysdefault") {
+      1
+    } else if n.starts_with("null") {
+      3
+    } else {
+      2
+    }
+  }
+  let mut out: Vec<cpal::Device> = Vec::new();
+  let mut seen: Vec<String> = Vec::new();
+  let push = |dev: cpal::Device, out: &mut Vec<cpal::Device>, seen: &mut Vec<String>| {
+    let name = dev.name().unwrap_or_default();
+    if name.starts_with("null") || seen.contains(&name) {
+      return;
+    }
+    seen.push(name);
+    out.push(dev);
+  };
+  if let Some(d) = default {
+    push(d, &mut out, &mut seen);
+  }
+  let mut rest = all.unwrap_or_default();
+  rest.sort_by_key(|d| rank(&d.name().unwrap_or_default()));
+  for d in rest {
+    push(d, &mut out, &mut seen);
+  }
+  out
+}
+
+fn log_picked(kind: &str, dev: &cpal::Device) {
+  crate::log::log(
+    "info",
+    &format!(
+      "{} device: {}",
+      kind,
+      dev.name().unwrap_or_else(|_| "<unnamed>".into())
+    ),
+  );
+}
+
+fn log_rejected(kind: &str, dev: &cpal::Device, why: &str) {
+  crate::log::log(
+    "debug",
+    &format!(
+      "{} device '{}' unusable ({}), trying the next one",
+      kind,
+      dev.name().unwrap_or_else(|_| "<unnamed>".into()),
+      why
+    ),
+  );
 }
 
 /// Linear interpolation resample of interleaved audio.

@@ -54,7 +54,11 @@ pub fn record_thread(
 
   let err_fn = |e| crate::log::log("error", &format!("input stream error: {}", e));
 
-  let stream = match sample_format {
+  // the builder closure owns its copies; the supervisor loop keeps its own
+  let paused_flag = recording_paused.clone();
+  let peak_meter = peak.clone();
+  let build_stream = move || -> Result<cpal::Stream, cpal::BuildStreamError> {
+    match sample_format {
     SampleFormat::F32 => build_input_f32(
       start_instant,
       &device,
@@ -74,13 +78,13 @@ pub fn record_thread(
       last_voice_ms.clone(),
       stop_sent.clone(),
       peak.clone(),
-      ui,
+      ui.clone(),
       volume.clone(),
       recording_paused.clone(),
       utterance_meta.clone(),
       tx_ui.clone(),
       err_fn,
-    )?,
+    ),
 
     SampleFormat::I16 => build_input_i16(
       start_instant,
@@ -101,13 +105,13 @@ pub fn record_thread(
       last_voice_ms.clone(),
       stop_sent.clone(),
       peak.clone(),
-      ui,
+      ui.clone(),
       volume.clone(),
       recording_paused.clone(),
       utterance_meta.clone(),
       tx_ui.clone(),
       err_fn,
-    )?,
+    ),
 
     SampleFormat::U16 => build_input_u16(
       start_instant,
@@ -128,22 +132,73 @@ pub fn record_thread(
       last_voice_ms.clone(),
       stop_sent.clone(),
       peak.clone(),
-      ui,
+      ui.clone(),
       volume.clone(),
       recording_paused.clone(),
       utterance_meta.clone(),
       tx_ui.clone(),
       err_fn,
-    )?,
+    ),
 
-    other => return Err(format!("unsupported input format: {other:?}").into()),
+      other => panic!("unsupported input format: {other:?}"),
+    }
   };
 
-  stream.play()?;
+  match sample_format {
+    SampleFormat::F32 | SampleFormat::I16 | SampleFormat::U16 => {}
+    other => return Err(format!("unsupported input format: {other:?}").into()),
+  }
 
-  // Keep the stream alive until the program exits
+  // The microphone is only open while recording: the device is opened when
+  // recording starts and closed shortly after it stops, so vtmate does not
+  // show up as using the microphone (nor keep it from other applications)
+  // while it sits idle waiting for a shortcut.
+  //
+  // Closing is delayed by `MIC_RELEASE_AFTER`: the callback flushes the
+  // captured utterance on its first run after `recording_paused` goes up, so
+  // the device has to outlive the pause by a few callbacks. Back-to-back
+  // recordings within that window reuse the open device.
+  const MIC_RELEASE_AFTER: std::time::Duration = std::time::Duration::from_millis(400);
+  const OPEN_RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(2);
+
+  let mut stream: Option<cpal::Stream> = None;
+  let mut paused_at: Option<Instant> = None;
+  let mut failed_at: Option<Instant> = None;
   loop {
-    std::thread::sleep(std::time::Duration::from_millis(10));
+    let paused = paused_flag.load(Ordering::Relaxed);
+    if !paused {
+      paused_at = None;
+      if stream.is_none() && failed_at.is_none_or(|t| t.elapsed() >= OPEN_RETRY_AFTER) {
+        let opened = build_stream()
+          .map_err(|e| e.to_string())
+          .and_then(|s| s.play().map(|_| s).map_err(|e| e.to_string()));
+        match opened {
+          Ok(s) => {
+            stream = Some(s);
+            failed_at = None;
+            crate::log::log("debug", "microphone opened");
+          }
+          Err(e) => {
+            failed_at = Some(Instant::now());
+            crate::log::log("error", &format!("cannot open the microphone: {}", e));
+          }
+        }
+      }
+    } else if stream.is_some() {
+      match paused_at {
+        None => paused_at = Some(Instant::now()),
+        Some(t) if t.elapsed() >= MIC_RELEASE_AFTER => {
+          stream = None; // closing the stream releases the device
+          paused_at = None;
+          if let Ok(mut p) = peak_meter.lock() {
+            *p = 0.0;
+          }
+          crate::log::log("debug", "microphone released");
+        }
+        Some(_) => {}
+      }
+    }
+    std::thread::sleep(std::time::Duration::from_millis(5));
   }
 }
 
