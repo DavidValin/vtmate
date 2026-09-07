@@ -103,22 +103,17 @@ pub extern "C" fn vtmate_alsa_log(msg: *const std::ffi::c_char) {
     return;
   }
   let line = unsafe { std::ffi::CStr::from_ptr(msg) }.to_string_lossy();
-  // While looking for a device, ALSA complains about every plugin it cannot
-  // use (a missing card, dmix asked to capture, the OSS bridge...). None of
-  // it is actionable: what matters is the device finally chosen, or the
-  // report of everything tried when none works.
-  if PROBING.load(std::sync::atomic::Ordering::Relaxed) {
-    crate::log::log("debug", &line);
-    return;
-  }
-  crate::log::log("warning", &line);
+  // ALSA talks a lot and none of it is actionable for the user: every plugin
+  // it cannot use while looking for a device (a missing card, dmix asked to
+  // capture, the OSS bridge), and buffer underruns it recovers from by
+  // itself. What matters is reported by vtmate: the device finally chosen,
+  // or everything tried when none works. Keep the rest for `--verbose`.
+  crate::log::log("debug", &line);
 }
 
-static PROBING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// Keeps device probing quiet: ALSA messages are demoted to debug, and the
-/// process's stderr is sent to the void, because some backends (JACK above
-/// all) write straight to it and would scribble over the terminal UI.
+/// Keeps device probing quiet: the process's stderr is sent to the void,
+/// because some backends (JACK above all) write straight to it and would
+/// scribble over the terminal UI.
 struct QuietProbe {
   #[cfg(unix)]
   saved_stderr: Option<i32>,
@@ -126,7 +121,6 @@ struct QuietProbe {
 
 impl QuietProbe {
   fn new() -> Self {
-    PROBING.store(true, std::sync::atomic::Ordering::Relaxed);
     #[cfg(unix)]
     {
       let saved_stderr = unsafe {
@@ -163,7 +157,6 @@ impl Drop for QuietProbe {
         libc::close(saved);
       }
     }
-    PROBING.store(false, std::sync::atomic::Ordering::Relaxed);
   }
 }
 
