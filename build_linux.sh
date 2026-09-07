@@ -1464,8 +1464,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Still CUDA 12: same driver floor, same _cuda12 cuDNN archive, same
 # libcudart.so.12 the installer looks for. Its nvcc accepts noble's GCC 13 as
 # host compiler, so ORT's .cu files and everything else share one compiler.
-# Only the pieces that get linked (nvcc, cudart, cuBLAS, cuFFT, cuRAND, the
-# CCCL headers, the libcuda stub), not the multi-GB cuda-toolkit meta package.
+# Only the pieces ORT and ggml compile or link against (nvcc, cudart, cuBLAS,
+# cuFFT, cuRAND, cuSPARSE - header only, via ORT's cuda_pch.h - the CCCL
+# headers, the libcuda stub), not the multi-GB cuda-toolkit meta package.
 ARG CUDA_VERSION=12.8
 RUN if [ "$VARIANT" = "cuda" ]; then \
       set -eux; \
@@ -1476,7 +1477,7 @@ RUN if [ "$VARIANT" = "cuda" ]; then \
       dpkg -i /tmp/cuda-keyring.deb; rm -f /tmp/cuda-keyring.deb; \
       apt-get update && apt-get install -y --no-install-recommends \
         cuda-nvcc-$v cuda-cudart-dev-$v cuda-driver-dev-$v cuda-cccl-$v \
-        libcublas-dev-$v libcufft-dev-$v libcurand-dev-$v; \
+        libcublas-dev-$v libcufft-dev-$v libcurand-dev-$v libcusparse-dev-$v; \
       rm -rf /var/lib/apt/lists/*; \
       ln -sfn /usr/local/cuda-$CUDA_VERSION /usr/local/cuda; \
       /usr/local/cuda/bin/nvcc --version; \
