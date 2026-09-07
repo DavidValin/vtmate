@@ -1056,8 +1056,7 @@ fn validate_language(language: &str, tts: &str) -> Result<(), std::io::Error> {
 fn validate_voice(voice: &str, language: &str, tts: &str) -> Result<(), std::io::Error> {
   // Validate voice format, supports mix of two voices
   let lang_clean = language.trim_matches('"');
-  let voices_raw = tts::get_voices_for(tts, lang_clean);
-  let voices: Vec<String> = voices_raw.iter().map(|s| s.to_string()).collect();
+  let voices = tts::get_voices_for(tts, lang_clean);
   if voices.is_empty() {
     return Err(std::io::Error::new(
       std::io::ErrorKind::Other,
@@ -1070,7 +1069,16 @@ fn validate_voice(voice: &str, language: &str, tts: &str) -> Result<(), std::io:
 
   let voice_clean = voice.trim_matches('"');
   // Call helper for validation
-  validate_voice_value(voice_clean, &voices, language)
+  validate_voice_value(voice_clean, &voices, language).map_err(|e| {
+    let mut msg = format!("{}. Available: {}", e, voices.join(", "));
+    if let Some(dir) = tts::voice_styles_dir_for(tts) {
+      msg.push_str(&format!(
+        ". Add your own as <name>.json in {}",
+        dir.display()
+      ));
+    }
+    std::io::Error::new(std::io::ErrorKind::Other, msg)
+  })
 }
 
 fn validate_tts(tts: &str) -> Result<(), std::io::Error> {

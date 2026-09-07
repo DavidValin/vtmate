@@ -200,12 +200,13 @@ pub fn get_all_available_languages() -> Vec<&'static str> {
   langs
 }
 
-pub fn get_voices_for(tts: &str, language: &str) -> Vec<&'static str> {
+pub fn get_voices_for(tts: &str, language: &str) -> Vec<String> {
+  let owned = |v: &[&str]| -> Vec<String> { v.iter().map(|s| s.to_string()).collect() };
   match tts {
     "kokoro" => {
       for (lang, voices) in KOKORO_VOICES_PER_LANGUAGE.iter() {
         if *lang == language {
-          return voices.to_vec();
+          return owned(voices);
         }
       }
       Vec::new()
@@ -213,31 +214,82 @@ pub fn get_voices_for(tts: &str, language: &str) -> Vec<&'static str> {
     "opentts" => {
       for (lang, voice) in crate::tts::opentts_tts::DEFAULT_OPENTTS_VOICES_PER_LANGUAGE.iter() {
         if *lang == language {
-          return vec![*voice];
+          return vec![voice.to_string()];
         }
       }
       Vec::new()
     }
     "supersonic2" => {
       // Supersonic2 voices are supported only for specific languages
-      let supersonic_voices = crate::tts::supersonic2_tts::SUPERSONIC2_VOICE_STYLES;
       if SUPSONIC_LANGS.contains(&language) {
-        supersonic_voices.to_vec()
+        voice_styles_in(
+          crate::tts::supersonic2_tts::voice_styles_dir(),
+          &crate::tts::supersonic2_tts::SUPERSONIC2_VOICE_STYLES,
+        )
       } else {
         Vec::new()
       }
     }
     "supertonic" => {
       // Supertonic voices are supported for all its languages
-      let supertonic_voices = crate::tts::supertonic_tts::SUPERTONIC_VOICE_STYLES;
       if SUPERTONIC_LANGS.contains(&language) {
-        supertonic_voices.to_vec()
+        voice_styles_in(
+          crate::tts::supertonic_tts::voice_styles_dir(),
+          &crate::tts::supertonic_tts::SUPERTONIC_VOICE_STYLES,
+        )
       } else {
         Vec::new()
       }
     }
     _ => Vec::new(),
   }
+}
+
+/// Where an engine keeps its voice files, for engines that have one file per
+/// voice on disk. `None` for engines whose voices are fixed (kokoro, opentts).
+pub fn voice_styles_dir_for(tts: &str) -> Option<std::path::PathBuf> {
+  match tts {
+    "supertonic" => Some(crate::tts::supertonic_tts::voice_styles_dir()),
+    "supersonic2" => Some(crate::tts::supersonic2_tts::voice_styles_dir()),
+    _ => None,
+  }
+}
+
+/// The voices an engine offers, read from its `voice_styles` directory: one
+/// `<voice>.json` per voice, so dropping a file in there adds a voice and
+/// `--list-voices`, the settings validator and playback all see it.
+///
+/// `builtin` is used when the directory cannot be read yet (models not
+/// unpacked, custom install), so the shipped voices are always offered.
+pub fn voice_styles_in(dir: std::path::PathBuf, builtin: &[&str]) -> Vec<String> {
+  let mut names: Vec<String> = Vec::new();
+  if let Ok(entries) = std::fs::read_dir(&dir) {
+    for entry in entries.flatten() {
+      let path = entry.path();
+      // `.json`, any case: Windows and macOS filesystems are case-insensitive
+      let is_json = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("json"));
+      if !is_json || !path.is_file() {
+        continue;
+      }
+      let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
+        continue; // non-UTF-8 file name
+      };
+      // hidden files, and the "._name" companions macOS writes on some volumes
+      if name.is_empty() || name.starts_with('.') {
+        continue;
+      }
+      names.push(name.to_string());
+    }
+  }
+  if names.is_empty() {
+    return builtin.iter().map(|s| s.to_string()).collect();
+  }
+  names.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()).then(a.cmp(b)));
+  names.dedup();
+  names
 }
 
 pub fn print_voices() {
@@ -260,6 +312,7 @@ pub fn print_voices() {
       "supertonic", lang, flag, voices_str
     );
   }
+  print_voice_styles_hint("supertonic");
   println!();
   println!(
     "supersonic2 🏆 High Quality Voices\n======================================================\n{:<8}\t{:<12}\t{:<2}\t{}",
@@ -278,6 +331,7 @@ pub fn print_voices() {
       "supersonic2", lang, flag, voices_str
     );
   }
+  print_voice_styles_hint("supersonic2");
   println!();
   println!(
     "Standard Quality Voices\n======================================================\n{:<8}\t{:<12}\t{:<2}\t{}",
@@ -316,6 +370,18 @@ pub fn print_voices() {
     println!(
       "{:<8}\t{:<12}\t{:<2}\t{}",
       "opentts", lang, flag, voices_str
+    );
+  }
+}
+
+/// Tell the user where an engine reads its voices from, so custom ones can be
+/// added by dropping a file next to the shipped ones.
+fn print_voice_styles_hint(tts: &str) {
+  if let Some(dir) = voice_styles_dir_for(tts) {
+    println!(
+      "add your own {} voices as <name>.json in {}",
+      tts,
+      dir.display()
     );
   }
 }

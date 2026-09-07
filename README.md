@@ -400,6 +400,21 @@ And then load each as you need:
 vtmate -c philosophers.txt --debate "Aristoteles" "Ptahhotep" "how to achieve harmony?"
 ```
 
+###  Custom voices
+
+`supertonic` and `supersonic2` read their voices from one JSON file per voice:
+
+```
+~/.vtmate/tts/supertonic-model/voice_styles/M1.json
+~/.vtmate/tts/supersonic2-model/voice_styles/F3.json
+```
+
+(on Windows `%USERPROFILE%\.vtmate\...`, on macOS `~/.vtmate/...` as well)
+
+Drop a new `<name>.json` in that directory and the voice becomes available under that name: `vtmate --list-voices` shows it, `voice = <name>` in an agent passes validation, and the agent speaks with it. Remove the file and it is gone again. `--list-voices` prints the exact directory for each engine.
+
+The other engines (`kokoro`, `opentts`) have fixed voice lists.
+
 ###  Model files
 
 vtmate self contains (no need for manual installation) espeak-ng-data, the whisper tiny & small models, kokoro model and voices, supersonic2 model and voices and supertonic (Supertonic 3) model and voices which will be autoextracted from the binary when running vtmate if they are not found in next locations:

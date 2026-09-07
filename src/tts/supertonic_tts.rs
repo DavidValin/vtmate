@@ -118,12 +118,17 @@ pub fn speak_via_supertonic(
 // ------------------------------------------------------------------
 
 /// Root of the extracted model: <root>/onnx/*.onnx and <root>/voice_styles/*.json
-fn model_root() -> PathBuf {
+pub fn model_root() -> PathBuf {
   if let Some(dir) = std::env::var_os("SUPERTONIC_DATA_DIRECTORY") {
     return PathBuf::from(dir);
   }
   let home = crate::util::get_user_home_path().expect("Could not determine home directory");
   home.join(".vtmate").join("tts").join("supertonic-model")
+}
+
+/// Directory holding one `<voice>.json` per voice.
+pub fn voice_styles_dir() -> PathBuf {
+  model_root().join("voice_styles")
 }
 
 static RUNTIME: OnceLock<Runtime> = OnceLock::new();

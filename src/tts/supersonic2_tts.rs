@@ -22,6 +22,20 @@ use supersonic2_tts_crate::{Device, TtsEngine, gpu_support_compiled};
 pub const SUPERSONIC2_VOICE_STYLES: [&str; 10] =
   ["M1", "M2", "M3", "M4", "M5", "F1", "F2", "F3", "F4", "F5"];
 
+/// Root of the extracted model: <root>/onnx/*.onnx and <root>/voice_styles/*.json
+pub fn model_root() -> std::path::PathBuf {
+  if let Some(dir) = std::env::var_os("SUPERSONIC2_DATA_DIRECTORY") {
+    return std::path::PathBuf::from(dir);
+  }
+  let home = crate::util::get_user_home_path().expect("Could not determine home directory");
+  home.join(".vtmate").join("tts").join("supersonic2-model")
+}
+
+/// Directory holding one `<voice>.json` per voice.
+pub fn voice_styles_dir() -> std::path::PathBuf {
+  model_root().join("voice_styles")
+}
+
 pub struct StreamingTts {
   engine: Arc<Mutex<TtsEngine>>,
   pub is_speaking: Arc<AtomicBool>,
@@ -44,9 +58,8 @@ fn load_engine() -> Result<TtsEngine, Box<dyn std::error::Error + Send + Sync>> 
   let rt = tokio::runtime::Builder::new_current_thread()
     .enable_all()
     .build()?;
-  let home = crate::util::get_user_home_path().expect("Could not determine home directory");
-  let onnx = home.join(".vtmate/tts/supersonic2-model/onnx");
-  let base = home.join(".vtmate/tts/supersonic2-model");
+  let base = model_root();
+  let onnx = base.join("onnx");
 
   if gpu_support_compiled() {
     match rt.block_on(TtsEngine::new_with_device(
