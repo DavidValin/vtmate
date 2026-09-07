@@ -134,7 +134,23 @@ api_key = sk-ant-...
 
 ## Configure agents
 
-The first time you run vtmate it will create a configuration file if it doesn't exist in `~/.vtmate/settings` with 2 agents. You can define as many agents as you want.
+The first time you run vtmate it will create a configuration file if it doesn't exist in `~/.vtmate/settings` with a `[general]` section, a `[daemon]` section and several `[agent]` sections. You can define as many agents as you want.
+
+The file starts like this:
+
+```
+[general]
+selected_agent = main agent
+
+[daemon]
+llm_background_ptt_combo = ctrl+alt+a
+tts_background_combo = ctrl+alt+r
+stt_and_paste_background_ptt_combo = ctrl+alt+s
+llm_background_reset = ctrl+escape
+```
+
+* `selected_agent` is the agent vtmate starts with. It is updated automatically every time you switch agents with `ARROW_LEFT` / `ARROW_RIGHT` (in the terminal or while attached to the daemon), so the next start picks the same agent. `-a <agent>` overrides it for one run without changing the file; a debate picks its agents per turn and never changes it either.
+* The `[daemon]` keys are the global shortcuts of the [daemon mode](#daemon-mode-global-shortcuts).
 
 Example of agent definition:
 
@@ -188,6 +204,9 @@ All cli options:
   -r <file.txt>                         read a file with voice, phrase by phrase (no llm involved)
   -r -                                  read text from STDIN with voice, phrase by phrase (no llm involved). Use - for STDIN (runs in quiet mode)
   -c <settings_file>                    use a specific settings file
+  --daemon                              start vtmate in the background, driven by global shortcuts (see daemon mode)
+  --daemon-stop                         stop the background daemon
+  --daemon-status                       show whether the daemon is running and its shortcuts
   --list-voices                         list all voices for all languages and tts systems
   --ptt <true/false>                    override for this session the ptt setting for all agents independently of its settings
   --verbose                             run the program in verbose mode
@@ -296,6 +315,48 @@ Get a single response and save it as audio file and text file
 ```
 echo "Can you find any suspicious processes in the next list? If so, why?\n\n $(ps aux | head -20)" | vtmate -q -i - -s
 ```
+
+### Daemon mode (global shortcuts)
+
+vtmate can run in the background with no terminal, driven by global shortcuts from any application: select some text in your browser or editor, hold a shortcut, talk, release it. Replies are spoken only.
+
+There are 4 features you can use in daemon mode:
+
+* Talk with an agent via voice (and reset the conversation context)
+* Ask a question to an agent regarding the selected text and get a voice response
+* Read a selected text using voice
+* Transform a voice recording into text and paste it as text
+
+Here is how to use it:
+
+```
+vtmate --daemon          # start it (models load once, then it waits for shortcuts)
+vtmate                   # attach: the normal terminal view of the daemon conversation
+vtmate --daemon-status   # is it running? which shortcuts?
+vtmate --daemon-stop     # stop it
+```
+
+Shortcuts (change them in the `[daemon]` section of `~/.vtmate/settings`):
+
+| setting | default | what it does |
+|---|---|---|
+| `llm_background_ptt_combo` | `ctrl+alt+a` | hold to talk. On release your speech is transcribed and, if some text is selected anywhere on the desktop, the selection is appended after the speech (speech first, blank line, selection). The whole thing is sent to the agent as one message and the reply is spoken. Pressing it while a reply is playing interrupts the reply. |
+| `tts_background_combo` | `ctrl+alt+r` | read the selected text aloud (no LLM). Press again while it is speaking to stop. |
+| `stt_and_paste_background_ptt_combo` | `ctrl+alt+s` | hold to talk. On release your speech is transcribed and pasted at the cursor of the application you are in (through the clipboard, whose previous text is put back afterwards). No LLM, nothing spoken. |
+| `llm_background_reset` | `ctrl+escape` | reset the conversation (stops speech, clears the history), like `ESCAPE` twice in the terminal. |
+
+Shortcuts are written as modifiers joined by `+`: `ctrl`, `alt` (or `option`), `shift`, `cmd` (or `super`), `cmdorctrl`, plus a key: letters, digits, `f1`..`f12`, `escape`, `space`, `tab`, arrows... e.g. `ctrl+alt+a`, `shift+f5`, `cmd+alt+r`.
+
+* When starting, the daemon grabs all four shortcuts. If any is already taken by another application (some desktops bind `ctrl+escape`, for example) the daemon does not start and `vtmate --daemon` lists the taken shortcuts so you can change them.
+* The agent that replies is the daemon's selected agent: run `vtmate` to attach, press `ARROW_LEFT` / `ARROW_RIGHT` to switch (this is remembered in `selected_agent`), then `Ctrl+C` to detach. Attached you get the full terminal view: the live transcript, the status bar and the usual keys (`SPACE` push-to-talk, `ESCAPE`, `u`, arrows, `Ctrl+D`). `Ctrl+C` only detaches; the daemon keeps running until `vtmate --daemon-stop`.
+* Only one daemon runs at a time. Its files live in `~/.vtmate`: `daemon.pid`, `daemon.sock` (Linux/macOS) and `daemon.log` (diagnostics only, never the conversation).
+* The daemon always works in push-to-talk mode: the microphone is only open while a shortcut is held.
+
+Platform notes:
+
+* Linux: X11 only (Wayland has no global shortcuts nor a readable selection; under Wayland run vtmate in an X11 session). The selection is the primary selection (whatever is highlighted), no `Ctrl+C` needed.
+* Windows / macOS: the selection is read by simulating `Ctrl+C` / `Cmd+C` and the clipboard is restored afterwards (text only). On macOS the vtmate binary needs the Accessibility permission (System Settings → Privacy & Security → Accessibility) to simulate keys. On Windows, `ctrl+alt` is the same as `AltGr` on some keyboard layouts and `ctrl+escape` opens the Start menu: rebind those if the daemon reports them as taken.
+* `vtmate --daemon` detaches from the terminal. To start it at login use your session autostart, a systemd user unit, a launchd agent or the Task Scheduler running `vtmate --daemon`.
 
 ###  Read mode (file to speech)
 

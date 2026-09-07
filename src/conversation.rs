@@ -6,6 +6,7 @@ use crate::START_INSTANT;
 use crate::playback::set_wav_tx;
 use crate::state::AppState;
 use crate::state::GLOBAL_STATE;
+use crate::state::UtteranceKind;
 use crate::util::terminate;
 use chrono::Local;
 use crossbeam_channel::{Receiver, Sender, select};
@@ -23,7 +24,7 @@ use uuid::Uuid;
 // API
 // ------------------------------------------------------------------
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ChatMessage {
   pub role: String,
   pub content: String,
@@ -37,8 +38,15 @@ pub enum Command {
   Undo,
 }
 
+/// Work the conversation thread hands back to the daemon controller.
+#[derive(Debug)]
+pub enum DaemonAction {
+  /// Paste this transcript at the cursor of the focused application.
+  Paste(String),
+}
+
 pub fn conversation_thread(
-  rx_utt: Receiver<crate::audio::AudioChunk>,
+  rx_utt: Receiver<crate::audio::Utterance>,
   interrupt_counter: Arc<AtomicU64>,
   model_path: String,
   settings: crate::config::AgentSettings,
@@ -52,8 +60,12 @@ pub fn conversation_thread(
   init_prompt: Option<String>,
   quiet: bool,
   save: bool,
+  tx_action: Option<Sender<DaemonAction>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let whisper = crate::stt::init(&model_path)?;
+  if let Some(state) = GLOBAL_STATE.get() {
+    state.stt_ready.store(true, Ordering::SeqCst);
+  }
 
   // WAV writer thread: activated when -s option is used
   // WAV writer will be started lazily when the first save path is created.
@@ -240,15 +252,23 @@ pub fn conversation_thread(
                 let _ = apply_agent_settings(state, next_agent);
               }
 
-              let _pcm_f32: Vec<f32> = utt.data.clone();
-              let mono_f32 = crate::audio::convert_to_mono(&utt);
-
-              let user_text = whisper.transcribe(
-                &mono_f32,
-                utt.sample_rate,
-                &state.language.lock().unwrap(),
-              )?;
+              if utt.kind == UtteranceKind::Discard {
+                state.processing_response.store(false, Ordering::Relaxed);
+                continue;
+              }
+              let user_text = match &utt.text {
+                Some(t) => t.clone(),
+                None => transcribe_utterance(whisper, &utt.audio, &state.language.lock().unwrap())?,
+              };
               let user_text = user_text.trim().to_string();
+              if utt.kind == UtteranceKind::Paste {
+                state.processing_response.store(false, Ordering::Relaxed);
+                if let (false, Some(tx)) = (user_text.is_empty(), &tx_action) {
+                  let _ = tx.send(DaemonAction::Paste(user_text));
+                }
+                continue;
+              }
+              let user_text = compose_user_text(user_text, utt.attachment.as_deref());
 
               if !user_text.is_empty() {
                 // Clear STOP_STREAM flag to ensure user text displays fully
@@ -397,27 +417,50 @@ pub fn conversation_thread(
         //   user audio input handler
         //  –––––––––––––––––––––––––––––––––––––
         let Ok(utt) = msg else { break };
+        if utt.kind == UtteranceKind::Discard {
+          crate::log::log("debug", "Utterance discarded (reset)");
+          continue;
+        }
         if let Some(ref wav_tx) = wav_tx_opt {
-          wav_tx.send(utt.clone()).unwrap_or(());
+          wav_tx.send(utt.audio.clone()).unwrap_or(());
         }
 
         let state = GLOBAL_STATE.get().expect("AppState not initialized");
         state.conversation_paused.store(false, Ordering::Relaxed);
         // start rendering for this turn (agent response to user query)
         state.processing_response.store(true, Ordering::Relaxed);
-        let pcm_f32: Vec<f32> = utt.data.clone();
-        let mono_f32 = crate::audio::convert_to_mono(&utt);
 
-        crate::log::log("debug", &format!("Received audio chunk of len {}", utt.data.len()));
-        crate::log::log("debug", &format!("Received mono f32 pcm len {}", pcm_f32.len()));
+        crate::log::log("debug", &format!("Received audio chunk of len {}", utt.audio.data.len()));
         crate::log::log("debug", "Transcribing utterance...");
-        let state = GLOBAL_STATE.get().expect("AppState not initialized");
-        let user_text = whisper.transcribe(&mono_f32, utt.sample_rate, &state.language.lock().unwrap())?;
-        crate::log::log("info", &format!("Transcribed: '{}'", user_text));
-        let system_prompt = {
-          let state = GLOBAL_STATE.get().expect("AppState not initialized");
-          state.system_prompt.lock().unwrap().clone()
+        let user_text = match &utt.text {
+          Some(t) => t.clone(),
+          None => transcribe_utterance(whisper, &utt.audio, &state.language.lock().unwrap())?,
         };
+        crate::log::log("info", &format!("Transcribed: '{}'", user_text));
+        let user_text = user_text.trim().to_string();
+
+        // Daemon dictation: the transcript goes to the clipboard/paste, not to the LLM.
+        if utt.kind == UtteranceKind::Paste {
+          state.processing_response.store(false, Ordering::Relaxed);
+          if user_text.is_empty() {
+            crate::log::log("debug", "Transcription returned empty string; nothing to paste");
+          } else if let Some(tx) = &tx_action {
+            let _ = tx.send(DaemonAction::Paste(user_text));
+          }
+          continue;
+        }
+
+        let speech_end_ms = crate::util::SPEECH_END_AT.load(std::sync::atomic::Ordering::SeqCst);
+        let mut first_phrase_logged = false;
+        if user_text.is_empty() {
+          crate::log::log("debug", "Transcription returned empty string");
+          state.processing_response.store(false, Ordering::Relaxed);
+          continue;
+        }
+        // Daemon LLM turn with selected text: speech first, then the selection.
+        let user_text = compose_user_text(user_text, utt.attachment.as_deref());
+
+        let system_prompt = state.system_prompt.lock().unwrap().clone();
         let hist = conversation_history.lock().unwrap();
         let mut messages = Vec::new();
         messages.push(ChatMessage{role:"system".to_string(), content:system_prompt.replace("\\n", "\n"), agent_name:None});
@@ -428,14 +471,6 @@ pub fn conversation_thread(
         // Release the conversation history lock before re-acquiring it to push the user message
         std::mem::drop(hist);
         messages.push(ChatMessage{role:"user".to_string(), content:user_text.clone(), agent_name:None});
-
-        let user_text = user_text.trim().to_string();
-        let speech_end_ms = crate::util::SPEECH_END_AT.load(std::sync::atomic::Ordering::SeqCst);
-        let mut first_phrase_logged = false;
-        if user_text.is_empty() {
-          crate::log::log("debug", "Transcription returned empty string");
-          continue;
-        }
 
         let my_interrupt = interrupt_counter.load(Ordering::SeqCst);
         if handle_interruption(&interrupt_counter, my_interrupt) {
@@ -524,15 +559,17 @@ pub fn conversation_thread(
             }
           }
 
+          // Update conversation history with this piece (same as handle_reply does).
+          // History first, then the UI: an attaching daemon client snapshots the
+          // history and must not see a piece twice.
+          push_or_update_last_assistant(&conv_hist_for_closure, piece, &assistant_name_for_closure);
+
           // send raw piece immediately
           let mut ui_piece = piece.to_string();
           if ui_piece.ends_with('.') || ui_piece.ends_with('!') || ui_piece.ends_with('?') {
             ui_piece.push(' ');
           }
           let _ = tx_ui_cloned_for_closure.send(format!("stream|{}", ui_piece));
-
-          // Update conversation history with this piece (same as handle_reply does)
-          push_or_update_last_assistant(&conv_hist_for_closure, piece, &assistant_name_for_closure);
         };
 
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
@@ -564,6 +601,11 @@ pub fn conversation_thread(
         // ignore join result to prevent panic on llm error
         let _join_result = handle.join();
         ui_thinking_cloned_for_closure.store(false, Ordering::Relaxed);
+        // Nothing was produced (request failed / interrupted before the first
+        // token): no audio will ever clear the flag, so clear it here.
+        if reply_accum.lock().map(|a| a.trim().is_empty()).unwrap_or(true) {
+          state.processing_response.store(false, Ordering::Relaxed);
+        }
         // Prepare clones for post-closure use
         let speaker_arc_for_after = speaker_arc.clone();
         let reply_accum_for_after = reply_accum.clone();
@@ -997,7 +1039,25 @@ fn push_user_message(history: &ConversationHistory, text: &str) {
   });
 }
 
-fn wait_for_playback(
+/// Run whisper on one captured utterance.
+fn transcribe_utterance(
+  whisper: &crate::stt::Whisper,
+  audio: &crate::audio::AudioChunk,
+  language: &str,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+  let mono_f32 = crate::audio::convert_to_mono(audio);
+  whisper.transcribe(&mono_f32, audio.sample_rate, language)
+}
+
+/// Speech first, then a blank line, then the selected text (if any).
+fn compose_user_text(transcript: String, attachment: Option<&str>) -> String {
+  match attachment.map(str::trim) {
+    Some(a) if !a.is_empty() => format!("{}\n\n{}", transcript, a),
+    _ => transcript,
+  }
+}
+
+pub fn wait_for_playback(
   state: &crate::state::AppState,
   interrupt_counter: &Arc<AtomicU64>,
   my_interrupt: u64,

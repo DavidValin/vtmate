@@ -159,7 +159,7 @@ pub fn spawn_ui_thread(
             redraw_buffer(&mut out, &buffer);
             let (_cols, term_height) = terminal::size().unwrap_or((80, 24));
             bottom_bar =
-              render_bottom_bar(&mut out, &ui_state, &spinner, &status_line, term_height - 1);
+              render_bottom_bar(&mut out, &ui_state, &spinner, &status_line, term_height.saturating_sub(1));
           }
 
           "modal_update" => {
@@ -177,7 +177,7 @@ pub fn spawn_ui_thread(
             // Render bottom bar
             let (_cols, term_height) = terminal::size().unwrap_or((80, 24));
             bottom_bar =
-              render_bottom_bar(&mut out, &ui_state, &spinner, &status_line, term_height - 1);
+              render_bottom_bar(&mut out, &ui_state, &spinner, &status_line, term_height.saturating_sub(1));
             out.flush().unwrap();
 
             // Re-send history lines
@@ -235,7 +235,7 @@ pub fn spawn_ui_thread(
       let (_cols, term_height) = terminal::size().unwrap_or((80, 24));
       if !skip_next_bottom_bar {
         bottom_bar =
-          render_bottom_bar(&mut out, &ui_state, &spinner, &status_line, term_height - 1);
+          render_bottom_bar(&mut out, &ui_state, &spinner, &status_line, term_height.saturating_sub(1));
       } else {
         skip_next_bottom_bar = false;
       }
@@ -293,7 +293,7 @@ fn handle_line_message<W: Write>(
       )
       .unwrap();
 
-      *bottom_bar = render_bottom_bar(out, ui_state, spinner, status_line, term_height - 1);
+      *bottom_bar = render_bottom_bar(out, ui_state, spinner, status_line, term_height.saturating_sub(1));
     } else {
       buffer.last_mut().unwrap().push(ch);
 
@@ -335,7 +335,7 @@ fn handle_line_message<W: Write>(
 
   // Redraw bottom bar
   let (_cols, term_height) = terminal::size().unwrap_or((80, 24));
-  *bottom_bar = render_bottom_bar(out, ui_state, spinner, status_line, term_height - 1);
+  *bottom_bar = render_bottom_bar(out, ui_state, spinner, status_line, term_height.saturating_sub(1));
 }
 
 fn handle_stream_message<W: Write>(
@@ -394,7 +394,7 @@ fn stream_chunk<W: Write>(
       )
       .unwrap();
 
-      *bottom_bar = render_bottom_bar(out, ui_state, spinner, status_line, term_height - 1);
+      *bottom_bar = render_bottom_bar(out, ui_state, spinner, status_line, term_height.saturating_sub(1));
     } else {
       buffer.last_mut().unwrap().push(ch);
 

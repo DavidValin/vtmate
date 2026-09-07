@@ -3,19 +3,22 @@ use clap::Parser;
 use cpal::traits::DeviceTrait;
 use crossbeam_channel::{bounded, unbounded};
 use crossterm::terminal::{self};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use ctrlc;
 use std::io::IsTerminal;
 use std::sync::{Arc, OnceLock, atomic::Ordering};
-use std::thread::{self, Builder as ThreadBuilder};
+use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
 mod assets;
+mod attach;
 mod audio;
 mod config;
 mod conversation;
+mod daemon;
+mod engine;
 mod keyboard;
 mod llm;
 mod log;
@@ -54,6 +57,31 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   })
   .expect("Error setting Ctrl-C handler");
 
+  // ---------------------------------------------------
+  // daemon mode: control commands, the daemon itself, auto-attach
+  // ---------------------------------------------------
+  if args.daemon_status {
+    daemon::print_status();
+  }
+  if args.daemon_stop {
+    daemon::stop_running();
+  }
+  if args.daemon {
+    daemon::spawn_detached(&args);
+  }
+  if args.daemon_foreground {
+    daemon::run_foreground(&args);
+  }
+  let bare_conversation_mode = args.read_file.is_none()
+    && args.prompt.is_none()
+    && args.prompt_file.is_none()
+    && !args.quiet
+    && args.debate.is_none()
+    && !args.list_voices;
+  if bare_conversation_mode && daemon::ipc::probe(Duration::from_millis(300)).is_some() {
+    attach::run(&args);
+  }
+
   // make sure piper phonemes are unpacked
   assets::ensure_piper_espeak_env();
   // make sure the user has the whisper + tts models unpacked
@@ -64,17 +92,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   // ---------------------------------------------------
   // setup thread communication channels
   // ---------------------------------------------------
-  // channel for utterance audio chunks
-  let (tx_utt, rx_utt) = bounded::<audio::AudioChunk>(1);
-  // channel for tts phrases
-  let (tx_tts, rx_tts) = unbounded::<(String, u64, String)>();
-  let (tts_done_tx, tts_done_rx) = crossbeam_channel::bounded(0);
-
-  // channel for playback audio chunks
-  let (tx_play, rx_play) = bounded::<audio::AudioChunk>(1);
-  // channel for ui messages
-  let (tx_ui, rx_ui) = bounded::<String>(1);
-  log::set_tx_ui_sender(tx_ui.clone());
+  let channels = engine::Channels::new();
+  log::set_tx_ui_sender(channels.tx_ui.clone());
 
   if !util::terminal_supported() {
     log::log(
@@ -113,22 +132,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // Load settings first to get agent configuration
     let _ = config::ensure_settings_file();
-    let settings_path = if let Some(ref cfg) = args.config {
-      // Resolve potential ~ path
-      let mut path = PathBuf::from(cfg.as_str());
-      if path.starts_with("~") {
-        if let Some(home) = get_user_home_path() {
-          let rel = path.strip_prefix("~").unwrap_or(&path);
-          path = home.join(rel.to_str().unwrap_or(""));
-        }
-      }
-      path
-    } else {
-      get_user_home_path()
-        .ok_or("Unable to determine home directory")?
-        .join(".vtmate")
-        .join("settings")
-    };
+    let settings_path = config::resolve_settings_path(&args)?;
 
     let agents = match config::load_settings(&settings_path, &args) {
       Ok(v) => v,
@@ -138,29 +142,13 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       }
     };
 
-    // Select agent: use --a if specified, otherwise pick first
-    let settings = match &args.agent {
-      Some(agent_name) => match agents.iter().find(|a| a.name == *agent_name).cloned() {
-        Some(a) => a,
-        None => {
-          crate::log::log(
-            "error",
-            &format!(
-              "Agent '{}' not found. Available agents: {}",
-              agent_name,
-              agents
-                .iter()
-                .map(|a| a.name.as_str())
-                .collect::<Vec<&str>>()
-                .join(", ")
-            ),
-          );
-          util::terminate(1);
-        }
-      },
-      None => {
-        // Pick the first agent if none specified
-        agents.first().unwrap().clone()
+    // Select agent: -a, else [general] selected_agent, else the first one
+    let general = config::load_general_settings(&settings_path).unwrap_or_default();
+    let settings = match config::select_agent(&agents, args.agent.as_deref(), &general) {
+      Ok(a) => a,
+      Err(e) => {
+        crate::log::log("error", &e);
+        util::terminate(1);
       }
     };
 
@@ -182,6 +170,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       settings.clone(),
       agents.clone(),
       args.quiet,
+      settings_path.clone(),
     ));
     state::GLOBAL_STATE.set(app_state.clone()).unwrap();
 
@@ -279,54 +268,12 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       }
     });
 
-    // Split content into phrases (by newlines or periods)
-    let phrases: Vec<String> = {
-      let mut phrases = Vec::new();
-      let mut current = String::new();
-      for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-          if !current.is_empty() {
-            phrases.push(current.trim().to_string());
-            current.clear();
-          }
-          continue;
-        }
-        // Split line on periods to handle sentence ends
-        let mut parts = trimmed.split('.');
-        // Handle first part
-        let first = parts.next().unwrap();
-        if !current.is_empty() {
-          current.push(' ');
-        }
-        current.push_str(first);
-        // Any subsequent parts mean we hit a period
-        for part in parts {
-          // End current phrase at period
-          phrases.push(current.trim().to_string());
-          current.clear();
-          // Start new phrase with remaining part
-          if !part.is_empty() {
-            current.push_str(part);
-          }
-        }
-      }
-      if !current.is_empty() {
-        phrases.push(current.trim().to_string());
-      }
-      phrases
-    };
-
-    // What TTS gets for each phrase: fenced ``` source code is displayed but
+    // Split content into phrases (by newlines or periods). What TTS gets for
+    // each phrase has fenced ``` source code removed: it is displayed but
     // never spoken. Computed up front, in order, so the fence state survives
     // the user jumping between phrases.
-    let tts_texts: Vec<String> = {
-      let mut in_code = false;
-      phrases
-        .iter()
-        .map(|p| crate::util::tts_text(p, &mut in_code))
-        .collect()
-    };
+    let (phrases, tts_texts): (Vec<String>, Vec<String>) =
+      util::split_text_for_tts(&content).into_iter().unzip();
 
     println!("📖 Reading {} phrases from '{}'", phrases.len(), filename);
 
@@ -559,22 +506,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   // ---------------------------------------------------
   // force creation of default config file if unexisting
   let _ = config::ensure_settings_file();
-  let settings_path = if let Some(ref cfg) = args.config {
-    // Resolve potential ~ path
-    let mut path = PathBuf::from(cfg.as_str());
-    if path.starts_with("~") {
-      if let Some(home) = get_user_home_path() {
-        let rel = path.strip_prefix("~").unwrap_or(&path);
-        path = home.join(rel.to_str().unwrap_or(""));
-      }
-    }
-    path
-  } else {
-    get_user_home_path()
-      .ok_or("Unable to determine home directory")?
-      .join(".vtmate")
-      .join("settings")
-  };
+  let settings_path = config::resolve_settings_path(&args)?;
 
   // load and file settings, merge cli args and validate
   let agents = match config::load_settings(&settings_path, &args) {
@@ -585,26 +517,14 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       util::terminate(1);
     }
   };
-  let settings = match &args.agent {
-    Some(agent_name) => match agents.iter().find(|a| a.name == *agent_name).cloned() {
-      Some(a) => a,
-      None => {
-        print!(
-          "❌ Agent '{}' not found. Available agents: {}",
-          agent_name,
-          agents
-            .iter()
-            .map(|a| a.name.as_str())
-            .collect::<Vec<&str>>()
-            .join(", ")
-        );
-        thread::sleep(Duration::from_millis(300));
-        util::terminate(1);
-      }
-    },
-    None => {
-      // Pick the first agent if none specified
-      agents.first().unwrap().clone()
+  // Select agent: -a, else [general] selected_agent, else the first one
+  let general = config::load_general_settings(&settings_path).unwrap_or_default();
+  let settings = match config::select_agent(&agents, args.agent.as_deref(), &general) {
+    Ok(a) => a,
+    Err(e) => {
+      print!("❌ {}", e);
+      thread::sleep(Duration::from_millis(300));
+      util::terminate(1);
     }
   };
 
@@ -613,6 +533,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     settings.clone(),
     agents.clone(),
     args.quiet,
+    settings_path.clone(),
   ));
 
   state::GLOBAL_STATE.set(state.clone()).unwrap();
@@ -628,98 +549,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let ui_handle = ui::spawn_ui_thread(
     ui.clone(),
     status_line.clone(),
-    rx_ui,
+    channels.rx_ui.clone(),
     conversation_history.clone(),
-  );
-
-  // interrupt counter
-  let _interrupt_counter = state.interrupt_counter.clone();
-
-  // (Debate logic removed – will be placed after prompt handling)
-
-  // Clones for threads
-  let tx_ui_for_keyboard = tx_ui.clone();
-  let (stop_play_tx, stop_play_rx) = unbounded::<()>(); // stop playback signal
-  let (tx_cmd_conv, rx_cmd_conv) = unbounded::<Command>(); // command channel for undo
-
-  // Resolve Whisper model path and log it
-  let whisper_path = config::resolved_whisper_model_path(&settings.whisper_model_path);
-  crate::log::log("info", &format!("Whisper model path: {}", whisper_path));
-
-  let host = cpal::default_host();
-  let (in_dev, _in_stream) = audio::pick_input_stream(&host).unwrap_or_else(|msg| {
-    log::log("error", &format!("{}", msg));
-    util::terminate(1)
-  });
-  let (out_dev, _out_stream) = audio::pick_output_stream(&host).unwrap_or_else(|msg| {
-    log::log("error", &format!("{}", msg));
-    util::terminate(1)
-  });
-  log::log(
-    "info",
-    &format!(
-      "Input device:  {}",
-      in_dev.name().unwrap_or("<unknown>".into())
-    ),
-  );
-  log::log(
-    "info",
-    &format!(
-      "Output device: {}",
-      out_dev.name().unwrap_or("<unknown>".into())
-    ),
-  );
-
-  let out_cfg_supported = out_dev.default_output_config()?;
-  let out_cfg: cpal::StreamConfig = out_cfg_supported.clone().into();
-  let out_sample_rate = out_cfg.sample_rate.0;
-  let out_channels = out_cfg.channels;
-
-  let in_cfg_supported = config::pick_input_config(&in_dev, out_sample_rate)?;
-  let in_cfg: cpal::StreamConfig = in_cfg_supported.clone().into();
-
-  log::log(
-    "info",
-    &format!(
-      "Picked Input:  {} ch @ {} Hz ({:?})",
-      in_cfg.channels,
-      in_cfg.sample_rate.0,
-      in_cfg_supported.sample_format()
-    ),
-  );
-  log::log(
-    "info",
-    &format!(
-      "Picked Output: {} ch @ {} Hz ({:?})",
-      out_cfg.channels,
-      out_cfg.sample_rate.0,
-      out_cfg_supported.sample_format()
-    ),
-  );
-  log::log(
-    "info",
-    &format!("Playback stream SR (truth): {}", out_sample_rate),
-  );
-
-  log::log("info", &format!("Agent: {}", settings.name));
-  log::log("info", &format!("TTS: {}", settings.tts));
-  log::log("info", &format!("Language: {}", settings.language));
-  log::log("info", &format!("TTS voice: {}", settings.voice));
-  log::log("info", &format!("LLM provider: {}", settings.provider));
-
-  if settings.baseurl.trim().is_empty() {
-    log::log("info", "LLM base url: (provider default)");
-  } else {
-    log::log("info", &format!("LLM base url: {}", settings.baseurl));
-  }
-  log::log(
-    "info",
-    &format!(
-      "sound_threshold_peak={:.3}  end_silence_ms={}  hangover_ms={}",
-      settings.sound_threshold_peak,
-      settings.end_silence_ms,
-      config::HANGOVER_MS_DEFAULT
-    ),
   );
 
   // ---------------------------------------------------
@@ -737,163 +568,40 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     initial_prompt = Some(prompt_text);
   }
 
-  let recording_paused = state.recording_paused.clone();
-  let recording_paused_for_record = recording_paused.clone();
-  if state.ptt.load(Ordering::Relaxed) {
-    recording_paused.store(true, Ordering::Relaxed);
-  }
-  let interrupt_counter = state.interrupt_counter.clone();
-  let paused = state.playback.paused.clone();
-  let playback_active = state.playback.playback_active.clone();
-  let gate_until_ms = state.playback.gate_until_ms.clone();
-  let conversation_history = state.conversation_history.clone();
-  let volume = state.playback.volume.clone();
-  let volume_play = volume.clone();
-  let volume_rec = volume.clone();
-
   // ---------------------------------------------------
-  // Thread: TTS
+  // Threads: tts, playback, record, conversation
   // ---------------------------------------------------
-
-  let stop_play_tx_for_tts = stop_play_tx.clone();
-  let tts_handle = thread::spawn({
-    // voice_state not needed; voice passed per message
-    let out_sample_rate = out_sample_rate.clone();
-    let tx_play = tx_play.clone();
-    let interrupt_counter = interrupt_counter.clone();
-
-    move || {
-      tts::tts_thread(
-        out_sample_rate,
-        tx_play,
-        interrupt_counter,
-        rx_tts,
-        stop_play_tx_for_tts,
-        tts_done_tx,
-      )
-      .unwrap();
-    }
-  });
-
-  // ---------------------------------------------------
-  // Thread: Playback
-  // ---------------------------------------------------
-
-  let rx_play_for_playback = rx_play.clone();
-  let playback_active_for_play = playback_active.clone();
-  let gate_until_ms_for_play = gate_until_ms.clone();
-  let paused_for_play = paused.clone();
-  let ui_for_play = ui.clone();
-  let volume_play_for_play = volume_play.clone();
-  let play_handle = thread::spawn({
-    move || {
-      playback::playback_thread(
-        &START_INSTANT,
-        out_dev.clone(),
-        out_cfg_supported.clone(),
-        out_cfg.clone(),
-        rx_play_for_playback,
-        stop_play_rx,
-        playback_active_for_play.clone(),
-        gate_until_ms_for_play.clone(),
-        paused_for_play.clone(),
-        out_channels,
-        ui_for_play.clone(),
-        volume_play_for_play.clone(),
-      )
-    }
-  });
-
-  // ---------------------------------------------------
-  // Thread: record
-  // ---------------------------------------------------
-  let tx_utt_for_rec = tx_utt.clone();
-  let playback_active_for_rec = playback_active.clone();
-  let gate_until_ms_for_rec = gate_until_ms.clone();
-  let interrupt_counter_for_rec = interrupt_counter.clone();
-  let ui_peak_for_rec = ui.peak.clone();
-  let ui_for_rec = ui.clone();
-  let volume_rec_for_rec = volume_rec.clone();
-  let recording_paused_for_record_for_rec = recording_paused_for_record.clone();
-  let tx_ui_for_record = tx_ui.clone();
-  let rec_handle = if !args.quiet {
-    ThreadBuilder::new()
-      .name("record_thread".to_string())
-      .stack_size(4 * 1024 * 1024)
-      .spawn({
-        move || {
-          record::record_thread(
-            &START_INSTANT,
-            in_dev.clone(),
-            in_cfg_supported,
-            in_cfg,
-            tx_utt_for_rec.clone(),
-            tx_ui_for_record,
-            settings.sound_threshold_peak,
-            settings.end_silence_ms,
-            playback_active_for_rec.clone(),
-            gate_until_ms_for_rec.clone(),
-            interrupt_counter_for_rec.clone(),
-            ui_peak_for_rec.clone(),
-            ui_for_rec.clone(),
-            volume_rec_for_rec.clone(),
-            recording_paused_for_record_for_rec.clone(),
-          )
-        }
-      })?
-  } else {
-    // Dummy thread when quiet mode: do nothing
-    thread::spawn(|| Ok::<(), Box<dyn std::error::Error + Send + Sync>>(()))
-  };
-
-  // ---------------------------------------------------
-  // Thread: conversation
-  // ---------------------------------------------------
-  let rx_utt_for_conv = rx_utt.clone();
-  let interrupt_counter_for_conv = interrupt_counter.clone();
-  let whisper_path_for_conv = whisper_path.clone();
-  let settings_for_conv = settings.clone();
-  let ui_for_conv = ui.clone();
-  let conversation_history_for_conv = conversation_history.clone();
-  let tx_tts_for_conv = tx_tts.clone();
-  let tx_ui_for_conv = tx_ui.clone();
-  let tts_done_rx_for_conv = tts_done_rx.clone();
-
-  let init_prompt_for_conv = initial_prompt.clone();
-  let stop_play_tx_conv = stop_play_tx.clone();
-  let conv_handle = thread::spawn(move || {
-    conversation::conversation_thread(
-      rx_utt_for_conv,
-      interrupt_counter_for_conv.clone(),
-      whisper_path_for_conv.clone(),
-      settings_for_conv.clone(),
-      ui_for_conv.clone(),
-      conversation_history_for_conv.clone(),
-      tx_ui_for_conv.clone(),
-      tx_tts_for_conv.clone(),
-      tts_done_rx_for_conv.clone(),
-      stop_play_tx_conv,
-      rx_cmd_conv,
-      init_prompt_for_conv,
-      args.quiet,
-      args.save,
-    )
-  });
+  let engine = engine::start(
+    &state,
+    &settings,
+    channels,
+    engine::EngineOptions {
+      quiet: args.quiet,
+      save: args.save,
+      initial_prompt: initial_prompt.clone(),
+      tx_action: None,
+    },
+  )?;
 
   // ---------------------------------------------------
   // Thread: keyboard
   // ---------------------------------------------------
-  let recording_paused_for_key = recording_paused.clone();
-  let stop_play_tx_for_key = stop_play_tx.clone();
-  let key_handle = thread::spawn(move || {
-    keyboard::keyboard_thread(
-      tx_ui_for_keyboard.clone(),
-      recording_paused_for_key.clone(),
-      stop_play_tx_for_key.clone(),
-      interrupt_counter.clone(),
-      None, // No read-file mode
-      tx_cmd_conv,
-    );
+  let key_handle = thread::spawn({
+    let tx_ui = engine.tx_ui.clone();
+    let recording_paused = state.recording_paused.clone();
+    let stop_play_tx = engine.stop_play_tx.clone();
+    let interrupt_counter = engine.interrupt_counter.clone();
+    let tx_cmd_conv = engine.tx_cmd_conv.clone();
+    move || {
+      keyboard::keyboard_thread(
+        tx_ui,
+        recording_paused,
+        stop_play_tx,
+        interrupt_counter,
+        None, // No read-file mode
+        tx_cmd_conv,
+      );
+    }
   });
 
   // Enable debate mode if requested
@@ -946,14 +654,10 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let _ = key_handle.join();
 
   // Join threads after debate flags set
-  let _ = rec_handle.join().unwrap();
-  let _ = play_handle.join().unwrap();
-  let _ = conv_handle.join().unwrap();
-  let _ = ui_handle.join().unwrap();
-  let _ = tts_handle.join().unwrap();
-
-  drop(stop_play_tx);
-  // drop(tx_tts);
+  for h in engine.handles {
+    let _ = h.join();
+  }
+  let _ = ui_handle.join();
 
   Ok(())
 }

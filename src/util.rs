@@ -261,7 +261,68 @@ pub fn _strip_ansi(s: &str) -> String {
   result
 }
 
+/// Split free text into phrases the way read-file mode does: a blank line ends
+/// a phrase, and every '.' inside a line ends one too. Returns
+/// `(display_text, tts_text)` pairs; `tts_text` has fenced ``` code removed
+/// and special characters stripped (it can be empty for code-only phrases).
+pub fn split_text_for_tts(content: &str) -> Vec<(String, String)> {
+  let mut phrases: Vec<String> = Vec::new();
+  let mut current = String::new();
+  for line in content.lines() {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+      if !current.is_empty() {
+        phrases.push(current.trim().to_string());
+        current.clear();
+      }
+      continue;
+    }
+    // Split line on periods to handle sentence ends
+    let mut parts = trimmed.split('.');
+    let first = parts.next().unwrap_or("");
+    if !current.is_empty() {
+      current.push(' ');
+    }
+    current.push_str(first);
+    // Any subsequent parts mean we hit a period
+    for part in parts {
+      phrases.push(current.trim().to_string());
+      current.clear();
+      if !part.is_empty() {
+        current.push_str(part);
+      }
+    }
+  }
+  if !current.is_empty() {
+    phrases.push(current.trim().to_string());
+  }
+  // Fence state carries across phrases, in order.
+  let mut in_code = false;
+  phrases
+    .into_iter()
+    .map(|p| {
+      let tts = tts_text(&p, &mut in_code);
+      (p, tts)
+    })
+    .collect()
+}
+
+static EXIT_HOOK: OnceLock<Box<dyn Fn() + Send + Sync>> = OnceLock::new();
+
+/// Register a function that `terminate` runs before exiting (the daemon uses
+/// it to remove its pid and socket files). Only the first hook is kept.
+pub fn set_exit_hook(hook: Box<dyn Fn() + Send + Sync>) {
+  let _ = EXIT_HOOK.set(hook);
+}
+
+pub fn run_exit_hook() {
+  if let Some(hook) = EXIT_HOOK.get() {
+    hook();
+  }
+}
+
 pub fn terminate(code: i32) -> ! {
+  run_exit_hook();
    // Disable raw mode if enabled, to restore terminal state
    let _ = crossterm::terminal::disable_raw_mode();
   // show cursor and clear bottom line before exiting

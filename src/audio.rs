@@ -15,6 +15,20 @@ pub struct AudioChunk {
   pub sample_rate: u32,
 }
 
+/// One captured user utterance on its way to the conversation thread, together
+/// with what should happen to it. The record thread snapshots the meta at the
+/// moment it flushes the audio, so kind and attachment can never pair up with
+/// the wrong recording.
+#[derive(Clone, Debug)]
+pub struct Utterance {
+  pub audio: AudioChunk,
+  pub kind: crate::state::UtteranceKind,
+  /// Selected desktop text to append to the transcript (daemon LLM turns).
+  pub attachment: Option<String>,
+  /// Already-known text: skip transcription (daemon testing aid).
+  pub text: Option<String>,
+}
+
 /// Convert a slice of f32 samples to 16‑bit signed PCM.
 pub fn f32_to_i16(samples: &[f32]) -> Vec<i16> {
   samples

@@ -20,7 +20,7 @@ pub fn record_thread(
   device: cpal::Device,
   supported: cpal::SupportedStreamConfig,
   config: cpal::StreamConfig,
-  tx_utt: Sender<crate::audio::AudioChunk>, // utterance -> conversation
+  tx_utt: Sender<crate::audio::Utterance>, // utterance -> conversation
   tx_ui: Sender<String>,                    // UI channel for interrupt banner
   vad_thresh: f32,
   end_silence_ms: u64,
@@ -32,6 +32,7 @@ pub fn record_thread(
   ui: crate::state::UiState,
   volume: Arc<Mutex<f32>>,
   recording_paused: Arc<AtomicBool>,
+  utterance_meta: Arc<Mutex<crate::state::UtteranceMeta>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   use cpal::SampleFormat;
 
@@ -76,6 +77,7 @@ pub fn record_thread(
       ui,
       volume.clone(),
       recording_paused.clone(),
+      utterance_meta.clone(),
       tx_ui.clone(),
       err_fn,
     )?,
@@ -102,6 +104,7 @@ pub fn record_thread(
       ui,
       volume.clone(),
       recording_paused.clone(),
+      utterance_meta.clone(),
       tx_ui.clone(),
       err_fn,
     )?,
@@ -128,6 +131,7 @@ pub fn record_thread(
       ui,
       volume.clone(),
       recording_paused.clone(),
+      utterance_meta.clone(),
       tx_ui.clone(),
       err_fn,
     )?,
@@ -152,7 +156,7 @@ fn build_input_f32(
   config: &cpal::StreamConfig,
   channels: u16,
   sample_rate: u32,
-  tx_utt: Sender<crate::audio::AudioChunk>,
+  tx_utt: Sender<crate::audio::Utterance>,
   vad_thresh: f32,
   end_silence_ms: u64,
   min_utt_ms: u64,
@@ -168,6 +172,7 @@ fn build_input_f32(
   ui: crate::state::UiState,
   volume: Arc<Mutex<f32>>,
   recording_paused: Arc<AtomicBool>,
+  utterance_meta: Arc<Mutex<crate::state::UtteranceMeta>>,
   tx_ui: Sender<String>,
   mut err_fn: impl FnMut(cpal::StreamError) + Send + 'static,
 ) -> Result<cpal::Stream, cpal::BuildStreamError> {
@@ -191,10 +196,19 @@ fn build_input_f32(
               crate::util::now_ms(&START_INSTANT),
               std::sync::atomic::Ordering::SeqCst,
             );
-            let _ = tx_utt.send(crate::audio::AudioChunk {
-              data: audio,
-              channels,
-              sample_rate,
+            let meta = utterance_meta
+                .lock()
+                .map(|m| m.clone())
+                .unwrap_or_default();
+            let _ = tx_utt.send(crate::audio::Utterance {
+              audio: crate::audio::AudioChunk {
+                data: audio,
+                channels,
+                sample_rate,
+              },
+              kind: meta.kind,
+              attachment: meta.attachment,
+              text: None,
             });
           } else {
             crate::log::log(
@@ -281,10 +295,19 @@ fn build_input_f32(
                 std::sync::atomic::Ordering::SeqCst,
               );
               // commit utterance audio
-              let _ = tx_utt.send(crate::audio::AudioChunk {
-                data: audio,
-                channels,
-                sample_rate,
+              let meta = utterance_meta
+                  .lock()
+                  .map(|m| m.clone())
+                  .unwrap_or_default();
+              let _ = tx_utt.send(crate::audio::Utterance {
+                audio: crate::audio::AudioChunk {
+                  data: audio,
+                  channels,
+                  sample_rate,
+                },
+                kind: meta.kind,
+                attachment: meta.attachment,
+                text: None,
               });
             } else {
               crate::log::log(
@@ -314,7 +337,7 @@ fn build_input_i16(
   config: &cpal::StreamConfig,
   channels: u16,
   sample_rate: u32,
-  tx_utt: Sender<crate::audio::AudioChunk>,
+  tx_utt: Sender<crate::audio::Utterance>,
   vad_thresh: f32,
   end_silence_ms: u64,
   min_utt_ms: u64,
@@ -330,6 +353,7 @@ fn build_input_i16(
   ui: crate::state::UiState,
   volume: Arc<Mutex<f32>>,
   recording_paused: Arc<AtomicBool>,
+  utterance_meta: Arc<Mutex<crate::state::UtteranceMeta>>,
   tx_ui: Sender<String>,
   mut err_fn: impl FnMut(cpal::StreamError) + Send + 'static,
 ) -> Result<cpal::Stream, cpal::BuildStreamError> {
@@ -348,10 +372,19 @@ fn build_input_i16(
               crate::util::now_ms(&START_INSTANT),
               std::sync::atomic::Ordering::SeqCst,
             );
-            let _ = tx_utt.send(crate::audio::AudioChunk {
-              data: audio,
-              channels,
-              sample_rate,
+            let meta = utterance_meta
+                .lock()
+                .map(|m| m.clone())
+                .unwrap_or_default();
+            let _ = tx_utt.send(crate::audio::Utterance {
+              audio: crate::audio::AudioChunk {
+                data: audio,
+                channels,
+                sample_rate,
+              },
+              kind: meta.kind,
+              attachment: meta.attachment,
+              text: None,
             });
           } else {
             crate::log::log(
@@ -443,10 +476,19 @@ fn build_input_i16(
                 crate::util::now_ms(&START_INSTANT),
                 std::sync::atomic::Ordering::SeqCst,
               );
-              let _ = tx_utt.send(crate::audio::AudioChunk {
-                data: audio,
-                channels,
-                sample_rate,
+              let meta = utterance_meta
+                  .lock()
+                  .map(|m| m.clone())
+                  .unwrap_or_default();
+              let _ = tx_utt.send(crate::audio::Utterance {
+                audio: crate::audio::AudioChunk {
+                  data: audio,
+                  channels,
+                  sample_rate,
+                },
+                kind: meta.kind,
+                attachment: meta.attachment,
+                text: None,
               });
             } else {
               // FIX: match f32 behavior (warn + drop)
@@ -477,7 +519,7 @@ fn build_input_u16(
   config: &cpal::StreamConfig,
   channels: u16,
   sample_rate: u32,
-  tx_utt: Sender<crate::audio::AudioChunk>,
+  tx_utt: Sender<crate::audio::Utterance>,
   vad_thresh: f32,
   end_silence_ms: u64,
   min_utt_ms: u64,
@@ -493,6 +535,7 @@ fn build_input_u16(
   ui: crate::state::UiState,
   volume: Arc<Mutex<f32>>,
   recording_paused: Arc<AtomicBool>,
+  utterance_meta: Arc<Mutex<crate::state::UtteranceMeta>>,
   tx_ui: Sender<String>,
   mut err_fn: impl FnMut(cpal::StreamError) + Send + 'static,
 ) -> Result<cpal::Stream, cpal::BuildStreamError> {
@@ -522,10 +565,19 @@ fn build_input_u16(
               crate::util::now_ms(&START_INSTANT),
               std::sync::atomic::Ordering::SeqCst,
             );
-            let _ = tx_utt.send(crate::audio::AudioChunk {
-              data: audio,
-              channels,
-              sample_rate,
+            let meta = utterance_meta
+                .lock()
+                .map(|m| m.clone())
+                .unwrap_or_default();
+            let _ = tx_utt.send(crate::audio::Utterance {
+              audio: crate::audio::AudioChunk {
+                data: audio,
+                channels,
+                sample_rate,
+              },
+              kind: meta.kind,
+              attachment: meta.attachment,
+              text: None,
             });
           } else {
             crate::log::log(
@@ -609,10 +661,19 @@ fn build_input_u16(
                 crate::util::now_ms(&START_INSTANT),
                 std::sync::atomic::Ordering::SeqCst,
               );
-              let _ = tx_utt.send(crate::audio::AudioChunk {
-                data: audio,
-                channels,
-                sample_rate,
+              let meta = utterance_meta
+                  .lock()
+                  .map(|m| m.clone())
+                  .unwrap_or_default();
+              let _ = tx_utt.send(crate::audio::Utterance {
+                audio: crate::audio::AudioChunk {
+                  data: audio,
+                  channels,
+                  sample_rate,
+                },
+                kind: meta.kind,
+                attachment: meta.attachment,
+                text: None,
               });
             }
           }

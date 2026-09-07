@@ -23,6 +23,11 @@ Architecture:
     Record thread: records audio from the microphone and sends the audio chunks to TTS thread
     Conversation thread: handles a single conversation with an agent, orchestrating user input and agent responses
     Keyword thread: handles keyboard events from the user
+  Daemon mode (vtmate --daemon): the same engine threads without a terminal, plus
+    Controller thread: global shortcut state machine (push-to-talk, read selection aloud, paste dictation, reset)
+    IPC server thread: local socket; attached terminals get the UI stream and forward their keys
+    UI sink thread: drains the UI channel headless and fans it out to attached clients
+    Attached client (plain `vtmate` while a daemon runs): the normal UI thread fed by the socket
 
 Features:
 ---------------------------------------------------------------------------------------------------
@@ -36,6 +41,8 @@ Features:
   - 📌 Stop PlayBack: `press "&lt;ESCAPE&gt;" ONCE to stop the playback for the current response`
   - 📌 Interrupt: `press "&lt;ESCAPE&gt;" TWICE to interrupt the current response alltogether`
   - 📌 Voice speed change: `change the agent voice speed by pressing &lt;ARROW_UP&gt; / &lt;ARROW_DOWN&gt; (applicable to next response)`
+  - 📌 Daemon mode: `vtmate --daemon` runs in the background driven by global shortcuts (hold ctrl+alt+a to talk, selected text is appended; ctrl+alt+r reads the selection aloud; ctrl+alt+s dictates at the cursor; ctrl+escape resets); `vtmate` attaches to it, Ctrl+C detaches
+  - 📌 Persistent agent selection: `[general] selected_agent` in the settings file, updated on every agent switch
   - 📌 Voice read a txt file: `vtmate -r myfile.txt`
   - 📌 Voice read text from stdin phrase by phrase: `echo "Hello. How are you?" | vtmate -r -`
   - 📌 Save conversation as audio and text: `vtmate -s`

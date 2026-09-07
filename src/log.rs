@@ -3,12 +3,17 @@
 // ------------------------------------------------------------------
 
 use crossbeam_channel::Sender;
-use std::sync::OnceLock;
+use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 static VERBOSE: AtomicBool = AtomicBool::new(false);
 
 static TX_UI: OnceLock<Sender<String>> = OnceLock::new();
+
+/// Optional plain-text log file (daemon mode). Diagnostics only: conversation
+/// text never goes through here.
+static FILE_SINK: OnceLock<Mutex<std::fs::File>> = OnceLock::new();
 
 // API
 // ------------------------------------------------------------------
@@ -25,9 +30,23 @@ pub fn is_verbose() -> bool {
   VERBOSE.load(Ordering::Relaxed)
 }
 
+/// Append log lines to `path` (truncated first). Errors are always written,
+/// other levels only in verbose mode.
+pub fn set_file_sink(path: &std::path::Path) -> std::io::Result<()> {
+  let file = std::fs::File::create(path)?;
+  let _ = FILE_SINK.set(Mutex::new(file));
+  Ok(())
+}
+
 pub fn log(msg_type: &str, msg: &str) {
-  if !is_verbose() && msg_type != "error" {
+  if !is_verbose() && msg_type != "error" && msg_type != "warning" {
     return;
+  }
+  if let Some(sink) = FILE_SINK.get() {
+    if let Ok(mut f) = sink.lock() {
+      let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+      let _ = writeln!(f, "{} [{}] {}", ts, msg_type, msg);
+    }
   }
   let emoji = match msg_type {
     "debug" => "🐛",

@@ -2,6 +2,7 @@
 //  Application state
 // ------------------------------------------------------------------
 
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -27,6 +28,27 @@ pub struct PlaybackState {
 }
 
 pub static GLOBAL_STATE: OnceLock<Arc<AppState>> = OnceLock::new();
+
+/// What the conversation thread should do with a captured utterance.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum UtteranceKind {
+  /// Transcribe and send to the LLM (normal conversation turn).
+  #[default]
+  Llm,
+  /// Transcribe and paste the text at the cursor (daemon dictation).
+  Paste,
+  /// Transcribe nothing; the utterance is thrown away (daemon reset).
+  Discard,
+}
+
+/// Snapshotted by the record thread at the moment an utterance is flushed, so
+/// the kind and the attached text always travel with the audio they belong to.
+#[derive(Clone, Debug, Default)]
+pub struct UtteranceMeta {
+  pub kind: UtteranceKind,
+  /// Selected desktop text to append to the transcript (daemon LLM turns).
+  pub attachment: Option<String>,
+}
 
 #[derive(Debug)]
 pub struct AppState {
@@ -65,6 +87,16 @@ pub struct AppState {
   pub save_path: Arc<Mutex<Option<std::path::PathBuf>>>,
   pub start_date: Arc<Mutex<String>>,
   pub undo_pending: Arc<AtomicBool>,
+  /// Settings file in use; `selected_agent` is written back here on agent switch.
+  pub settings_path: Arc<Mutex<PathBuf>>,
+  /// Meta attached to the next utterance the record thread flushes.
+  pub utterance_meta: Arc<Mutex<UtteranceMeta>>,
+  /// Whisper model loaded (the daemon reports it as "ready").
+  pub stt_ready: Arc<AtomicBool>,
+  /// Daemon "read selection aloud" job running.
+  pub tts_read_active: Arc<AtomicBool>,
+  /// Running as (or attached to) the background daemon.
+  pub daemon_mode: AtomicBool,
 }
 
 impl AppState {
@@ -117,6 +149,11 @@ impl AppState {
       save_path: Arc::new(Mutex::new(None)),
       start_date: Arc::new(Mutex::new(String::new())),
       undo_pending: Arc::new(AtomicBool::new(false)),
+      settings_path: Arc::new(Mutex::new(PathBuf::new())),
+      utterance_meta: Arc::new(Mutex::new(UtteranceMeta::default())),
+      stt_ready: Arc::new(AtomicBool::new(false)),
+      tts_read_active: Arc::new(AtomicBool::new(false)),
+      daemon_mode: AtomicBool::new(false),
     }
   }
 
@@ -124,27 +161,53 @@ impl AppState {
     settings: crate::config::AgentSettings,
     agents: Vec<crate::config::AgentSettings>,
     quiet: bool,
+    settings_path: PathBuf,
   ) -> Self {
     let mut state = Self::new();
     state.ui.quiet = quiet;
-    *state.voice.lock().unwrap() = settings.voice.clone();
-    *state.agent_name.lock().unwrap() = settings.name.clone();
-    *state.tts.lock().unwrap() = settings.tts.clone();
-    *state.language.lock().unwrap() = settings.language.clone();
-    *state.provider.lock().unwrap() = settings.provider.clone();
-    *state.baseurl.lock().unwrap() = settings.baseurl.clone();
-    *state.model.lock().unwrap() = settings.model.clone();
-    *state.api_key.lock().unwrap() = settings.api_key.clone();
-    *state.system_prompt.lock().unwrap() = settings.system_prompt.clone();
-    state.ptt.store(settings.ptt, Ordering::Relaxed);
-    *state.sound_threshold_peak.lock().unwrap() = settings.sound_threshold_peak;
-    *state.end_silence_ms.lock().unwrap() = settings.end_silence_ms;
-    *state.whisper_model_path.lock().unwrap() = settings.whisper_model_path.clone();
-    state
-      .speed
-      .store((settings.voice_speed * 10.0) as u32, Ordering::Relaxed);
+    state.apply_agent(&settings);
     state.agents = Arc::new(agents);
+    *state.settings_path.lock().unwrap() = settings_path;
     state
+  }
+
+  /// Make `agent` the active one: copy its settings into the live state and
+  /// set the PTT gate accordingly. Used at startup and on LEFT/RIGHT switches.
+  pub fn apply_agent(&self, agent: &crate::config::AgentSettings) {
+    *self.voice.lock().unwrap() = agent.voice.clone();
+    *self.agent_name.lock().unwrap() = agent.name.clone();
+    *self.tts.lock().unwrap() = agent.tts.clone();
+    *self.language.lock().unwrap() = agent.language.clone();
+    *self.provider.lock().unwrap() = agent.provider.clone();
+    *self.baseurl.lock().unwrap() = agent.baseurl.clone();
+    *self.model.lock().unwrap() = agent.model.clone();
+    *self.api_key.lock().unwrap() = agent.api_key.clone();
+    *self.system_prompt.lock().unwrap() = agent.system_prompt.clone();
+    self.ptt.store(agent.ptt, Ordering::Relaxed);
+    *self.sound_threshold_peak.lock().unwrap() = agent.sound_threshold_peak;
+    *self.end_silence_ms.lock().unwrap() = agent.end_silence_ms;
+    *self.whisper_model_path.lock().unwrap() = agent.whisper_model_path.clone();
+    self
+      .speed
+      .store((agent.voice_speed * 10.0) as u32, Ordering::Relaxed);
+    // PTT agents start with the mic gated; live agents record straight away.
+    self.recording_paused.store(agent.ptt, Ordering::Relaxed);
+  }
+
+  /// Name of the agent at `pos` relative to the active one (wrapping).
+  pub fn neighbour_agent(&self, offset: isize) -> Option<crate::config::AgentSettings> {
+    let agents = self.agents.as_ref();
+    if agents.is_empty() {
+      return None;
+    }
+    let current_name = self.agent_name.lock().unwrap().clone();
+    let pos = agents
+      .iter()
+      .position(|a| a.name == current_name)
+      .unwrap_or(0) as isize;
+    let len = agents.len() as isize;
+    let idx = ((pos + offset) % len + len) % len;
+    Some(agents[idx as usize].clone())
   }
 
   pub fn reset_conversation(&self) {

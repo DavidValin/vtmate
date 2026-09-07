@@ -21,7 +21,7 @@ use url::Url;
 // API
 // ------------------------------------------------------------------
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Default)]
 pub struct AgentSettings {
   pub name: String,
   pub language: String,
@@ -43,10 +43,37 @@ pub struct AgentSettings {
 
 #[derive(Parser, Debug, Clone)]
 #[clap(version = env!("CARGO_PKG_VERSION"))]
+#[command(group(clap::ArgGroup::new("daemon_cmd").multiple(false)))]
 #[clap(after_help = r#"
 Settings file is at ~/.vtmate/settings
 
-Explanation on the fields:
+The file starts with a [general] section, then a [daemon]
+section, then one [agent] section per agent.
+
+[general]
+  * selected_agent:       name of the agent vtmate starts with.
+                          Updated automatically every time you
+                          switch agents with LEFT/RIGHT (in the
+                          terminal or while attached to the
+                          daemon). `-a` overrides it for one run.
+
+[daemon]  (global shortcuts used by `vtmate --daemon`)
+  * llm_background_ptt_combo:          hold to talk; on release the
+                                       speech plus any selected text
+                                       is sent to the agent and the
+                                       reply is spoken (ctrl+alt+a)
+  * tts_background_combo:              read the selected text aloud;
+                                       press again to stop (ctrl+alt+r)
+  * stt_and_paste_background_ptt_combo: hold to talk; on release the
+                                       transcript is pasted at the
+                                       cursor (ctrl+alt+s)
+  * llm_background_reset:              reset the daemon conversation
+                                       (ctrl+escape)
+  Combos are written as modifiers joined by '+', e.g. ctrl+alt+a,
+  shift+f5, cmd+alt+r (modifiers: ctrl, alt/option, shift,
+  cmd/super, cmdorctrl).
+
+Explanation on the [agent] fields:
 
   * name:                 a short name for the agent
   ------------------------------------------------------------
@@ -199,12 +226,398 @@ pub struct Args {
 
   #[arg(short = 's', long = "save", action = clap::ArgAction::SetTrue, help = "save the conversation to text and audio file in ~/.vtmate/conversations")]
   pub save: bool,
+
+  #[arg(
+    long,
+    action = clap::ArgAction::SetTrue,
+    group = "daemon_cmd",
+    conflicts_with_all = ["read_file", "quiet", "prompt", "prompt_file", "debate", "list_voices"],
+    help = "start vtmate in the background (global hotkeys, voice only). Run `vtmate` again to attach"
+  )]
+  pub daemon: bool,
+
+  #[arg(
+    long,
+    action = clap::ArgAction::SetTrue,
+    group = "daemon_cmd",
+    hide = true,
+    conflicts_with_all = ["read_file", "quiet", "prompt", "prompt_file", "debate", "list_voices"]
+  )]
+  pub daemon_foreground: bool,
+
+  #[arg(long, action = clap::ArgAction::SetTrue, group = "daemon_cmd", help = "stop the running daemon")]
+  pub daemon_stop: bool,
+
+  #[arg(long, action = clap::ArgAction::SetTrue, group = "daemon_cmd", help = "show whether a daemon is running and its hotkeys")]
+  pub daemon_status: bool,
 }
 
 // internal static values
 pub const HANGOVER_MS_DEFAULT: u64 = 300;
 pub const MIN_UTTERANCE_MS_DEFAULT: u64 = 300;
 pub const OPENTTS_BASE_URL_DEFAULT: &str = "http://127.0.0.1:5500/api/tts?&vocoder=high&denoiserStrength=0.005&&speakerId=&ssml=false&ssmlNumbers=true&ssmlDates=true&ssmlCurrency=true&cache=false";
+
+pub const DAEMON_LLM_PTT_DEFAULT: &str = "ctrl+alt+a";
+pub const DAEMON_TTS_DEFAULT: &str = "ctrl+alt+r";
+pub const DAEMON_PASTE_PTT_DEFAULT: &str = "ctrl+alt+s";
+pub const DAEMON_RESET_DEFAULT: &str = "ctrl+escape";
+
+/// `[general]` section of the settings file.
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct GeneralSettings {
+  /// Agent vtmate starts with. Empty (or unknown) means the first agent.
+  #[serde(default)]
+  pub selected_agent: String,
+}
+
+/// `[daemon]` section of the settings file: the global shortcuts.
+#[derive(Debug, Deserialize, Clone)]
+pub struct DaemonSettings {
+  #[serde(default = "d_llm_ptt")]
+  pub llm_background_ptt_combo: String,
+  #[serde(default = "d_tts")]
+  pub tts_background_combo: String,
+  #[serde(default = "d_paste_ptt")]
+  pub stt_and_paste_background_ptt_combo: String,
+  #[serde(default = "d_reset")]
+  pub llm_background_reset: String,
+}
+
+fn d_llm_ptt() -> String {
+  DAEMON_LLM_PTT_DEFAULT.to_string()
+}
+fn d_tts() -> String {
+  DAEMON_TTS_DEFAULT.to_string()
+}
+fn d_paste_ptt() -> String {
+  DAEMON_PASTE_PTT_DEFAULT.to_string()
+}
+fn d_reset() -> String {
+  DAEMON_RESET_DEFAULT.to_string()
+}
+
+impl Default for DaemonSettings {
+  fn default() -> Self {
+    Self {
+      llm_background_ptt_combo: d_llm_ptt(),
+      tts_background_combo: d_tts(),
+      stt_and_paste_background_ptt_combo: d_paste_ptt(),
+      llm_background_reset: d_reset(),
+    }
+  }
+}
+
+impl DaemonSettings {
+  /// (setting name, combo) pairs, in a fixed order.
+  pub fn combos(&self) -> [(&'static str, &str); 4] {
+    [
+      ("llm_background_ptt_combo", self.llm_background_ptt_combo.as_str()),
+      ("tts_background_combo", self.tts_background_combo.as_str()),
+      (
+        "stt_and_paste_background_ptt_combo",
+        self.stt_and_paste_background_ptt_combo.as_str(),
+      ),
+      ("llm_background_reset", self.llm_background_reset.as_str()),
+    ]
+  }
+}
+
+/// The `[general]` and `[daemon]` blocks cut out of a settings file, plus
+/// everything else (the `[agent]` sections) untouched.
+#[derive(Debug, Clone, Default)]
+pub struct LeadingSections {
+  pub general: Option<String>,
+  pub daemon: Option<String>,
+  pub rest: String,
+}
+
+/// Separate the `[general]` and `[daemon]` sections from the `[agent]`
+/// sections. A section starts at a line that is exactly its header and ends
+/// at the next line starting with '['. Text before any header stays in `rest`.
+pub fn split_leading_sections(text: &str) -> LeadingSections {
+  #[derive(PartialEq)]
+  enum Cur {
+    Rest,
+    General,
+    Daemon,
+  }
+  let mut out = LeadingSections::default();
+  let mut cur = Cur::Rest;
+  for line in text.split_inclusive('\n') {
+    let t = line.trim();
+    if t.starts_with('[') {
+      cur = match t {
+        "[general]" => {
+          out.general.get_or_insert_with(String::new);
+          Cur::General
+        }
+        "[daemon]" => {
+          out.daemon.get_or_insert_with(String::new);
+          Cur::Daemon
+        }
+        _ => Cur::Rest,
+      };
+      if cur == Cur::Rest {
+        out.rest.push_str(line);
+      }
+      continue;
+    }
+    match cur {
+      Cur::Rest => out.rest.push_str(line),
+      Cur::General => out.general.as_mut().unwrap().push_str(line),
+      Cur::Daemon => out.daemon.as_mut().unwrap().push_str(line),
+    }
+  }
+  out
+}
+
+/// Rewrite an INI block as `key=value` lines: whitespace trimmed, one layer
+/// of surrounding double quotes removed, comments and lines without '='
+/// dropped. This is what serde_ini gets to parse.
+fn clean_ini_block(block: &str) -> String {
+  let mut clean_section = String::new();
+  for line in block.lines() {
+    let trimmed = line.trim_start();
+    if trimmed.starts_with('#') || trimmed.starts_with(';') {
+      continue;
+    }
+    if let Some(idx) = line.find('=') {
+      let (key, val_part) = line.split_at(idx);
+      let key = key.trim();
+      let val = &val_part[1..].trim();
+      let val_trimmed = if val.len() >= 2 && val.starts_with('"') && val.ends_with('"') {
+        &val[1..val.len() - 1]
+      } else {
+        val
+      };
+      clean_section.push_str(key);
+      clean_section.push('=');
+      clean_section.push_str(val_trimmed);
+      clean_section.push('\n');
+    }
+  }
+  clean_section
+}
+
+/// Parse the `[general]` section of a settings file (defaults when absent).
+pub fn load_general_settings(settings_path: &std::path::Path) -> Result<GeneralSettings, Error> {
+  let text = read_to_string(settings_path)?;
+  let sections = split_leading_sections(&text);
+  let Some(block) = sections.general else {
+    return Ok(GeneralSettings::default());
+  };
+  let clean = clean_ini_block(&block);
+  if clean.trim().is_empty() {
+    return Ok(GeneralSettings::default());
+  }
+  let mut g: GeneralSettings = from_str(clean.trim())
+    .map_err(|e| Error::msg(format!("Failed to parse [general] section: {}", e)))?;
+  g.selected_agent = g.selected_agent.trim_matches('"').trim().to_string();
+  Ok(g)
+}
+
+/// Parse and validate the `[daemon]` section (defaults when absent): every
+/// combo must parse as a global shortcut and the four must be distinct.
+pub fn load_daemon_settings(settings_path: &std::path::Path) -> Result<DaemonSettings, Error> {
+  let text = read_to_string(settings_path)?;
+  let sections = split_leading_sections(&text);
+  let mut d = match sections.daemon {
+    None => DaemonSettings::default(),
+    Some(block) => {
+      let clean = clean_ini_block(&block);
+      if clean.trim().is_empty() {
+        DaemonSettings::default()
+      } else {
+        from_str(clean.trim())
+          .map_err(|e| Error::msg(format!("Failed to parse [daemon] section: {}", e)))?
+      }
+    }
+  };
+  for field in [
+    &mut d.llm_background_ptt_combo,
+    &mut d.tts_background_combo,
+    &mut d.stt_and_paste_background_ptt_combo,
+    &mut d.llm_background_reset,
+  ] {
+    *field = field.trim_matches('"').trim().to_lowercase();
+  }
+  validate_daemon_settings(&d)?;
+  Ok(d)
+}
+
+pub fn validate_daemon_settings(d: &DaemonSettings) -> Result<(), Error> {
+  use global_hotkey::hotkey::HotKey;
+  use std::str::FromStr;
+  let mut seen: Vec<(u32, &str, &str)> = Vec::new();
+  let mut errors: Vec<String> = Vec::new();
+  for (name, combo) in d.combos() {
+    if combo.is_empty() {
+      errors.push(format!("[daemon] {}: shortcut cannot be empty", name));
+      continue;
+    }
+    match HotKey::from_str(combo) {
+      Ok(hk) => {
+        if let Some((_, other_name, other_combo)) = seen.iter().find(|(id, _, _)| *id == hk.id())
+        {
+          errors.push(format!(
+            "[daemon] {} ({}) is the same shortcut as {} ({})",
+            name, combo, other_name, other_combo
+          ));
+        }
+        seen.push((hk.id(), name, combo));
+      }
+      Err(e) => errors.push(format!(
+        "[daemon] {}: '{}' is not a valid shortcut ({}). Example: ctrl+alt+a",
+        name, combo, e
+      )),
+    }
+  }
+  if errors.is_empty() {
+    Ok(())
+  } else {
+    Err(Error::msg(errors.join("\n")))
+  }
+}
+
+/// Pick the agent to start with: `-a` wins (error when unknown), then
+/// `[general] selected_agent` (warning + first agent when unknown), then the
+/// first agent.
+pub fn select_agent(
+  agents: &[AgentSettings],
+  cli: Option<&str>,
+  general: &GeneralSettings,
+) -> Result<AgentSettings, String> {
+  let available = || {
+    agents
+      .iter()
+      .map(|a| a.name.as_str())
+      .collect::<Vec<&str>>()
+      .join(", ")
+  };
+  if let Some(name) = cli {
+    return agents
+      .iter()
+      .find(|a| a.name == name)
+      .cloned()
+      .ok_or_else(|| format!("Agent '{}' not found. Available agents: {}", name, available()));
+  }
+  let first = agents
+    .first()
+    .cloned()
+    .ok_or_else(|| "No agents configured".to_string())?;
+  if general.selected_agent.is_empty() {
+    return Ok(first);
+  }
+  match agents.iter().find(|a| a.name == general.selected_agent) {
+    Some(a) => Ok(a.clone()),
+    None => {
+      crate::log::log(
+        "warning",
+        &format!(
+          "[general] selected_agent '{}' not found (available: {}); using '{}'",
+          general.selected_agent,
+          available(),
+          first.name
+        ),
+      );
+      Ok(first)
+    }
+  }
+}
+
+/// Write `selected_agent = <name>` into the `[general]` section of the
+/// settings file, touching nothing else. The section is created at the top of
+/// the file when missing. The file is replaced atomically (tmp + rename).
+pub fn persist_selected_agent(settings_path: &std::path::Path, name: &str) -> std::io::Result<()> {
+  let text = read_to_string(settings_path)?;
+  let new_line = format!("selected_agent = {}", name);
+  let mut out = String::with_capacity(text.len() + 64);
+  let mut in_general = false;
+  let mut found_section = false;
+  let mut replaced = false;
+  for line in text.split_inclusive('\n') {
+    let t = line.trim();
+    let ending = if line.ends_with("\r\n") {
+      "\r\n"
+    } else if line.ends_with('\n') {
+      "\n"
+    } else {
+      ""
+    };
+    if t.starts_with('[') {
+      if in_general && !replaced {
+        out.push_str(&new_line);
+        out.push('\n');
+        replaced = true;
+      }
+      in_general = t == "[general]";
+      if in_general {
+        found_section = true;
+      }
+      out.push_str(line);
+      continue;
+    }
+    if in_general && !replaced {
+      let key = line.split('=').next().map(|k| k.trim()).unwrap_or("");
+      if key == "selected_agent" {
+        out.push_str(&new_line);
+        out.push_str(ending);
+        replaced = true;
+        continue;
+      }
+    }
+    out.push_str(line);
+  }
+  if found_section && !replaced {
+    // section at the end of the file without the key
+    if !out.ends_with('\n') && !out.is_empty() {
+      out.push('\n');
+    }
+    out.push_str(&new_line);
+    out.push('\n');
+  }
+  if !found_section {
+    let mut fresh = String::with_capacity(text.len() + 64);
+    fresh.push_str("[general]\n");
+    fresh.push_str(&new_line);
+    fresh.push_str("\n\n");
+    fresh.push_str(text.trim_start_matches(['\n', '\r']));
+    out = fresh;
+  }
+  let tmp = settings_path.with_file_name(format!(
+    "{}.tmp",
+    settings_path
+      .file_name()
+      .map(|f| f.to_string_lossy().into_owned())
+      .unwrap_or_else(|| "settings".to_string())
+  ));
+  {
+    let mut f = File::create(&tmp)?;
+    f.write_all(out.as_bytes())?;
+    f.sync_all()?;
+  }
+  std::fs::rename(&tmp, settings_path)
+}
+
+/// Path of the settings file: `-c` (with `~` expanded) or `~/.vtmate/settings`.
+pub fn resolve_settings_path(args: &Args) -> Result<std::path::PathBuf, Error> {
+  if let Some(ref cfg) = args.config {
+    let mut path = std::path::PathBuf::from(cfg.as_str());
+    if path.starts_with("~") {
+      if let Some(home) = get_user_home_path() {
+        let rel = path.strip_prefix("~").unwrap_or(&path).to_path_buf();
+        path = home.join(rel);
+      }
+    }
+    return Ok(path);
+  }
+  Ok(
+    get_user_home_path()
+      .ok_or_else(|| Error::msg("Unable to determine home directory"))?
+      .join(".vtmate")
+      .join("settings"),
+  )
+}
 
 fn bool_from_str_or_bool<'de, D>(deserializer: D) -> Result<bool, D::Error>
 where
@@ -259,8 +672,9 @@ pub fn load_settings(
   settings_path: &std::path::Path,
   args: &Args,
 ) -> Result<Vec<AgentSettings>, Error> {
-  // Read the whole INI file
-  let ini_contents = read_to_string(settings_path)?;
+  // Read the whole INI file; the [general] and [daemon] sections are parsed
+  // separately (load_general_settings / load_daemon_settings).
+  let ini_contents = split_leading_sections(&read_to_string(settings_path)?).rest;
   // Split on the section header "[agent]"
   let blocks: Vec<&str> = ini_contents
     .split("[agent]")
@@ -271,29 +685,7 @@ pub fn load_settings(
   let mut errors: Vec<String> = Vec::new();
   for block in blocks {
     // Preprocess the block to remove surrounding quotes from values
-    let mut clean_section = String::new();
-    // Track ptt value string if present
-    let _ptt_value_str: Option<String> = None;
-    for line in block.lines() {
-      if let Some(idx) = line.find('=') {
-        let (key, val_part) = line.split_at(idx);
-        // trim whitespace around key and value
-        let key = key.trim();
-        // val_part includes the '=' at start
-        let val = &val_part[1..].trim();
-        let val_trimmed = if val.starts_with('"') && val.ends_with('"') {
-          &val[1..val.len() - 1]
-        } else {
-          val
-        };
-        clean_section.push_str(key);
-        clean_section.push('=');
-        clean_section.push_str(val_trimmed);
-        clean_section.push('\n');
-      }
-      // skip lines without '=' (e.g., empty lines)
-    }
-
+    let clean_section = clean_ini_block(block);
     let section = clean_section.trim();
 
     // println!("DEBUG section: {}", section);
@@ -440,7 +832,15 @@ pub fn ensure_settings_file() -> Result<(), Error> {
   if settings_path.exists() {
     return Ok(());
   }
-  let content = r#"
+  let content = r#"[general]
+selected_agent = main agent
+
+[daemon]
+llm_background_ptt_combo = ctrl+alt+a
+tts_background_combo = ctrl+alt+r
+stt_and_paste_background_ptt_combo = ctrl+alt+s
+llm_background_reset = ctrl+escape
+
 [agent]
 name = main agent
 language = en

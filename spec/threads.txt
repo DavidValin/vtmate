@@ -15,6 +15,12 @@ flowchart LR
         Key[Keyboard thread]
         UI[UI thread]
     end
+    subgraph Daemon[Daemon mode only - replaces Key and UI]
+        Ctl[Controller thread - global shortcuts, attached keys]
+        Srv[IPC server thread - local socket, one reader/writer per attached client]
+        Sink[UI sink thread - drains tx_ui, fans out to clients]
+        Att[Attached vtmate - UI thread fed by the socket, keys forwarded]
+    end
 
     %% Global stop propagation
     Main -->|stop_all_tx| Audio
@@ -42,3 +48,14 @@ flowchart LR
     %% Keyboard interactions
     Key -->|stop_all_tx - global stop| Main
     Key -->|stop_play_tx - ESC stop| Play
+
+    %% Daemon mode interactions
+    Ctl -->|recording_paused / utterance_meta - push-to-talk with selection| Rec
+    Ctl -->|tx_tts - read selection aloud| TTS
+    Ctl -->|stop_play_tx + interrupt_counter - stop speech| Play
+    Conv -->|tx_action - paste transcript at cursor| Ctl
+    UI -.->|tx_ui lines| Sink
+    Sink -->|Ui / State / History messages| Srv
+    Srv -->|snapshot + live stream| Att
+    Att -->|Key events| Srv
+    Srv -->|ClientEvent - keys, Say| Ctl
