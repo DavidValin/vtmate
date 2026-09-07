@@ -147,13 +147,28 @@ switch ($VARIANT) {
         $WITH_CUDA     = $false
         $WITH_VULKAN   = $true
     }
-    "cuda" {
+    # cuda12 / cuda13: the same build against a CUDA 12.x / 13.x toolkit,
+    # named by the major the user has installed (installer.sh picks the one
+    # whose runtime is present). The toolkit, cuDNN and the prebuilt ONNX
+    # Runtime all follow $CUDA_MAJOR below.
+    "cuda12" {
         $WITH_OPENBLAS = $true
         $WITH_CUDA     = $true
         $WITH_VULKAN   = $false
+        $CUDA_MAJOR    = 12
+    }
+    "cuda13" {
+        $WITH_OPENBLAS = $true
+        $WITH_CUDA     = $true
+        $WITH_VULKAN   = $false
+        $CUDA_MAJOR    = 13
+    }
+    "cuda" {
+        Write-Error "ERROR: variant 'cuda' is ambiguous; use cuda12 or cuda13"
+        exit 1
     }
     default {
-        Write-Error "ERROR: Unknown variant $VARIANT"
+        Write-Error "ERROR: Unknown variant $VARIANT (cpu, vulkan, cuda12, cuda13)"
         exit 1
     }
 }
@@ -161,7 +176,7 @@ switch ($VARIANT) {
 Write-Host "`n============================================"
 Write-Host "Building variant: $VARIANT"
 if ($WITH_OPENBLAS) { Write-Host "OpenBLAS: ENABLED" }
-if ($WITH_CUDA)     { Write-Host "CUDA: ENABLED" }
+if ($WITH_CUDA)     { Write-Host "CUDA: ENABLED (CUDA $CUDA_MAJOR)" }
 if ($WITH_VULKAN)   { Write-Host "Vulkan: ENABLED" }
 Write-Host "============================================`n"
 
@@ -176,13 +191,21 @@ foreach ($dir in $TARGET_DIR, $DIST_DIR, $VENDOR_DIR) {
 # ENSURE CUDA TOOLKIT IF REQUIRED (BUILD-TIME)
 # ==========================================================
 if ($WITH_CUDA) {
+    # One toolkit minor per CUDA major (keep in sync with the windows-x64
+    # matrix in .github/workflows/build.yml, which installs it ahead of this
+    # script on CI). Both accept the runners' MSVC: CUDA 12.3 rejected
+    # MSVC >= 19.40 (crt/host_config.h); 12.8 and 13.3 allow VS 2019-2026.
+    # 12.8 is also what Microsoft builds the CUDA 12 ONNX Runtime package
+    # with, so the runtime this variant asks for is never older than what
+    # that package expects. cuDNN and the ORT package follow the major.
+    switch ($CUDA_MAJOR) {
+        12 { $CUDA_VERSION = "12.8.1"; $CUDA_MM = "12.8"; $ORT_PKG = "onnxruntime-win-x64-gpu" }
+        13 { $CUDA_VERSION = "13.3.0"; $CUDA_MM = "13.3"; $ORT_PKG = "onnxruntime-win-x64-gpu_cuda13" }
+    }
+
     $nvcc = Get-Command nvcc -ErrorAction SilentlyContinue
     if (-not $nvcc) {
-        Write-Host "CUDA not detected. Installing CUDA Toolkit for build..."
-        # CUDA 12.3 rejects MSVC >= 19.40 (crt/host_config.h), so it cannot
-        # build against VS 2026 on current runners. 13.3 allows VS 2019-2026.
-        $CUDA_VERSION = "13.3.0"
-        $CUDA_MM = "13.3"
+        Write-Host "CUDA not detected. Installing CUDA Toolkit $CUDA_VERSION for build..."
         $cuda_root = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v$CUDA_MM"
         $CUDA_INSTALLER = "$env:TEMP\cuda_installer.exe"
         $CUDA_URL = "https://developer.download.nvidia.com/compute/cuda/$CUDA_VERSION/network_installers/cuda_${CUDA_VERSION}_windows_network.exe"
@@ -222,7 +245,17 @@ if ($WITH_CUDA) {
         Write-Host "CUDA successfully installed for build."
     }
     else {
-        Write-Host "CUDA already present."
+        # Two cuda variants exist, so the toolkit on PATH must be the one this
+        # variant is named after: a cuda12 binary linked against 13's cuBLAS
+        # would ask users for the wrong runtime.
+        $rel = & $nvcc.Source --version | Select-String -Pattern 'release (\d+)\.(\d+)' | Select-Object -First 1
+        if (-not $rel) { Write-Error "could not read the CUDA version from nvcc --version"; exit 1 }
+        $nvccMajor = [int]$rel.Matches[0].Groups[1].Value
+        if ($nvccMajor -ne $CUDA_MAJOR) {
+            Write-Error "variant $VARIANT needs a CUDA $CUDA_MAJOR toolkit, but nvcc on PATH is release $($rel.Matches[0].Groups[1].Value).$($rel.Matches[0].Groups[2].Value)"
+            exit 1
+        }
+        Write-Host "CUDA already present (release $($rel.Matches[0].Groups[1].Value).$($rel.Matches[0].Groups[2].Value))."
         $cuda_root = Split-Path -Parent (Split-Path -Parent $nvcc.Source)
         $env:CUDA_PATH = $cuda_root
         $env:CUDAToolkit_ROOT = $cuda_root
@@ -235,13 +268,13 @@ if ($WITH_CUDA) {
     # Pulled from NVIDIA's public redist mirror - no developer login needed.
     # ------------------------------------------------------
     if (-not $env:CUDNN_HOME -or -not (Test-Path $env:CUDNN_HOME)) {
-        # The _cudaXX suffix must match the installed CUDA major version.
-        # This tracks CUDA 13.x above; going back to CUDA 12.x means _cuda12.
+        # The _cudaXX suffix must match the CUDA major this variant builds
+        # against; NVIDIA ships one cuDNN archive per major.
         $CUDNN_VERSION = "9.16.0.29"
-        $CUDNN_NAME    = "cudnn-windows-x86_64-${CUDNN_VERSION}_cuda13-archive"
+        $CUDNN_NAME    = "cudnn-windows-x86_64-${CUDNN_VERSION}_cuda${CUDA_MAJOR}-archive"
         $CUDNN_URL     = "https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/windows-x86_64/$CUDNN_NAME.zip"
         $CUDNN_ZIP     = "$env:TEMP\cudnn.zip"
-        $CUDNN_ROOT    = "C:\cudnn\$CUDNN_VERSION"
+        $CUDNN_ROOT    = "C:\cudnn\${CUDNN_VERSION}_cuda${CUDA_MAJOR}"
 
         Write-Host "cuDNN not detected. Downloading $CUDNN_NAME ..."
         Invoke-WebRequest -Uri $CUDNN_URL -OutFile $CUDNN_ZIP -UseBasicParsing
@@ -255,7 +288,7 @@ if ($WITH_CUDA) {
         # The archive unpacks to <name>/ - normalise to a version-only path.
         $extracted = Join-Path (Split-Path -Parent $CUDNN_ROOT) $CUDNN_NAME
         if (Test-Path $CUDNN_ROOT) { Remove-Item -Recurse -Force $CUDNN_ROOT }
-        Rename-Item -Path $extracted -NewName $CUDNN_VERSION -Force
+        Rename-Item -Path $extracted -NewName (Split-Path -Leaf $CUDNN_ROOT) -Force
         Remove-Item -Force $CUDNN_ZIP
 
         $env:CUDNN_HOME = $CUDNN_ROOT
@@ -470,7 +503,7 @@ switch ($VARIANT) {
         $ONNX_VULKAN_FLAG = "ON"
         $ONNX_USE_BLAS    = "ON"
     }
-    "cuda" {
+    { $_ -in "cuda12", "cuda13" } {
         $ONNX_CUDA_FLAG   = "OFF"
         $ONNX_VULKAN_FLAG = "OFF"
         $ONNX_USE_BLAS    = "ON"
@@ -493,7 +526,7 @@ switch ($VARIANT) {
 $ORT_PREBUILT = $null
 if ($WITH_CUDA) {
     $ortVer  = "1.24.1"
-    $ortName = "onnxruntime-win-x64-gpu_cuda13-$ortVer"
+    $ortName = "$ORT_PKG-$ortVer"
     $ortZip  = "$env:TEMP\$ortName.zip"
     Write-Host "Downloading prebuilt $ortName ..."
     Invoke-WebRequest -UseBasicParsing -OutFile $ortZip `
@@ -502,7 +535,7 @@ if ($WITH_CUDA) {
     Expand-Archive -Path $ortZip -DestinationPath $VENDOR_DIR -Force
     Remove-Item -Force $ortZip
 
-    # The archive is named ..._cuda13-<ver>.zip but unpacks to
+    # The CUDA 13 archive is named ..._cuda13-<ver>.zip but unpacks to
     # onnxruntime-win-x64-gpu-<ver>/ without the _cuda13 part, so locate the
     # import library rather than assuming the directory name.
     $ortLib = Get-ChildItem -Path $VENDOR_DIR -Recurse -Filter "onnxruntime.lib" -ErrorAction SilentlyContinue |

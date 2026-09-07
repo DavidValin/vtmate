@@ -7,7 +7,7 @@ set -euo pipefail
 #
 # Builds vtmate for:
 #   arch:    amd64, arm64
-#   variant: cpu, vulkan, cuda (cuda is amd64-only)
+#   variant: cpu, vulkan, cuda12, cuda13 (cuda* is amd64-only)
 #
 # OpenBLAS is linked into every variant on every arch.
 #
@@ -42,13 +42,21 @@ ESPEAK_ARCHIVE="${ASSETS_DIR}/espeak-ng-data.tar.gz"
 DO_PACKAGE=1
 DOCKER_NO_CACHE=1
 SEL_ARCH="all"      # amd64,arm64,all
-SEL_VARIANT="all"   # cpu,vulkan,cuda,all
+SEL_VARIANT="all"   # cpu,vulkan,cuda12,cuda13,all (cuda = cuda12,cuda13)
 
 # Linux variant toggles - on by default, so a bare invocation still produces
 # cpu+vulkan+(cuda on amd64) in one pass. --variant overrides these.
 WITH_CPU="${WITH_CPU:-1}"       # amd64 + arm64
-WITH_CUDA="${WITH_CUDA:-1}"     # amd64 only
+WITH_CUDA="${WITH_CUDA:-1}"     # amd64 only; the default for both majors below
 WITH_VULKAN="${WITH_VULKAN:-1}" # amd64 + arm64
+# cuda12 / cuda13: the same build against a CUDA 12.x / 13.x toolkit, named
+# by the major the user has installed (installer.sh picks the one whose
+# runtime is present). One toolkit minor per major, from NVIDIA's Ubuntu
+# 24.04 apt repository; build_windows.ps1 keeps its table on the same majors.
+WITH_CUDA12="${WITH_CUDA12:-$WITH_CUDA}"
+WITH_CUDA13="${WITH_CUDA13:-$WITH_CUDA}"
+LINUX_CUDA12_VERSION="12.8"
+LINUX_CUDA13_VERSION="13.3"
 
 # Host cache mounts (Linux Docker)
 HOST_HOME="${HOME}"
@@ -66,13 +74,15 @@ Usage:
   ./build_linux.sh [--arch <list>] [--variant <list>] [--skip-package] [--cache|--no-cache]
 
 --arch    comma-separated: amd64,arm64,all  (x86_64/aarch64 accepted as aliases)
---variant comma-separated: cpu,vulkan,cuda,all  (cuda is amd64 only)
+--variant comma-separated: cpu,vulkan,cuda12,cuda13,all  (cuda = both majors; cuda* is amd64 only)
           When given, it overrides the WITH_* env toggles below. CI uses
           this to build one arch+variant per runner.
 
 Env:
   WITH_CPU=0|1      (amd64 + arm64) default 1
-  WITH_CUDA=0|1     (amd64 only) default 1
+  WITH_CUDA=0|1     (amd64 only) default 1 - default for the two below
+  WITH_CUDA12=0|1   (amd64 only) CUDA 12.x build, default WITH_CUDA
+  WITH_CUDA13=0|1   (amd64 only) CUDA 13.x build, default WITH_CUDA
   WITH_VULKAN=0|1   (amd64 + arm64) default 1
   DEBUG_SYMBOLS=0|1 (glibc vulkan/cuda) default 0 - keep symbols + line tables
                     for a readable gdb/coredumpctl backtrace
@@ -119,12 +129,15 @@ done
 # --variant, when given, is authoritative: it replaces the WITH_* toggles so
 # one runner can build exactly one arch+variant.
 if [[ "${SEL_VARIANT}" != "all" ]]; then
-  WITH_CPU=0; WITH_VULKAN=0; WITH_CUDA=0
+  WITH_CPU=0; WITH_VULKAN=0; WITH_CUDA12=0; WITH_CUDA13=0
   list_has "${SEL_VARIANT}" cpu    && WITH_CPU=1
   list_has "${SEL_VARIANT}" vulkan && WITH_VULKAN=1
-  list_has "${SEL_VARIANT}" cuda   && WITH_CUDA=1
-  if [[ "${WITH_CPU}${WITH_VULKAN}${WITH_CUDA}" == "000" ]]; then
-    echo "ERROR: --variant '${SEL_VARIANT}' selected no known variant (cpu,vulkan,cuda)"
+  list_has "${SEL_VARIANT}" cuda12 && WITH_CUDA12=1
+  list_has "${SEL_VARIANT}" cuda13 && WITH_CUDA13=1
+  # plain "cuda" means both majors
+  list_has "${SEL_VARIANT}" cuda   && { WITH_CUDA12=1; WITH_CUDA13=1; }
+  if [[ "${WITH_CPU}${WITH_VULKAN}${WITH_CUDA12}${WITH_CUDA13}" == "0000" ]]; then
+    echo "ERROR: --variant '${SEL_VARIANT}' selected no known variant (cpu,vulkan,cuda12,cuda13)"
     exit 1
   fi
 fi
@@ -140,8 +153,12 @@ mkdir -p "${DIST_DIR}" "${PKG_DIR}" "${PROJECT_ROOT}/target-cross" "${ASSETS_DIR
 mkdir -p "${HOST_K_CACHE}" "${HOST_WHISPER_MODELS}"
 
 echo "Version: ${VERSION}"
+# WITH_CUDA from here on means "any CUDA major": the musl images take it as a
+# build arg, and the musl pass below forces it off (cuda is glibc-only).
+WITH_CUDA=0
+[[ "${WITH_CUDA12}" == "1" || "${WITH_CUDA13}" == "1" ]] && WITH_CUDA=1
 echo "Linux: arch=${SEL_ARCH} variant=${SEL_VARIANT}"
-echo "WITH_CPU=${WITH_CPU}  WITH_CUDA=${WITH_CUDA} (amd64 only)  WITH_VULKAN=${WITH_VULKAN}"
+echo "WITH_CPU=${WITH_CPU}  WITH_CUDA12=${WITH_CUDA12} WITH_CUDA13=${WITH_CUDA13} (amd64 only)  WITH_VULKAN=${WITH_VULKAN}"
 echo "OpenBLAS: always ON"
 
 # Features - OpenBLAS is part of every variant's feature set, unconditionally.
@@ -1394,8 +1411,18 @@ build_linux_glibc_variant() {
   esac
 
   case "${arch}-${variant}" in
-    amd64-vulkan|arm64-vulkan|amd64-cuda) ;;
+    amd64-vulkan|arm64-vulkan|amd64-cuda12|amd64-cuda13) ;;
     *) echo "ERROR: unsupported glibc combination ${arch}-${variant}"; return 1 ;;
+  esac
+
+  # cuda12 and cuda13 share the Dockerfile: VARIANT=cuda selects its CUDA
+  # blocks and CUDA_VERSION the toolkit minor (its major picks the cuDNN
+  # archive). The variant name itself stays on the target directory, the
+  # image tag and the artifact, which is what installer.sh matches.
+  local kind="${variant%%[0-9]*}" cuda_args=()
+  case "${variant}" in
+    cuda12) cuda_args=(--build-arg CUDA_VERSION="${LINUX_CUDA12_VERSION}") ;;
+    cuda13) cuda_args=(--build-arg CUDA_VERSION="${LINUX_CUDA13_VERSION}") ;;
   esac
 
   tmp="$(mktemp -d)"
@@ -1461,9 +1488,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # package is CUDA 12.0, and ORT 1.24's CUDA provider (built upstream against
 # 12.8) no longer compiles with 12.0's cuda_bf16.hpp - cu_inc/common.cuh casts
 # onnxruntime::BFloat16 to __nv_bfloat16, which 12.0 reports as ambiguous.
-# Still CUDA 12: same driver floor, same _cuda12 cuDNN archive, same
-# libcudart.so.12 the installer looks for. Its nvcc accepts noble's GCC 13 as
-# host compiler, so ORT's .cu files and everything else share one compiler.
+# CUDA_VERSION (major.minor) comes from build_linux_glibc_variant: 12.x for
+# the cuda12 variant, 13.x for cuda13; the cuDNN archive below follows its
+# major. Both toolkits accept noble's GCC 13 as host compiler, so ORT's .cu
+# files and everything else share one compiler.
 # Only the pieces ORT and ggml compile or link against (nvcc, cudart, cuBLAS,
 # cuFFT, cuRAND, cuSPARSE - header only, via ORT's cuda_pch.h - the CCCL
 # headers, the libcuda stub), not the multi-GB cuda-toolkit meta package.
@@ -1490,10 +1518,11 @@ ENV PATH=/usr/local/cuda/bin:$PATH \
     CUDA_PATH=/usr/local/cuda
 
 # cuDNN for the ONNX Runtime CUDA execution provider - not part of the toolkit.
+# NVIDIA ships one archive per CUDA major (_cuda12 / _cuda13); follow ours.
 ARG CUDNN_VERSION=9.16.0.29
 RUN if [ "$VARIANT" = "cuda" ]; then \
       set -eux; \
-      f=cudnn-linux-x86_64-${CUDNN_VERSION}_cuda12-archive; \
+      f=cudnn-linux-x86_64-${CUDNN_VERSION}_cuda${CUDA_VERSION%%.*}-archive; \
       wget -nv --timeout=60 --tries=3 -O /tmp/cudnn.tar.xz \
         "https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/linux-x86_64/$f.tar.xz"; \
       mkdir -p /usr/local/cudnn; \
@@ -1727,8 +1756,9 @@ DOCKERFILE
   echo "== Linux ${arch} ${variant} (glibc) image =="
   docker build "${build_args[@]}" --platform="${plat}" \
     --build-arg ARCH="${arch}" \
-    --build-arg VARIANT="${variant}" \
+    --build-arg VARIANT="${kind}" \
     --build-arg MULTIARCH="${multiarch}" \
+    ${cuda_args[@]+"${cuda_args[@]}"} \
     -f "$df" -t "$img" "$tmp"
 
   # cuda keeps ort-cuda: ORT is built with its CUDA execution provider (see
@@ -1737,8 +1767,8 @@ DOCKERFILE
   # acceleration via whisper-cuda either way.
   local feats
   case "${variant}" in
-    vulkan) feats="${FEATURES_VULKAN}" ;;
-    cuda)   feats="${FEATURES_CUDA}" ;;
+    vulkan)        feats="${FEATURES_VULKAN}" ;;
+    cuda12|cuda13) feats="${FEATURES_CUDA}" ;;
   esac
 
   echo "== Linux ${arch} ${variant} (glibc) cargo build =="
@@ -1813,7 +1843,7 @@ DOCKERFILE
       fi
 
       ORT_RPATH=""
-      if [ "${VARIANT}" = "cuda" ]; then
+      if [[ "${VARIANT}" == cuda* ]]; then
         # $ORIGIN/../lib/vtmate is where installer.sh puts the libraries
         # (<prefix>/bin/vtmate next to <prefix>/lib/vtmate/*.so).
         ORT_RPATH="-C link-arg=-Wl,--disable-new-dtags -C link-arg=-Wl,-rpath,\$ORIGIN:\$ORIGIN/../lib/vtmate"
@@ -1854,7 +1884,7 @@ DOCKERFILE
 
       # cuda: stage the ORT CUDA provider module and its shim next to the binary
       # for packaging (the ORT core itself is linked statically above).
-      if [ "${VARIANT}" = "cuda" ]; then
+      if [[ "${VARIANT}" == cuda* ]]; then
         for f in libonnxruntime_providers_cuda.so libonnxruntime_providers_shared.so; do
           p="$(find /onnxruntime -name "$f" -print -quit)"
           test -n "$p"
@@ -1872,7 +1902,7 @@ DOCKERFILE
     rm -rf "${out_dir}"; mkdir -p "${out_dir}"
     cp "${src_dir}/${BIN_NAME}" "${out_dir}/"
     chmod +x "${out_dir}/${BIN_NAME}" || true
-    if [[ "${variant}" == "cuda" ]]; then
+    if [[ "${variant}" == cuda* ]]; then
       cp "${src_dir}"/libonnxruntime_providers_*.so "${out_dir}/"
       [[ -f "${out_dir}/libonnxruntime_providers_cuda.so" ]] \
         || { echo "ERROR: ONNX Runtime CUDA provider not staged in ${src_dir}"; return 1; }
@@ -1907,8 +1937,11 @@ if [[ "${WITH_VULKAN}" == "1" ]]; then
   want_arch amd64 && build_linux_glibc_variant amd64 vulkan
   want_arch arm64 && build_linux_glibc_variant arm64 vulkan
 fi
-if [[ "${WITH_CUDA}" == "1" ]]; then
-  want_arch amd64 && build_linux_glibc_variant amd64 cuda
+if [[ "${WITH_CUDA12}" == "1" ]]; then
+  want_arch amd64 && build_linux_glibc_variant amd64 cuda12
+fi
+if [[ "${WITH_CUDA13}" == "1" ]]; then
+  want_arch amd64 && build_linux_glibc_variant amd64 cuda13
 fi
 true
 

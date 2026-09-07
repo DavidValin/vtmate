@@ -2,7 +2,7 @@
 # vtmate installer - POSIX sh (bash/dash/zsh on Linux and macOS, Git Bash on Windows)
 #
 #   curl -fsSL https://raw.githubusercontent.com/DavidValin/vtmate/main/installer.sh | sh
-#   sh installer.sh [--scope user|system] [--prefix DIR] [--variant cpu|vulkan|cuda]
+#   sh installer.sh [--scope user|system] [--prefix DIR] [--variant cpu|vulkan|cuda12|cuda13]
 #                   [--version TAG] [--yes] [--dry-run] [--uninstall] [--help]
 #
 # Layout (fixed locations, the binary is put on $PATH):
@@ -29,7 +29,8 @@ usage() {
 Options:
   --scope user|system   install for this user (default) or system-wide (sudo / Administrator)
   --prefix DIR          custom prefix: DIR/bin and DIR/lib/vtmate (implies --scope user)
-  --variant NAME        force cpu, vulkan or cuda instead of auto-detection
+  --variant NAME        force cpu, vulkan, cuda12 or cuda13 instead of auto-detection
+                        (cuda = whichever CUDA major this machine has a runtime for)
   --version TAG         install a specific release tag instead of the latest
   --yes                 answer yes to every question (reinstall, uninstall)
   --dry-run             detect, select and report; download and install nothing
@@ -55,7 +56,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 case "$SCOPE" in ""|user|system) ;; *) echo "❌ --scope must be user or system"; exit 1 ;; esac
-case "$VARIANT" in ""|cpu|vulkan|cuda) ;; *) echo "❌ --variant must be cpu, vulkan or cuda"; exit 1 ;; esac
+case "$VARIANT" in ""|cpu|vulkan|cuda|cuda12|cuda13) ;; *) echo "❌ --variant must be cpu, vulkan, cuda12, cuda13 or cuda"; exit 1 ;; esac
 [ -n "$PREFIX" ] && SCOPE="user"
 
 # -------------------------
@@ -293,7 +294,9 @@ say "vtmate $VERSION - $OS_NAME/$ARCH_NAME$([ "$WSL" -eq 1 ] && echo ' (WSL)')"
 [ "$WSL" -eq 1 ] && warn "Running under WSL: this installs the Linux build inside WSL. For GPU use you need NVIDIA's WSL2 driver on the Windows side; the native Windows build is a separate download."
 
 # -------------------------
-# GPU detection: driver, then the runtime the cuda variant actually needs
+# GPU detection: driver, then the runtime the cuda12 / cuda13 variant needs.
+# The two cuda builds are the same program against CUDA 12.x / 13.x; the one
+# to install is the one whose runtime libraries are already on this machine.
 # -------------------------
 detect_cuda_driver() {
   command -v nvidia-smi >/dev/null 2>&1 && return 0
@@ -324,12 +327,50 @@ have_dll() { # cudart64_*.dll on PATH or in the CUDA toolkit
   done
   return 1
 }
-cuda_runtime_missing() { # prints what is missing for the cuda variant
+# cuda_runtime_libs MAJOR -> the runtime files the cudaMAJOR build needs here.
+# Library names carry the CUDA major (cuFFT bumps its own: 11 under CUDA 12,
+# 12 under CUDA 13); cuRAND 10 and cuDNN 9 keep theirs across both. On
+# Windows the archive already bundles cuDNN and cuBLAS beside the exe, so
+# only the rest is listed.
+cuda_runtime_libs() {
   if [ "$OS_NAME" = "linux" ]; then
-    for l in libcudart.so.12 libcublas.so.12 libcublasLt.so.12 libcufft.so.11 libcurand.so.10 libcudnn.so.9; do have_so "$l" || printf '%s ' "$l"; done
+    case "$1" in
+      12) echo "libcudart.so.12 libcublas.so.12 libcublasLt.so.12 libcufft.so.11 libcurand.so.10 libcudnn.so.9" ;;
+      13) echo "libcudart.so.13 libcublas.so.13 libcublasLt.so.13 libcufft.so.12 libcurand.so.10 libcudnn.so.9" ;;
+    esac
   elif [ "$OS_NAME" = "windows" ]; then
-    for l in "cudart64_*.dll" "cufft64_*.dll" "curand64_*.dll"; do have_dll "$l" || printf '%s ' "$l"; done
+    case "$1" in
+      12) echo "cudart64_12.dll cufft64_11.dll curand64_10.dll" ;;
+      13) echo "cudart64_13.dll cufft64_12.dll curand64_10.dll" ;;
+    esac
   fi
+}
+cuda_runtime_missing() { # MAJOR -> prints what is missing for the cudaMAJOR variant
+  for l in $(cuda_runtime_libs "$1"); do
+    if [ "$OS_NAME" = "linux" ]; then have_so "$l" || printf '%s ' "$l"
+    else have_dll "$l" || printf '%s ' "$l"; fi
+  done
+}
+# driver_cuda_max -> the newest CUDA major the driver can run (nvidia-smi's
+# header line); empty when there is no nvidia-smi to ask. A CUDA 13 runtime
+# on a driver that stops at 12.x fails at load, so that major is skipped.
+driver_cuda_max() {
+  for c in nvidia-smi nvidia-smi.exe; do
+    command -v "$c" >/dev/null 2>&1 || continue
+    "$c" 2>/dev/null | sed -n 's/.*CUDA Version: *\([0-9][0-9]*\)\..*/\1/p' | head -1
+    return 0
+  done
+  return 0
+}
+# cuda_major_available -> the highest CUDA major (13, then 12) whose runtime
+# is complete on this machine and within the driver's reach; empty if none.
+cuda_major_available() {
+  drv="$(driver_cuda_max)"
+  for m in 13 12; do
+    [ -n "$drv" ] && [ "$drv" -lt "$m" ] && continue
+    [ -z "$(cuda_runtime_missing "$m")" ] && { echo "$m"; return 0; }
+  done
+  return 0
 }
 
 CUDA=0; VULKAN=0
@@ -353,23 +394,34 @@ say "Binary:    $BIN_DIR/$APP$([ "$OS_NAME" = windows ] && echo .exe)"
 say "Libraries: $LIB_DIR"
 
 # -------------------------
-# Candidates: cuda -> vulkan -> cpu, best available first
+# Candidates: cuda13/cuda12 (whichever runtime is here) -> vulkan -> cpu
 # -------------------------
 PREFIX_NAME="${APP}-${VERSION}-${OS_NAME}-${ARCH_NAME}"
 EXT="tgz"; [ "$OS_NAME" = "windows" ] && EXT="zip"
 CANDIDATES=""
 if [ "$OS_NAME" = "macos" ]; then
   CANDIDATES="${PREFIX_NAME}.${EXT}"
+elif [ "$VARIANT" = "cuda" ]; then
+  major="$(cuda_major_available)"
+  [ -n "$major" ] || die "--variant cuda: no complete CUDA 12 or 13 runtime found on this machine; use --variant cuda12 or --variant cuda13 to force one"
+  CANDIDATES="${PREFIX_NAME}-cuda${major}.${EXT}"
 elif [ -n "$VARIANT" ]; then
   CANDIDATES="${PREFIX_NAME}-${VARIANT}.${EXT}"
 else
   if [ "$CUDA" -eq 1 ]; then
-    missing="$(cuda_runtime_missing)"
-    if [ -n "$missing" ]; then
-      warn "NVIDIA driver found, but the cuda build also needs: $missing"
-      warn "Install the CUDA Toolkit 12.x$([ "$OS_NAME" = linux ] && echo ' and cuDNN 9') and rerun, or force it with --variant cuda. Falling back to vulkan/cpu."
+    major="$(cuda_major_available)"
+    if [ -n "$major" ]; then
+      CANDIDATES="${PREFIX_NAME}-cuda${major}.${EXT}"
     else
-      CANDIDATES="${PREFIX_NAME}-cuda.${EXT}"
+      drv="$(driver_cuda_max)"
+      for m in 13 12; do
+        if [ -n "$drv" ] && [ "$drv" -lt "$m" ]; then
+          warn "cuda$m: the NVIDIA driver goes up to CUDA $drv.x only"
+        else
+          warn "cuda$m: NVIDIA driver found, but the build also needs: $(cuda_runtime_missing "$m")"
+        fi
+      done
+      warn "Install the CUDA Toolkit 12.x or 13.x$([ "$OS_NAME" = linux ] && echo ' and cuDNN 9') and rerun, or force one with --variant cuda12|cuda13. Falling back to vulkan/cpu."
     fi
   fi
   [ "$VULKAN" -eq 1 ] && CANDIDATES="$CANDIDATES ${PREFIX_NAME}-vulkan.${EXT}"
@@ -472,8 +524,9 @@ done
 if [ "$OS_NAME" = "windows" ]; then add_to_path "$BIN_DIR" "$LIB_DIR"; else add_to_path "$BIN_DIR"; fi
 
 case "$INSTALLED" in
-  *-cuda.*)
-    say "Installed the cuda build. It needs the CUDA 12 runtime$([ "$OS_NAME" = linux ] && echo ' and cuDNN 9') on this machine (system-wide or copied into $LIB_DIR)." ;;
+  *-cuda12.*|*-cuda13.*)
+    m="${INSTALLED##*-cuda}"; m="${m%%.*}"
+    say "Installed the cuda$m build. It needs the CUDA $m runtime$([ "$OS_NAME" = linux ] && echo ' and cuDNN 9') on this machine (system-wide or copied into $LIB_DIR)." ;;
   *-vulkan.*)
     say "Installed the vulkan build. It needs the Vulkan loader (libvulkan.so.1 / vulkan-1.dll) from your GPU driver." ;;
 esac

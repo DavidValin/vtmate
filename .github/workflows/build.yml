@@ -28,7 +28,10 @@ jobs:
       fail-fast: false
       matrix:
         # One arch+variant per runner, matching the windows-x64 job's shape.
-        # CUDA is amd64-only (build_linux.sh header).
+        # CUDA is amd64-only (build_linux.sh header). cuda12 and cuda13 are
+        # the same build against a CUDA 12.x / 13.x toolkit (minors pinned in
+        # build_linux.sh), named by the major the user has installed, which is
+        # what installer.sh matches against.
         #
         # cpu is musl and fully static; arm64-cpu cross-compiles from amd64.
         # vulkan/cuda are glibc - the Vulkan/CUDA loaders the user installs are
@@ -42,7 +45,8 @@ jobs:
         include:
           - { arch: x86_64,  variant: cpu,    runner: ubuntu-latest }
           - { arch: x86_64,  variant: vulkan, runner: ubuntu-latest }
-          - { arch: x86_64,  variant: cuda,   runner: ubuntu-latest }
+          - { arch: x86_64,  variant: cuda12, runner: ubuntu-latest }
+          - { arch: x86_64,  variant: cuda13, runner: ubuntu-latest }
           - { arch: aarch64, variant: cpu,    runner: ubuntu-latest }
           - { arch: aarch64, variant: vulkan, runner: ubuntu-24.04-arm }
     steps:
@@ -85,17 +89,22 @@ jobs:
     # -rdc=true, which ran past two hours and was killed mid-build. Trimming
     # CMAKE_CUDA_ARCHITECTURES is the lever if this gets too slow or costly.
     timeout-minutes: 360
-    env:
-      # Keep in sync with $CUDA_VERSION in build_windows.ps1.
-      CUDA_VERSION: "13.3.0"
-      # CUDA installs into a directory named by major.minor (v12.3), NOT the
-      # full patch version, and the silent-install component names use the
-      # same major.minor form (nvcc_12.3).
-      CUDA_MM: "13.3"
     strategy:
       fail-fast: false
       matrix:
-        variant: [cpu, vulkan, cuda]
+        # cuda12 / cuda13: the same build against a CUDA 12.x / 13.x toolkit,
+        # named by the major the user has installed (installer.sh picks).
+        # Keep cuda_version in sync with the table in build_windows.ps1.
+        # cuda_mm: CUDA installs into a directory named by major.minor
+        # (v12.8), NOT the full patch version, and the silent-install
+        # component names use the same major.minor form (nvcc_12.8).
+        # cuda_installer: the local (self-contained) installer file name.
+        # 12.x embeds the bundled driver version in it; 13.x dropped that.
+        include:
+          - { variant: cpu }
+          - { variant: vulkan }
+          - { variant: cuda12, cuda_version: "12.8.1", cuda_mm: "12.8", cuda_installer: cuda_12.8.1_572.61_windows.exe }
+          - { variant: cuda13, cuda_version: "13.3.0", cuda_mm: "13.3", cuda_installer: cuda_13.3.0_windows.exe }
     steps:
       - uses: actions/checkout@v4
 
@@ -114,25 +123,24 @@ jobs:
       # into build_windows.ps1's fallback network installer, which hangs.
       # Cache the real install directory instead.
       - name: Cache CUDA Toolkit
-        if: matrix.variant == 'cuda'
+        if: startsWith(matrix.variant, 'cuda')
         uses: actions/cache@v4
         id: cuda-cache
         with:
-          path: C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ env.CUDA_MM }}
-          key: windows-cuda-${{ env.CUDA_VERSION }}
+          path: C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ matrix.cuda_mm }}
+          key: windows-cuda-${{ matrix.cuda_version }}
 
       - name: Install CUDA Toolkit (if not cached)
-        if: matrix.variant == 'cuda' && steps.cuda-cache.outputs.cache-hit != 'true'
+        if: startsWith(matrix.variant, 'cuda') && steps.cuda-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $ver = "${{ env.CUDA_VERSION }}"
-          $mm  = "${{ env.CUDA_MM }}"
+          $ver = "${{ matrix.cuda_version }}"
+          $mm  = "${{ matrix.cuda_mm }}"
           $root = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v$mm"
           # Local (self-contained) installer, not the network one: the network
           # installer pulls components at install time and is what stalls in CI.
-          # CUDA 13.x dropped the driver-version suffix from the installer name.
-          $url = "https://developer.download.nvidia.com/compute/cuda/$ver/local_installers/cuda_${ver}_windows.exe"
+          $url = "https://developer.download.nvidia.com/compute/cuda/$ver/local_installers/${{ matrix.cuda_installer }}"
           $exe = "$env:RUNNER_TEMP\cuda_installer.exe"
           Write-Host "Downloading $url"
           Invoke-WebRequest -Uri $url -OutFile $exe -UseBasicParsing
@@ -154,45 +162,49 @@ jobs:
             throw "nvcc.exe not found under $root"
           }
 
-          # CUDA 13 splits pieces the toolkit installer's component list does
-          # not cover into separate redistributables: crt/host_config.h (pulled
-          # in by cuda_runtime.h) and nvvm/bin/cicc.exe (nvcc's %CICC_PATH%).
-          # Without them nvcc fails with "Cannot open include file:
-          # 'crt/host_config.h'" and "The system cannot find the path
-          # specified". Overlay them from NVIDIA's manifest so the per-component
-          # versions stay correct. This lands in $root, so the cache keeps it.
-          $manifest = Invoke-RestMethod -UseBasicParsing `
-            -Uri "https://developer.download.nvidia.com/compute/cuda/redist/redistrib_$ver.json"
-          foreach ($comp in @("cuda_crt", "libnvvm", "libnvptxcompiler", "libnvfatbin")) {
-            $rel = $manifest.$comp."windows-x86_64".relative_path
-            if (-not $rel) { throw "no windows-x86_64 payload for $comp in CUDA $ver manifest" }
-            Write-Host "overlaying $comp -> $rel"
-            $zip = "$env:RUNNER_TEMP\$comp.zip"
-            Invoke-WebRequest -UseBasicParsing -OutFile $zip `
-              -Uri "https://developer.download.nvidia.com/compute/cuda/redist/$rel"
-            Expand-Archive -Path $zip -DestinationPath "$env:RUNNER_TEMP\$comp" -Force
-            # each archive holds one top-level dir laid out toolkit-relative
-            $top = (Get-ChildItem "$env:RUNNER_TEMP\$comp" -Directory)[0].FullName
-            Copy-Item -Recurse -Force "$top\*" "$root\"
-          }
-          foreach ($need in @("include\crt\host_config.h", "nvvm\bin\cicc.exe")) {
-            if (-not (Test-Path "$root\$need")) { throw "$need still missing after overlay" }
+          # CUDA 12.x ships crt/ and nvvm/ inside the nvcc component; 13.x
+          # moved them out (see below), so the overlay is 13-only.
+          if ($ver -like "13.*") {
+            # CUDA 13 splits pieces the toolkit installer's component list does
+            # not cover into separate redistributables: crt/host_config.h (pulled
+            # in by cuda_runtime.h) and nvvm/bin/cicc.exe (nvcc's %CICC_PATH%).
+            # Without them nvcc fails with "Cannot open include file:
+            # 'crt/host_config.h'" and "The system cannot find the path
+            # specified". Overlay them from NVIDIA's manifest so the per-component
+            # versions stay correct. This lands in $root, so the cache keeps it.
+            $manifest = Invoke-RestMethod -UseBasicParsing `
+              -Uri "https://developer.download.nvidia.com/compute/cuda/redist/redistrib_$ver.json"
+            foreach ($comp in @("cuda_crt", "libnvvm", "libnvptxcompiler", "libnvfatbin")) {
+              $rel = $manifest.$comp."windows-x86_64".relative_path
+              if (-not $rel) { throw "no windows-x86_64 payload for $comp in CUDA $ver manifest" }
+              Write-Host "overlaying $comp -> $rel"
+              $zip = "$env:RUNNER_TEMP\$comp.zip"
+              Invoke-WebRequest -UseBasicParsing -OutFile $zip `
+                -Uri "https://developer.download.nvidia.com/compute/cuda/redist/$rel"
+              Expand-Archive -Path $zip -DestinationPath "$env:RUNNER_TEMP\$comp" -Force
+              # each archive holds one top-level dir laid out toolkit-relative
+              $top = (Get-ChildItem "$env:RUNNER_TEMP\$comp" -Directory)[0].FullName
+              Copy-Item -Recurse -Force "$top\*" "$root\"
+            }
+            foreach ($need in @("include\crt\host_config.h", "nvvm\bin\cicc.exe")) {
+              if (-not (Test-Path "$root\$need")) { throw "$need still missing after overlay" }
+            }
           }
 
       # refreshenv only affects the shell of the step that runs it; every later
       # step is a fresh process. Persist via GITHUB_ENV/GITHUB_PATH so
       # build_windows.ps1 finds nvcc instead of trying to install CUDA itself.
       - name: Expose CUDA to later steps
-        if: matrix.variant == 'cuda'
+        if: startsWith(matrix.variant, 'cuda')
         shell: pwsh
         run: |
-          $root = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ env.CUDA_MM }}"
+          $root = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ matrix.cuda_mm }}"
           if (-not (Test-Path "$root\bin\nvcc.exe")) { throw "CUDA missing at $root" }
           # The MSBuild CUDA targets that the VS integration installs resolve
           # CudaToolkitDir from CUDA_PATH_V<major>_<minor>. A silent component
           # install never sets it, so nvcc is found but every .cu compile dies
           # with "The CUDA Toolkit directory '' does not exist".
-          $vname = "CUDA_PATH_V" + ("${{ env.CUDA_MM }}" -replace '\.','_')
+          $vname = "CUDA_PATH_V" + ("${{ matrix.cuda_mm }}" -replace '\.','_')
           "CUDA_PATH=$root"        | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "CUDAToolkit_ROOT=$root" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "$vname=$root"           | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
