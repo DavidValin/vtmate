@@ -392,3 +392,19 @@ voice_speed = 5.0
   assert_eq!(agent.voice_speed, 5.0);
   assert_eq!(agent.whisper_model_path, "~/.whisper-models/ggml-tiny.bin");
 }
+
+#[test]
+fn unknown_section_is_reported_and_headers_are_case_insensitive() {
+  // a typo'd header used to be swallowed into the first agent block and
+  // surface as `missing field name`
+  let path = temp_settings(
+    "[Deamon]\nllm_background_reset = ctrl+alt+x\n\n[agent]\nname = a\nlanguage = en\ntts = supertonic\nvoice = M1\nprovider = ollama\nmodel = m\nbaseurl = http://127.0.0.1:11434\nsystem_prompt = x\n",
+  );
+  let err = load_settings(&path, &default_args()).unwrap_err().to_string();
+  assert!(err.contains("unknown section [Deamon]"), "{}", err);
+
+  let sections = split_leading_sections("[General]\nselected_agent = a\n[DAEMON]\n[Agent]\nname = a\n");
+  assert!(sections.unknown.is_empty());
+  assert!(sections.general.is_some() && sections.daemon.is_some());
+  assert!(sections.rest.starts_with("[agent]\n"), "{:?}", sections.rest);
+}

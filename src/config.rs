@@ -329,6 +329,9 @@ pub struct LeadingSections {
   pub general: Option<String>,
   pub daemon: Option<String>,
   pub rest: String,
+  /// Section headers that are none of [general], [daemon], [agent]
+  /// (typos, wrong case...). Reported by `load_settings`.
+  pub unknown: Vec<String>,
 }
 
 /// Separate the `[general]` and `[daemon]` sections from the `[agent]`
@@ -345,8 +348,9 @@ pub fn split_leading_sections(text: &str) -> LeadingSections {
   let mut cur = Cur::Rest;
   for line in text.split_inclusive('\n') {
     let t = line.trim();
-    if t.starts_with('[') {
-      cur = match t {
+    if t.starts_with('[') && t.ends_with(']') {
+      // headers are matched case-insensitively and re-emitted canonical
+      cur = match t.to_ascii_lowercase().as_str() {
         "[general]" => {
           out.general.get_or_insert_with(String::new);
           Cur::General
@@ -355,11 +359,18 @@ pub fn split_leading_sections(text: &str) -> LeadingSections {
           out.daemon.get_or_insert_with(String::new);
           Cur::Daemon
         }
-        _ => Cur::Rest,
+        "[agent]" => {
+          let body_len = line.trim_end_matches(['\r', '\n']).len();
+          out.rest.push_str("[agent]");
+          out.rest.push_str(&line[body_len..]); // keep the original line ending
+          Cur::Rest
+        }
+        _ => {
+          out.unknown.push(t.to_string());
+          out.rest.push_str(line);
+          Cur::Rest
+        }
       };
-      if cur == Cur::Rest {
-        out.rest.push_str(line);
-      }
       continue;
     }
     match cur {
@@ -674,7 +685,18 @@ pub fn load_settings(
 ) -> Result<Vec<AgentSettings>, Error> {
   // Read the whole INI file; the [general] and [daemon] sections are parsed
   // separately (load_general_settings / load_daemon_settings).
-  let ini_contents = split_leading_sections(&read_to_string(settings_path)?).rest;
+  let sections = split_leading_sections(&read_to_string(settings_path)?);
+  if !sections.unknown.is_empty() {
+    let msg = format!(
+      "unknown section {} in {}: expected [general], [daemon] or [agent]",
+      sections.unknown.join(", "),
+      settings_path.display()
+    );
+    print!("❌ {}", msg);
+    thread::sleep(Duration::from_millis(30));
+    return Err(Error::msg(msg));
+  }
+  let ini_contents = sections.rest;
   // Split on the section header "[agent]"
   let blocks: Vec<&str> = ini_contents
     .split("[agent]")

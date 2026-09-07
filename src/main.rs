@@ -78,8 +78,25 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     && !args.quiet
     && args.debate.is_none()
     && !args.list_voices;
-  if bare_conversation_mode && daemon::ipc::probe(Duration::from_millis(300)).is_some() {
-    attach::run(&args);
+  if bare_conversation_mode {
+    if daemon::ipc::probe(Duration::from_millis(300)).is_some() {
+      attach::run(&args);
+    }
+    // A daemon process exists but did not answer in time (busy, still
+    // starting): give it a few seconds before running a separate session.
+    if let Some(pid) = daemon::paths::read_pid().filter(|p| daemon::paths::pid_alive(*p)) {
+      for _ in 0..10 {
+        thread::sleep(Duration::from_millis(300));
+        if daemon::ipc::probe(Duration::from_millis(500)).is_some() {
+          attach::run(&args);
+        }
+      }
+      println!(
+        "⚠️  a vtmate daemon (pid {}) is running but does not answer; starting a separate terminal session",
+        pid
+      );
+      thread::sleep(Duration::from_millis(1500));
+    }
   }
 
   // make sure piper phonemes are unpacked
