@@ -326,7 +326,7 @@ have_dll() { # cudart64_*.dll on PATH or in the CUDA toolkit
 }
 cuda_runtime_missing() { # prints what is missing for the cuda variant
   if [ "$OS_NAME" = "linux" ]; then
-    for l in libcudart.so.12 libcublas.so.12 libcublasLt.so.12 libcudnn.so.9; do have_so "$l" || printf '%s ' "$l"; done
+    for l in libcudart.so.12 libcublas.so.12 libcublasLt.so.12 libcufft.so.11 libcurand.so.10 libcudnn.so.9; do have_so "$l" || printf '%s ' "$l"; done
   elif [ "$OS_NAME" = "windows" ]; then
     for l in "cudart64_*.dll" "cufft64_*.dll" "curand64_*.dll"; do have_dll "$l" || printf '%s ' "$l"; done
   fi

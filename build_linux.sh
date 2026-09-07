@@ -1170,7 +1170,12 @@ RUN set -eux; \
       -Donnxruntime_USE_WEBNN=OFF \
       -Donnxruntime_USE_CANN=OFF \
       -Donnxruntime_USE_CUDA=OFF \
-      -Donnxruntime_USE_KLEIDIAI=ON \
+      # OFF: KleidiAI needs i8mm, and the musl.cc GCC 11.2.1 toolchain cannot
+      # build it - it accepts -march=...+i8mm but defines no
+      # __ARM_FEATURE_MATMUL_INT8 (KleidiAI's #error guard) and its assembler
+      # rejects smmla. The glibc arm64 image (GCC 13) keeps it on; here MLAS
+      # stays on its own NEON kernels, as in 0.5.0.
+      -Donnxruntime_USE_KLEIDIAI=OFF \
       -DCMAKE_INSTALL_PREFIX=$ONNX_DIR \
       -DCMAKE_BUILD_TYPE=Release \
       -Donnxruntime_USE_SYSTEM_PROTOBUF=ON \
@@ -1451,14 +1456,37 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libvulkan-dev glslc \
  && rm -rf /var/lib/apt/lists/*
 
-# nvcc for whisper/ggml's CUDA backend and for ORT's CUDA execution provider.
-# g++-12: noble's toolkit is CUDA 12.0, whose nvcc accepts GCC <= 12 as host
-# compiler; ORT's .cu files go through it, everything else stays on the default
-# GCC 13 (same libstdc++, so the objects link together).
+# nvcc for whisper/ggml's CUDA backend and for ORT's CUDA execution provider,
+# from NVIDIA's apt repository rather than noble's nvidia-cuda-toolkit: that
+# package is CUDA 12.0, and ORT 1.24's CUDA provider (built upstream against
+# 12.8) no longer compiles with 12.0's cuda_bf16.hpp - cu_inc/common.cuh casts
+# onnxruntime::BFloat16 to __nv_bfloat16, which 12.0 reports as ambiguous.
+# Still CUDA 12: same driver floor, same _cuda12 cuDNN archive, same
+# libcudart.so.12 the installer looks for. Its nvcc accepts noble's GCC 13 as
+# host compiler, so ORT's .cu files and everything else share one compiler.
+# Only the pieces that get linked (nvcc, cudart, cuBLAS, cuFFT, cuRAND, the
+# CCCL headers, the libcuda stub), not the multi-GB cuda-toolkit meta package.
+ARG CUDA_VERSION=12.8
 RUN if [ "$VARIANT" = "cuda" ]; then \
-      apt-get update && apt-get install -y --no-install-recommends nvidia-cuda-toolkit g++-12 && \
-      rm -rf /var/lib/apt/lists/* ; \
+      set -eux; \
+      case "$ARCH" in amd64) repo=x86_64 ;; arm64) repo=sbsa ;; esac; \
+      v="$(echo "$CUDA_VERSION" | tr . -)"; \
+      wget -nv --timeout=60 --tries=3 -O /tmp/cuda-keyring.deb \
+        "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/$repo/cuda-keyring_1.1-1_all.deb"; \
+      dpkg -i /tmp/cuda-keyring.deb; rm -f /tmp/cuda-keyring.deb; \
+      apt-get update && apt-get install -y --no-install-recommends \
+        cuda-nvcc-$v cuda-cudart-dev-$v cuda-driver-dev-$v cuda-cccl-$v \
+        libcublas-dev-$v libcufft-dev-$v libcurand-dev-$v; \
+      rm -rf /var/lib/apt/lists/*; \
+      ln -sfn /usr/local/cuda-$CUDA_VERSION /usr/local/cuda; \
+      /usr/local/cuda/bin/nvcc --version; \
     fi
+# nvcc on PATH for ggml's CMake (whisper-rs-sys) in the cargo step; the rest
+# is what FindCUDAToolkit and whisper-rs-sys consult. Unused on other variants.
+ENV PATH=/usr/local/cuda/bin:$PATH \
+    CUDAToolkit_ROOT=/usr/local/cuda \
+    CUDA_HOME=/usr/local/cuda \
+    CUDA_PATH=/usr/local/cuda
 
 # cuDNN for the ONNX Runtime CUDA execution provider - not part of the toolkit.
 ARG CUDNN_VERSION=9.16.0.29
@@ -1499,9 +1527,9 @@ RUN set -eux; \
     KLEIDIAI=OFF; if [ "$ARCH" = "arm64" ]; then KLEIDIAI=ON; fi; \
     if [ "$VARIANT" = "cuda" ]; then \
       CUDA_FLAGS="-Donnxruntime_USE_CUDA=ON \
-        -DCMAKE_CUDA_COMPILER=/usr/bin/nvcc \
-        -DCMAKE_CUDA_HOST_COMPILER=/usr/bin/g++-12 \
-        -DCUDAToolkit_ROOT=/usr \
+        -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc \
+        -DCMAKE_CUDA_HOST_COMPILER=/usr/bin/g++ \
+        -DCUDAToolkit_ROOT=/usr/local/cuda \
         -DCUDNN_PATH=/usr/local/cudnn \
         -DCMAKE_CUDA_ARCHITECTURES=75;86;89 \
         -Donnxruntime_USE_FLASH_ATTENTION=OFF \
@@ -1724,6 +1752,9 @@ DOCKERFILE
     -e DEBUG_SYMBOLS="${DEBUG_SYMBOLS:-0}" \
     "$img" \
     bash -lc '
+      # Single-quoted through to the closing quote below: no apostrophes,
+      # comments included. One ends the string early, the container then
+      # runs a truncated script and the host evaluates the rest (ARCH: unbound).
       set -euo pipefail
       cd /work
       rustup target add "$TARGET"
@@ -1765,7 +1796,8 @@ DOCKERFILE
       echo "ORT dependency archives linked: $(echo $ORT_DEPS | wc -w)"
 
       # cuda: DT_RPATH (old dtags, so it also covers the dependencies of the
-      # dlopened ORT CUDA provider) pointing at the binary's own directory.
+      # dlopened ORT CUDA provider) pointing at the directory of the binary
+      # itself.
       # With the provider-search-fallback patch above this is how ORT finds
       # its provider module beside the binary whatever argv[0] looks like
       # (glibc resolves $ORIGIN from /proc/self/exe), and CUDA / cuDNN
@@ -1819,7 +1851,7 @@ DOCKERFILE
 
       CARGO_TARGET_DIR="$ctd" cargo build --release --target "$TARGET" --features "$FEATS"
 
-      # cuda: stage ORT's CUDA provider module and its shim next to the binary
+      # cuda: stage the ORT CUDA provider module and its shim next to the binary
       # for packaging (the ORT core itself is linked statically above).
       if [ "${VARIANT}" = "cuda" ]; then
         for f in libonnxruntime_providers_cuda.so libonnxruntime_providers_shared.so; do
