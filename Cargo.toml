@@ -67,7 +67,7 @@ windows-sys = { version = "0.59", features = [
 objc2-app-kit = { version = "0.3", features = ["NSEvent"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-x11rb = { version = "0.13", features = ["xtest"] }
+x11rb = { version = "0.13", features = ["xtest", "xfixes"] }
 
 [build-dependencies]
 cc = "1"

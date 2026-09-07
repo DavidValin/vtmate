@@ -97,6 +97,16 @@ pub fn speak_via_supertonic(
       channels: 1,
       sample_rate,
     };
+    // Re-check after synthesis: an interrupt that arrived while this chunk
+    // was being generated already emptied the playback queue, so sending it
+    // now would start speaking again.
+    if interrupt_counter.load(Ordering::SeqCst) != expected_interrupt {
+      crate::log::log(
+        "debug",
+        "[supertonic_tts] interrupted during synthesis: chunk discarded, not played",
+      );
+      return Ok(SpeakOutcome::Interrupted);
+    }
     if tx.send(audio).is_err() {
       return Ok(SpeakOutcome::Interrupted);
     }

@@ -261,6 +261,9 @@ fn stream_wav16le_over_http(
     let aligned = pending.len() - (pending.len() % channels as usize);
     pending.truncate(aligned);
     if !pending.is_empty() {
+      if interrupt_counter.load(Ordering::SeqCst) != expected_interrupt {
+        return Ok(crate::tts::SpeakOutcome::Interrupted);
+      }
       tx.send(AudioChunk {
         data: pending,
         channels,
@@ -310,6 +313,9 @@ fn stream_wav16le_over_http(
     } else {
       Vec::new()
     };
+    if interrupt_counter.load(Ordering::SeqCst) != expected_interrupt {
+      return Ok(crate::tts::SpeakOutcome::Interrupted);
+    }
     tx.send(AudioChunk {
       data,
       channels,

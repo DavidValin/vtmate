@@ -53,6 +53,7 @@ pub fn controller_thread(inputs: ControllerInputs) {
     desktop: Desktop::new(),
     key_state: KeyLocalState::default(),
     tts_job: None,
+    last_reset_press: None,
   };
   let rx_hotkey = GlobalHotKeyEvent::receiver();
   loop {
@@ -120,6 +121,8 @@ struct Controller {
   desktop: Desktop,
   key_state: KeyLocalState,
   tts_job: Option<JoinHandle<()>>,
+  /// Reset hotkey: once stops the speech, twice within a second resets.
+  last_reset_press: Option<Instant>,
 }
 
 impl Controller {
@@ -189,7 +192,7 @@ impl Controller {
         self.read_selection_aloud();
       }
       (Hotkey::Reset, true) => {}
-      (Hotkey::Reset, false) => self.reset_conversation(),
+      (Hotkey::Reset, false) => self.reset_hotkey(),
     }
   }
 
@@ -215,13 +218,7 @@ impl Controller {
       return;
     }
     if source == PttSource::HotkeyLlm {
-      let attachment = self.desktop.read_selection();
-      if let Some(a) = &attachment {
-        crate::log::log(
-          "debug",
-          &format!("attaching {} selected characters", a.chars().count()),
-        );
-      }
+      let attachment = self.current_selection();
       if let Ok(mut m) = self.state.utterance_meta.lock() {
         m.attachment = attachment;
       }
@@ -237,7 +234,12 @@ impl Controller {
       crate::log::log("warning", "read-aloud is not available during a debate");
       return;
     }
-    let Some(text) = self.desktop.read_selection() else {
+    let Some(text) = self
+      .desktop
+      .selection_present()
+      .then(|| self.desktop.read_selection())
+      .flatten()
+    else {
       crate::log::log("info", "nothing selected to read");
       return;
     };
@@ -281,8 +283,50 @@ impl Controller {
     }));
   }
 
+  /// The text selected right now, or nothing when nothing is selected.
+  /// X11 keeps serving the last selected text after the selection is gone,
+  /// so the answer comes from whether the selection still has an owner:
+  /// text still highlighted is sent again, a dropped selection is not.
+  fn current_selection(&mut self) -> Option<String> {
+    if !self.desktop.selection_present() {
+      crate::log::log("debug", "nothing selected: no text attached");
+      return None;
+    }
+    let attachment = self.desktop.read_selection();
+    if let Some(a) = &attachment {
+      crate::log::log(
+        "debug",
+        &format!("attaching {} selected characters", a.chars().count()),
+      );
+    }
+    attachment
+  }
+
+  /// Reset hotkey, like ESC in the terminal: once stops the speech (and
+  /// pauses a debate), twice within a second also resets the conversation.
+  fn reset_hotkey(&mut self) {
+    let now = Instant::now();
+    let double = self
+      .last_reset_press
+      .is_some_and(|prev| now.duration_since(prev) <= Duration::from_millis(1000));
+    if double {
+      self.last_reset_press = None;
+      self.reset_conversation();
+      return;
+    }
+    self.last_reset_press = Some(now);
+    self.interrupt_speech();
+    let state = &self.state;
+    if state.debate_enabled.load(Ordering::SeqCst) && !state.debate_paused.load(Ordering::SeqCst) {
+      state.debate_paused.store(true, Ordering::SeqCst);
+      self.ui_line("\n\x1b[32m🚩 Debate paused, speak again to continue \x1b[0m\n");
+    }
+    crate::log::log("debug", "speech stopped by hotkey (press again to reset)");
+  }
+
   fn reset_conversation(&mut self) {
     self.interrupt_speech();
+    self.last_reset_press = None;
     if matches!(
       self.active_ptt,
       Some(PttSource::HotkeyLlm) | Some(PttSource::HotkeyPaste)
@@ -305,6 +349,7 @@ impl Controller {
     self.ui_line("");
     self.ui_line("\n\x1b[32m✨ Session restarted (history reset) \x1b[0m\n");
     crate::log::log("info", "conversation reset by hotkey");
+    super::desktop::notify("vtmate", "Conversation restarted!");
   }
 
   fn on_action(&mut self, action: DaemonAction) {
@@ -372,7 +417,7 @@ impl Controller {
   /// Testing aid: process `text` as if transcribed from a hotkey utterance.
   fn say(&mut self, text: String, kind: UtteranceKind) {
     let attachment = if kind == UtteranceKind::Llm {
-      self.desktop.read_selection()
+      self.current_selection()
     } else {
       None
     };

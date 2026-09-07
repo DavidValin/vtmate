@@ -431,6 +431,9 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
         if now.duration_since(prev) <= Duration::from_millis(1000) {
           st.last_esc = None;
           state.reset_conversation();
+          if state.daemon_mode.load(Ordering::Relaxed) {
+            crate::daemon::desktop::notify("vtmate", "Conversation restarted!");
+          }
           let _ = ctx.tx_ui.send("line|".to_string());
           let _ = ctx.tx_ui.send(
             "line|\n\x1b[32m✨ Session restarted (history reset) \x1b[0m\n".to_string(),

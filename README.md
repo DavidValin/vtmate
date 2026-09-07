@@ -340,10 +340,10 @@ Shortcuts (change them in the `[daemon]` section of `~/.vtmate/settings`):
 
 | setting | default | what it does |
 |---|---|---|
-| `llm_background_ptt_combo` | `ctrl+alt+a` | hold to talk. On release your speech is transcribed and, if some text is selected anywhere on the desktop, the selection is appended after the speech (speech first, blank line, selection). The whole thing is sent to the agent as one message and the reply is spoken. Pressing it while a reply is playing interrupts the reply. |
+| `llm_background_ptt_combo` | `ctrl+alt+a` | hold to talk. On release your speech is transcribed and, if some text is selected anywhere on the desktop, the selection is appended after the speech (speech first, blank line, selection). The whole thing is sent to the agent as one message and the reply is spoken. Pressing it while a reply is playing interrupts the reply. Whatever is selected at that moment is sent, every time. Once you deselect it, nothing is appended. |
 | `tts_background_combo` | `ctrl+alt+r` | read the selected text aloud (no LLM). Press again while it is speaking to stop. |
 | `stt_and_paste_background_ptt_combo` | `ctrl+alt+s` | hold to talk. On release your speech is transcribed and pasted at the cursor of the application you are in (through the clipboard, whose previous text is put back afterwards). No LLM, nothing spoken. |
-| `llm_background_reset` | `ctrl+escape` | reset the conversation (stops speech, clears the history), like `ESCAPE` twice in the terminal. |
+| `llm_background_reset` | `ctrl+escape` | like `ESCAPE` in the terminal: press once to stop the speech, twice within a second to also reset the conversation (history cleared). A desktop notification "Conversation restarted!" confirms the reset. |
 
 Shortcuts are written as modifiers joined by `+`: `ctrl`, `alt` (or `option`), `shift`, `cmd` (or `super`), `cmdorctrl`, plus a key: letters, digits, `f1`..`f12`, `escape`, `space`, `tab`, arrows... e.g. `ctrl+alt+a`, `shift+f5`, `cmd+alt+r`.
 

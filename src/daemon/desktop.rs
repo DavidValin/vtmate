@@ -5,6 +5,8 @@
 #[cfg(not(target_os = "linux"))]
 use enigo::{Direction, Key, Keyboard};
 use enigo::{Enigo, Settings};
+#[cfg(target_os = "linux")]
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 // API
@@ -20,6 +22,10 @@ pub struct Desktop {
   clipboard: Option<arboard::Clipboard>,
   #[cfg_attr(target_os = "linux", allow(dead_code))]
   enigo: Option<Enigo>,
+  /// Whether anything currently owns the PRIMARY selection, i.e. whether
+  /// text is selected right now; fed by the XFixes watcher.
+  #[cfg(target_os = "linux")]
+  selection_present: Arc<Mutex<bool>>,
 }
 
 impl Desktop {
@@ -38,7 +44,34 @@ impl Desktop {
         None
       }
     };
-    Self { clipboard, enigo }
+    #[cfg(target_os = "linux")]
+    let selection_present = {
+      let slot = Arc::new(Mutex::new(true));
+      spawn_selection_watch(slot.clone());
+      slot
+    };
+    Self {
+      clipboard,
+      enigo,
+      #[cfg(target_os = "linux")]
+      selection_present,
+    }
+  }
+
+  /// Whether text is selected right now. `false` means the selection was
+  /// dropped (nothing owns it) and the stale text it held must not be used.
+  ///
+  /// Windows / macOS capture the selection with a copy shortcut at the
+  /// moment of the request, so it is always what is highlighted right now.
+  pub fn selection_present(&self) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+      self.selection_present.lock().map(|p| *p).unwrap_or(true)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+      true
+    }
   }
 
   /// The text currently selected anywhere on the desktop, trimmed; `None`
@@ -155,6 +188,130 @@ impl Desktop {
     let _ = enigo.key(Key::Unicode(key), Direction::Click);
     let _ = enigo.key(modifier, Direction::Release);
   }
+}
+
+/// Show a desktop notification (best effort, never blocks): `notify-send`
+/// on Linux, Notification Center on macOS, a toast on Windows.
+pub fn notify(title: &str, body: &str) {
+  use std::process::{Command, Stdio};
+  #[cfg(target_os = "linux")]
+  let mut cmd = {
+    let mut c = Command::new("notify-send");
+    c.args(["-a", "vtmate", "-t", "3000", title, body]);
+    c
+  };
+  #[cfg(target_os = "macos")]
+  let mut cmd = {
+    let mut c = Command::new("osascript");
+    c.args([
+      "-e",
+      &format!(
+        "display notification \"{}\" with title \"{}\"",
+        body.replace('"', "'"),
+        title.replace('"', "'")
+      ),
+    ]);
+    c
+  };
+  #[cfg(target_os = "windows")]
+  let mut cmd = {
+    let script = format!(
+      concat!(
+        "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null;",
+        "$x = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02);",
+        "$t = $x.GetElementsByTagName('text');",
+        "$t.Item(0).AppendChild($x.CreateTextNode('{}')) | Out-Null;",
+        "$t.Item(1).AppendChild($x.CreateTextNode('{}')) | Out-Null;",
+        "$id = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\powershell.exe';",
+        "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($id).Show([Windows.UI.Notifications.ToastNotification]::new($x))"
+      ),
+      title.replace('\'', "''"),
+      body.replace('\'', "''")
+    );
+    let mut c = Command::new("powershell");
+    c.args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", &script]);
+    c
+  };
+  #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+  let mut cmd = {
+    let _ = (title, body);
+    return;
+  };
+  if let Err(e) = cmd
+    .stdin(Stdio::null())
+    .stdout(Stdio::null())
+    .stderr(Stdio::null())
+    .spawn()
+  {
+    crate::log::log("debug", &format!("desktop notification unavailable: {}", e));
+  }
+}
+
+/// Watch the PRIMARY selection through XFixes: it has an owner exactly while
+/// text is selected somewhere, so ownership tells us whether a selection
+/// exists right now, which reading the selection cannot (it keeps serving the
+/// last text an application put there).
+#[cfg(target_os = "linux")]
+fn spawn_selection_watch(slot: Arc<Mutex<bool>>) {
+  let _ = std::thread::Builder::new()
+    .name("selection-watch".into())
+    .spawn(move || {
+      use x11rb::connection::Connection;
+      use x11rb::protocol::Event;
+      use x11rb::protocol::xfixes::{ConnectionExt as _, SelectionEventMask};
+      use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as _};
+      let disabled = |why: String| {
+        crate::log::log(
+          "debug",
+          &format!(
+            "selection watch disabled ({}): the selection is read without checking it still exists",
+            why
+          ),
+        );
+      };
+      let (conn, screen_num) = match x11rb::connect(None) {
+        Ok(c) => c,
+        Err(e) => return disabled(e.to_string()),
+      };
+      let root = conn.setup().roots[screen_num].root;
+      match conn.xfixes_query_version(5, 0).map(|c| c.reply()) {
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => return disabled(format!("XFixes: {}", e)),
+        Err(e) => return disabled(format!("XFixes: {}", e)),
+      }
+      if let Ok(Ok(r)) = conn
+        .get_selection_owner(u32::from(AtomEnum::PRIMARY))
+        .map(|c| c.reply())
+      {
+        if let Ok(mut s) = slot.lock() {
+          *s = r.owner != x11rb::NONE;
+        }
+      }
+      let mask = SelectionEventMask::SET_SELECTION_OWNER
+        | SelectionEventMask::SELECTION_WINDOW_DESTROY
+        | SelectionEventMask::SELECTION_CLIENT_CLOSE;
+      match conn
+        .xfixes_select_selection_input(root, AtomEnum::PRIMARY.into(), mask)
+        .map(|c| c.check())
+      {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => return disabled(e.to_string()),
+        Err(e) => return disabled(e.to_string()),
+      }
+      loop {
+        match conn.wait_for_event() {
+          Ok(Event::XfixesSelectionNotify(ev)) => {
+            // owner NONE: the selection was dropped (deselected, window
+            // closed). Any other owner: text is selected right now.
+            if let Ok(mut s) = slot.lock() {
+              *s = ev.owner != x11rb::NONE;
+            }
+          }
+          Ok(_) => {}
+          Err(e) => return disabled(e.to_string()),
+        }
+      }
+    });
 }
 
 /// Press Control, tap `key`, release Control through the XTEST extension.
