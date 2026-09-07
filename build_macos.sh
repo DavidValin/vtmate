@@ -134,6 +134,11 @@ export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
 export CARGO_PROFILE_RELEASE_DEBUG=false
 export CARGO_PROFILE_RELEASE_STRIP=symbols
 export CARGO_PROFILE_RELEASE_INCREMENTAL=false
+# Same x86 baseline as the Linux and Windows builds (x86-64-v3 = AVX2/FMA,
+# every Intel Mac that runs macOS 11 has it); Apple silicon needs nothing.
+if [ "${arch}" = "x86_64" ]; then
+  export RUSTFLAGS="${RUSTFLAGS:-} -C target-cpu=x86-64-v3"
+fi
 
 echo "== Building macOS (${arch}) with features: ${FEATURES:-none} =="
 

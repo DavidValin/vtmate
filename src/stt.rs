@@ -23,6 +23,14 @@ use whisper_rs::{
 /// stops the model being loaded twice at startup (the old warm-up built a second
 /// context just to discard it) and keeps the GPU buffers reserved, so a sound
 /// server or LLM filling VRAM mid-session cannot starve a later turn.
+/// whisper.cpp defaults to 4 threads whatever the machine has; use every
+/// hardware thread instead (transcription runs while nothing else is busy).
+fn whisper_threads() -> i32 {
+  std::thread::available_parallelism()
+    .map(|n| n.get())
+    .unwrap_or(4) as i32
+}
+
 pub struct Whisper {
   state: Mutex<WhisperState>,
 }
@@ -66,10 +74,9 @@ impl Whisper {
     // The state keeps the context alive; the wrapper itself is not needed.
     let mut state = ctx.create_state()?;
     // Warm-up: 1 s of silence primes the compute buffers and kernels.
-    state.full(
-      FullParams::new(SamplingStrategy::Greedy { best_of: 1 }),
-      &vec![0.0f32; 16000],
-    )?;
+    let mut warm = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+    warm.set_n_threads(whisper_threads());
+    state.full(warm, &vec![0.0f32; 16000])?;
     Ok(Self {
       state: Mutex::new(state),
     })
@@ -106,6 +113,7 @@ impl Whisper {
     params.set_print_realtime(false);
     params.set_translate(false);
     params.set_language(Some(language));
+    params.set_n_threads(whisper_threads());
 
     let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
     state

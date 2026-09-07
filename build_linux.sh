@@ -1170,7 +1170,7 @@ RUN set -eux; \
       -Donnxruntime_USE_WEBNN=OFF \
       -Donnxruntime_USE_CANN=OFF \
       -Donnxruntime_USE_CUDA=OFF \
-      -Donnxruntime_USE_KLEIDIAI=OFF \
+      -Donnxruntime_USE_KLEIDIAI=ON \
       -DCMAKE_INSTALL_PREFIX=$ONNX_DIR \
       -DCMAKE_BUILD_TYPE=Release \
       -Donnxruntime_USE_SYSTEM_PROTOBUF=ON \
@@ -1397,6 +1397,44 @@ build_linux_glibc_variant() {
   df="${tmp}/Dockerfile.linux.glibc.${arch}.${variant}"
   img="local/${BIN_NAME}-linux-glibc-${arch}-${variant}:cache"
 
+  # ORT opens its provider modules (the CUDA execution provider and its shim)
+  # by one absolute path only: the executable's directory as reported by
+  # dladdr(). This patch retries by bare name when that fails, so the dynamic
+  # loader's own search applies as well - the binary's $ORIGIN rpath (set in
+  # the cargo step), LD_LIBRARY_PATH, then the ldconfig cache and system
+  # directories. Two upstream lines; re-check it on every ORT bump.
+  cat > "${tmp}/provider-search-fallback.patch" <<'PATCH'
+--- a/onnxruntime/core/session/provider_bridge_ort.cc
++++ b/onnxruntime/core/session/provider_bridge_ort.cc
+@@ -1868,7 +1868,13 @@
+ 
+     auto full_path = Env::Default().GetRuntimePath() +
+                      PathString(LIBRARY_PREFIX ORT_TSTR("onnxruntime_providers_shared") LIBRARY_EXTENSION);
+-    ORT_RETURN_IF_ERROR(Env::Default().LoadDynamicLibrary(full_path, true /*shared_globals on unix*/, &handle_));
++    // vtmate: after the runtime directory, fall back to the dynamic loader's own
++    // search (DT_RPATH, LD_LIBRARY_PATH, ldconfig cache, system directories).
++    if (!Env::Default().LoadDynamicLibrary(full_path, true /*shared_globals on unix*/, &handle_).IsOK()) {
++      ORT_RETURN_IF_ERROR(Env::Default().LoadDynamicLibrary(
++          PathString(LIBRARY_PREFIX ORT_TSTR("onnxruntime_providers_shared") LIBRARY_EXTENSION),
++          true /*shared_globals on unix*/, &handle_));
++    }
+ 
+     void (*PProvider_SetHost)(void*);
+     ORT_RETURN_IF_ERROR(Env::Default().GetSymbolFromLibrary(handle_, "Provider_SetHost", (void**)&PProvider_SetHost));
+@@ -1934,7 +1940,10 @@
+         ORT_RETURN_IF_ERROR(Env::Default().LoadDynamicLibrary(filename_, false, &handle_));
+       } else {
+         auto full_path = Env::Default().GetRuntimePath() + filename_;
+-        ORT_RETURN_IF_ERROR(Env::Default().LoadDynamicLibrary(full_path, false, &handle_));
++        // vtmate: same fallback as ProviderSharedLibrary::Initialize.
++        if (!Env::Default().LoadDynamicLibrary(full_path, false, &handle_).IsOK()) {
++          ORT_RETURN_IF_ERROR(Env::Default().LoadDynamicLibrary(filename_, false, &handle_));
++        }
+       }
+ 
+       Provider* (*PGetProvider)();
+PATCH
+
   cat > "$df" <<'DOCKERFILE'
 FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
@@ -1406,15 +1444,19 @@ ARG VARIANT
 # noble, not jammy: ggml's Vulkan backend needs glslc to compile its shaders
 # and 22.04 ships only glslang-tools. The cost is a glibc 2.39 floor.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential pkg-config curl wget ca-certificates git \
+      build-essential pkg-config curl wget ca-certificates git patch \
       cmake python3 gfortran \
       libssl-dev zlib1g-dev libasound2-dev \
       libopenblas-dev libclang-dev clang \
       libvulkan-dev glslc \
  && rm -rf /var/lib/apt/lists/*
 
+# nvcc for whisper/ggml's CUDA backend and for ORT's CUDA execution provider.
+# g++-12: noble's toolkit is CUDA 12.0, whose nvcc accepts GCC <= 12 as host
+# compiler; ORT's .cu files go through it, everything else stays on the default
+# GCC 13 (same libstdc++, so the objects link together).
 RUN if [ "$VARIANT" = "cuda" ]; then \
-      apt-get update && apt-get install -y --no-install-recommends nvidia-cuda-toolkit && \
+      apt-get update && apt-get install -y --no-install-recommends nvidia-cuda-toolkit g++-12 && \
       rm -rf /var/lib/apt/lists/* ; \
     fi
 
@@ -1436,18 +1478,43 @@ ENV CUDNN_PATH=/usr/local/cudnn
 
 # ONNX Runtime built from source, static. Microsoft's prebuilt Linux packages
 # contain only libonnxruntime.so (no .a at all), so linking ORT statically means
-# building it. ORT's own CUDA execution provider is NOT enabled here: that build
-# is what overran CI time limits, and ggml/whisper provides the GPU acceleration
-# for these variants independently of ORT.
+# building it. For cuda the CUDA execution provider is built too. ORT always
+# emits that provider as a shared module (libonnxruntime_providers_cuda.so plus
+# the libonnxruntime_providers_shared.so shim) which the statically linked core
+# dlopens from the executable's directory, so those two ship beside the binary
+# (staged in the cargo step, packaged in build_linux_glibc_variant); the core
+# itself stays static. An untrimmed CUDA EP build is what overran CI time
+# limits, so it is cut down to what an ASR/TTS workload needs: three consumer
+# GPU architectures (the list build_windows.ps1 uses), no flash /
+# memory-efficient / lean attention kernels (the cutlass-heavy bulk of a CUDA
+# EP build) and no NHWC ops.
 #
 # Unlike the musl images this needs no protobuf/abseil/re2 prebuild (ORT fetches
 # its own), no musl locale shim, and no ORT_USE_CXX20_STD_CHRONO patch - noble
 # ships GCC 13, which has std::chrono operator<< for time_point.
 ENV ONNX_DIR=/onnxruntime
 ENV ONNX_SRC=/onnxruntime-src
+COPY provider-search-fallback.patch /tmp/provider-search-fallback.patch
 RUN set -eux; \
+    KLEIDIAI=OFF; if [ "$ARCH" = "arm64" ]; then KLEIDIAI=ON; fi; \
+    if [ "$VARIANT" = "cuda" ]; then \
+      CUDA_FLAGS="-Donnxruntime_USE_CUDA=ON \
+        -DCMAKE_CUDA_COMPILER=/usr/bin/nvcc \
+        -DCMAKE_CUDA_HOST_COMPILER=/usr/bin/g++-12 \
+        -DCUDAToolkit_ROOT=/usr \
+        -DCUDNN_PATH=/usr/local/cudnn \
+        -DCMAKE_CUDA_ARCHITECTURES=75;86;89 \
+        -Donnxruntime_USE_FLASH_ATTENTION=OFF \
+        -Donnxruntime_USE_MEMORY_EFFICIENT_ATTENTION=OFF \
+        -Donnxruntime_USE_LEAN_ATTENTION=OFF \
+        -Donnxruntime_USE_CUDA_NHWC_OPS=OFF \
+        -Donnxruntime_ENABLE_CUDA_LINE_NUMBER_INFO=OFF"; \
+    else \
+      CUDA_FLAGS="-Donnxruntime_USE_CUDA=OFF"; \
+    fi; \
     mkdir -p "$ONNX_DIR"; \
     git clone --depth 1 -b v1.24.1 https://github.com/microsoft/onnxruntime.git $ONNX_SRC; \
+    patch -p1 -d $ONNX_SRC < /tmp/provider-search-fallback.patch; \
     cd $ONNX_SRC; \
     cmake ./cmake -B $ONNX_DIR \
       -DCMAKE_BUILD_TYPE=Release \
@@ -1470,7 +1537,7 @@ RUN set -eux; \
       -Donnxruntime_USE_VCPKG=OFF \
       -Donnxruntime_USE_MIMALLOC=OFF \
       -Donnxruntime_ENABLE_EXTERNAL_CUSTOM_OP_SCHEMAS=OFF \
-      -Donnxruntime_USE_CUDA=OFF \
+      $CUDA_FLAGS \
       -Donnxruntime_USE_CUDA_INTERFACE=OFF \
       -Donnxruntime_USE_TENSORRT=OFF \
       -Donnxruntime_USE_TENSORRT_INTERFACE=OFF \
@@ -1494,7 +1561,7 @@ RUN set -eux; \
       -Donnxruntime_USE_JSEP=OFF \
       -Donnxruntime_USE_CANN=OFF \
       -Donnxruntime_USE_NCCL=OFF \
-      -Donnxruntime_USE_KLEIDIAI=OFF \
+      -Donnxruntime_USE_KLEIDIAI=$KLEIDIAI \
       -Donnxruntime_DISABLE_RTTI=OFF \
       -Donnxruntime_DISABLE_EXCEPTIONS=OFF \
       -Donnxruntime_MINIMAL_BUILD=OFF \
@@ -1505,6 +1572,10 @@ RUN set -eux; \
       -DCMAKE_INSTALL_PREFIX=$ONNX_DIR; \
     cmake --build $ONNX_DIR --config Release -j"$(nproc)"; \
     find $ONNX_DIR -name 'libonnxruntime_common.a' | grep -q . ; \
+    if [ "$VARIANT" = "cuda" ]; then \
+      find $ONNX_DIR -name 'libonnxruntime_providers_cuda.so' | grep -q . ; \
+      find $ONNX_DIR -name 'libonnxruntime_providers_shared.so' | grep -q . ; \
+    fi; \
     rm -rf $ONNX_SRC/.git
 
 # re2, built from the source ORT itself fetched and against ORT's own abseil.
@@ -1631,14 +1702,14 @@ DOCKERFILE
     --build-arg MULTIARCH="${multiarch}" \
     -f "$df" -t "$img" "$tmp"
 
-  # ort-cuda is deliberately dropped: ORT is built here without its CUDA
-  # execution provider (that build does not fit CI time limits), so requesting
-  # the feature would ask ort-sys for symbols this ORT does not contain.
-  # whisper/ggml still gets full CUDA acceleration via whisper-cuda.
+  # cuda keeps ort-cuda: ORT is built with its CUDA execution provider (see
+  # the Dockerfile), so the Rust side (ort, and the supertonic3 / supersonic2
+  # TTS crates through it) can register it. whisper/ggml gets its CUDA
+  # acceleration via whisper-cuda either way.
   local feats
   case "${variant}" in
     vulkan) feats="${FEATURES_VULKAN}" ;;
-    cuda)   feats="$(echo "${FEATURES_CUDA}" | sed 's/,ort-cuda//')" ;;
+    cuda)   feats="${FEATURES_CUDA}" ;;
   esac
 
   echo "== Linux ${arch} ${variant} (glibc) cargo build =="
@@ -1693,10 +1764,33 @@ DOCKERFILE
       done
       echo "ORT dependency archives linked: $(echo $ORT_DEPS | wc -w)"
 
-      export RUSTFLAGS="-C codegen-units=1 -C opt-level=3 \
+      # cuda: DT_RPATH (old dtags, so it also covers the dependencies of the
+      # dlopened ORT CUDA provider) pointing at the binary's own directory.
+      # With the provider-search-fallback patch above this is how ORT finds
+      # its provider module beside the binary whatever argv[0] looks like
+      # (glibc resolves $ORIGIN from /proc/self/exe), and CUDA / cuDNN
+      # libraries dropped beside vtmate are found there first, the way the
+      # Windows package bundles its DLLs; otherwise the usual LD_LIBRARY_PATH /
+      # ldconfig lookup applies.
+      # Same CPU baseline as the musl build and cmake/ggml-portable.cmake:
+      # x86-64-v3 (AVX2/FMA) for the Rust side on amd64, nothing on arm64.
+      TARGET_CPU=""
+      if [ "${ARCH}" = "amd64" ]; then
+        TARGET_CPU="-C target-cpu=x86-64-v3"
+      fi
+
+      ORT_RPATH=""
+      if [ "${VARIANT}" = "cuda" ]; then
+        # $ORIGIN/../lib/vtmate is where installer.sh puts the libraries
+        # (<prefix>/bin/vtmate next to <prefix>/lib/vtmate/*.so).
+        ORT_RPATH="-C link-arg=-Wl,--disable-new-dtags -C link-arg=-Wl,-rpath,\$ORIGIN:\$ORIGIN/../lib/vtmate"
+      fi
+
+      export RUSTFLAGS="-C codegen-units=1 -C opt-level=3 ${TARGET_CPU} \
         -L native=/opt/blas-static \
         -L native=/onnxruntime/_deps/re2-build \
         -L native=/opt/alsa-static/lib \
+        ${ORT_RPATH} \
         -C link-arg=-Wl,--start-group ${ORT_DEPS} -C link-arg=-Wl,--end-group \
         -C link-arg=-Wl,--whole-archive \
         -C link-arg=/opt/alsa-static/lib/libasound_full.a \
@@ -1724,16 +1818,32 @@ DOCKERFILE
       fi
 
       CARGO_TARGET_DIR="$ctd" cargo build --release --target "$TARGET" --features "$FEATS"
+
+      # cuda: stage ORT's CUDA provider module and its shim next to the binary
+      # for packaging (the ORT core itself is linked statically above).
+      if [ "${VARIANT}" = "cuda" ]; then
+        for f in libonnxruntime_providers_cuda.so libonnxruntime_providers_shared.so; do
+          p="$(find /onnxruntime -name "$f" -print -quit)"
+          test -n "$p"
+          cp "$p" "$ctd/$TARGET/release/"
+        done
+      fi
     '
 
   # ONNX Runtime is linked statically, so the binary stands alone: only the
-  # GPU loaders the user installs stay dynamic.
+  # GPU loaders the user installs stay dynamic. cuda additionally carries ORT's
+  # CUDA provider module beside the binary (see the Dockerfile).
   local src_dir="${PROJECT_ROOT}/target-cross/linux-${arch}-${variant}/${target}/release"
   local out_dir="${DIST_DIR}/${BIN_NAME}-${VERSION}-linux-$(artifact_arch "${arch}")-${variant}"
   if [[ -f "${src_dir}/${BIN_NAME}" ]]; then
     rm -rf "${out_dir}"; mkdir -p "${out_dir}"
     cp "${src_dir}/${BIN_NAME}" "${out_dir}/"
     chmod +x "${out_dir}/${BIN_NAME}" || true
+    if [[ "${variant}" == "cuda" ]]; then
+      cp "${src_dir}"/libonnxruntime_providers_*.so "${out_dir}/"
+      [[ -f "${out_dir}/libonnxruntime_providers_cuda.so" ]] \
+        || { echo "ERROR: ONNX Runtime CUDA provider not staged in ${src_dir}"; return 1; }
+    fi
     add_artifact "${out_dir}"
     echo "✔ Built: ${out_dir}/${BIN_NAME}"
   else

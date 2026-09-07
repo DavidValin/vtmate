@@ -265,12 +265,12 @@ if ($WITH_CUDA) {
         Write-Host "cuDNN already present."
     }
 
-    $env:CUDNN_PATH = $env:CUDNN_HOME
-    $env:Path       = "$env:CUDNN_HOME\bin;$env:Path"
+    $env:Path = "$env:CUDNN_HOME\bin;$env:Path"
 
-    $CUDNN_LIB_DIR = Join-Path $env:CUDNN_HOME "lib\x64"
-    if (-not (Test-Path (Join-Path $CUDNN_LIB_DIR "cudnn.lib"))) {
-        Write-Error "cudnn.lib not found under $CUDNN_LIB_DIR"
+    # Only the runtime DLLs are used (bundled next to the exe at the end);
+    # ORT's CUDA EP comes prebuilt, so nothing links against cudnn.lib.
+    if (-not (Get-ChildItem -Path (Join-Path $env:CUDNN_HOME "bin") -Filter "cudnn*64*.dll" -ErrorAction SilentlyContinue)) {
+        Write-Error "no cudnn*64*.dll found under $env:CUDNN_HOME\bin"
         exit 1
     }
     Write-Host "CUDNN_HOME = $env:CUDNN_HOME"
@@ -449,7 +449,13 @@ if ($WITH_OPENBLAS) {
     $env:OpenBLAS_INCLUDE_DIR = $INCLUDE_DIR
 }
 
-# $ONNX_CUDA_FLAG drives ONNX Runtime's CUDA execution provider.
+# $ONNX_CUDA_FLAG drives onnxruntime_USE_CUDA in the ORT source build. It is
+# OFF for every variant on purpose: building ORT's CUDA execution provider
+# from source does not fit CI (see the prebuilt block below), so the cuda
+# variant skips the source build and takes Microsoft's prebuilt package
+# instead. Flip it to ON (and re-add the nvcc / CMAKE_CUDA_ARCHITECTURES /
+# cuDNN cmake arguments, plus a route past the $ORT_PREBUILT gate) only if
+# a from-source CUDA build becomes viable again.
 # $ONNX_VULKAN_FLAG and $ONNX_USE_BLAS drive the ggml/whisper backend
 # (ORT itself exposes neither a Vulkan EP nor a BLAS switch); they are
 # consumed by the GGML_* env + CMAKE_ARGS block further down.
@@ -465,7 +471,7 @@ switch ($VARIANT) {
         $ONNX_USE_BLAS    = "ON"
     }
     "cuda" {
-        $ONNX_CUDA_FLAG   = "ON"
+        $ONNX_CUDA_FLAG   = "OFF"
         $ONNX_VULKAN_FLAG = "OFF"
         $ONNX_USE_BLAS    = "ON"
     }
@@ -1343,48 +1349,15 @@ $ONNX_CMAKE_ARGS = @(
     "-Donnxruntime_MSVC_STATIC_RUNTIME=ON",
     "-DABSL_ENABLE_INSTALL=ON",
     "-DABSL_MSVC_STATIC_RUNTIME=ON",
+    # OFF for every variant today (see $ONNX_CUDA_FLAG where it is set): the
+    # cuda variant never reaches this source build, it takes Microsoft's
+    # prebuilt package whose onnxruntime_providers_cuda.dll is the CUDA
+    # execution provider.
     "-Donnxruntime_USE_CUDA=$ONNX_CUDA_FLAG"
 )
 
 if ($ORT_EXTRA_CMAKE_ARGS) {
   $ONNX_CMAKE_ARGS += $ORT_EXTRA_CMAKE_ARGS
-}
-
-# Conditionally add CUDA-specific options only if CUDA is ON
-if ($ONNX_CUDA_FLAG -eq "ON") {
-    $cuda_root = $env:CUDAToolkit_ROOT
-    # Point CMake straight at nvcc. Under the Visual Studio generator CMake
-    # otherwise looks for CUDA MSBuild integration inside the VS install, and
-    # the toolkit installs none for VS 2026 - so detection returns NOTFOUND
-    # even though nvcc is on PATH and runs fine.
-    $nvcc = Join-Path $cuda_root "bin\nvcc.exe"
-    if (-not (Test-Path $nvcc)) { Write-Error "nvcc.exe not found at $nvcc"; exit 1 }
-    # CUDA 13 dropped Maxwell/Pascal/Volta, but ORT still defaults to a list
-    # starting at compute_60, so nvcc aborts with
-    # "nvcc fatal : Unsupported gpu architecture 'compute_60'".
-    # Turing (75) is the oldest CUDA 13 supports.
-    $ONNX_CMAKE_ARGS += @(
-        "-DCUDAToolkit_ROOT=$cuda_root",
-        # Turing / Ampere-consumer / Ada. Each extra arch is a full extra
-        # device-code pass over every .cu with -rdc=true; five arches ran ~4h.
-        # Add 80 (A100) or 90 (Hopper) back if datacenter GPUs matter.
-        "-DCMAKE_CUDA_ARCHITECTURES=75;86;89",
-        # CUDA 13 bundles CCCL, which hard-errors when built with MSVC's
-        # traditional preprocessor. /Zc:preprocessor would change how the rest
-        # of ORT's MSVC code preprocesses, so use CCCL's own opt-out instead.
-        # /WX- because ORT passes nvcc -Werror all-warnings, and MSVC 19.51
-        # emits a new warning inside nvcc's own generated cudafe stub:
-        # "error C2220: the following warning is treated as an error".
-        # /sdl (which ORT passes) promotes C4996 deprecation warnings to errors,
-        # and CUDA 13 deprecated longlong4/ulonglong4 in favour of the *_16a /
-        # *_32a forms that ORT 1.24.1 predates - 72 such errors. /WX- alone does
-        # not undo /sdl, so disable it and silence the two warnings involved.
-        "-DCMAKE_CUDA_FLAGS=-DCCCL_IGNORE_MSVC_TRADITIONAL_PREPROCESSOR_WARNING -Xcompiler=/WX- -Xcompiler=/sdl- -Xcompiler=/wd4996 -Xcompiler=/wd4211",
-        "-DCMAKE_CUDA_COMPILER=$($nvcc -replace '\\','/')",
-        "-Donnxruntime_CUDNN_HOME=$env:CUDNN_HOME",
-        "-DCUDNN_HOME=$env:CUDNN_HOME",
-        "-DCMAKE_CUDA_RUNTIME_LIBRARY=Static"
-    )
 }
 
 # Run CMake with the assembled arguments
@@ -1471,10 +1444,8 @@ Get-ChildItem -Path "$env:VCPKG_ROOT" -Recurse -File -Filter *.lib |
     ForEach-Object { Write-Host $_.FullName }
 
 # Set ORT crate feature flags
-if ($WITH_CUDA)    { $env:ORT_USE_CUDA = "1" } else { Remove-Item Env:ORT_USE_CUDA -ErrorAction SilentlyContinue }
 if ($WITH_OPENBLAS){ $env:ORT_USE_OPENMP = "1" } else { Remove-Item Env:ORT_USE_OPENMP -ErrorAction SilentlyContinue }
 
-Write-Host "ORT_USE_CUDA = $env:ORT_USE_CUDA"
 Write-Host "ORT_USE_OPENMP = $env:ORT_USE_OPENMP"
 
 # ==========================================================
@@ -1528,6 +1499,7 @@ if ($ORT_PREBUILT) {
     $env:RUSTFLAGS = "-C target-feature=+crt-static `
                   -C codegen-units=1 `
                   -C opt-level=3 `
+                  -C target-cpu=x86-64-v3 `
                   -L native=$ORT_PREBUILT/lib `
                   -C link-arg=$ORT_PREBUILT/lib/onnxruntime.lib `
                   -C link-arg=/DEFAULTLIB:legacy_stdio_definitions.lib `
@@ -1545,6 +1517,7 @@ if ($ORT_PREBUILT) {
 $env:RUSTFLAGS = "-C target-feature=+crt-static `
                   -C codegen-units=1 `
                   -C opt-level=3 `
+                  -C target-cpu=x86-64-v3 `
                   -C link-arg=$ONNX_BUILD/_deps/re2-build/Release/re2.lib `
                   -C link-arg=$ONNX_BUILD/_deps/abseil_cpp-build/absl/base/Release/absl_base.lib `
                   -C link-arg=$ONNX_BUILD/_deps/abseil_cpp-build/absl/base/Release/absl_log_severity.lib `
@@ -1642,11 +1615,11 @@ $env:RUSTFLAGS = "-C target-feature=+crt-static `
 }
 
 # ----------------------------------------------------------
-# CUDA variant: link the CUDA EP plus the CUDA/cuDNN runtimes.
-# The explicit -C link-arg list above enumerates the ORT libs by name and
-# predates the CUDA provider, so onnxruntime_providers_cuda.lib has to be
-# added here. cudnn/cublas stay dynamic - they are driver-side and exempt
-# from the fully-static rule.
+# CUDA variant: make the CUDA toolkit's import libraries reachable for the
+# whisper/ggml CUDA backend. The CUDA EP itself lives in the prebuilt
+# onnxruntime_providers_cuda.dll (loaded at run time by onnxruntime.dll), so
+# nothing here links against ORT's provider or cuDNN; cudnn/cublas stay
+# dynamic and are bundled next to the exe at the end.
 # ----------------------------------------------------------
 if ($WITH_CUDA) {
     $CUDA_LIB_DIR = Join-Path $env:CUDA_PATH "lib\x64"
@@ -1664,28 +1637,8 @@ if ($WITH_CUDA) {
         Write-Error "CUDA lib junction $CUDA_LINK_DIR does not expose $CUDA_LIB_DIR"
         exit 1
     }
-    if ($CUDNN_LIB_DIR -match ' ') {
-        Write-Error "CUDNN_LIB_DIR contains a space and cannot go in RUSTFLAGS: $CUDNN_LIB_DIR"
-        exit 1
-    }
-
-    $env:RUSTFLAGS += " -L native=$CUDA_LINK_DIR" +
-                      " -L native=$CUDNN_LIB_DIR"
-
-    if ($ORT_PREBUILT) {
-        # The CUDA EP lives in onnxruntime_providers_cuda.dll, loaded at run
-        # time by onnxruntime.dll; there is no static lib to link, and CUDA's
-        # own runtime is already inside those DLLs.
-        Write-Host "Prebuilt ORT: CUDA EP is provided by onnxruntime_providers_cuda.dll"
-    } else {
-        $env:RUSTFLAGS += " -C link-arg=$ONNX_BUILD/Release/onnxruntime_providers_cuda.lib" +
-                          " -C link-arg=cudart_static.lib" +
-                          " -C link-arg=cublas.lib" +
-                          " -C link-arg=cublasLt.lib" +
-                          " -C link-arg=cudnn.lib"
-    }
-
-    Write-Host "CUDA link dirs: $CUDA_LINK_DIR (-> $CUDA_LIB_DIR) ; $CUDNN_LIB_DIR"
+    $env:RUSTFLAGS += " -L native=$CUDA_LINK_DIR"
+    Write-Host "CUDA link dir: $CUDA_LINK_DIR (-> $CUDA_LIB_DIR)"
 }
 
 $env:CXXFLAGS="/std:c++17 /MT /D_CRT_SECURE_NO_WARNINGS /D_CRT_NONSTDC_NO_DEPRECATE"

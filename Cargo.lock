@@ -3371,6 +3371,7 @@ version = "0.5.3"
 dependencies = [
  "anyhow",
  "bytes",
+ "cc",
  "chrono",
  "clap",
  "cpal",

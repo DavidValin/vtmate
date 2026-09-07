@@ -135,7 +135,8 @@ Explanation on the fields:
   ------------------------------------------------------------
   * whisper_model_path:   the path to the whisper model.
                           vtmate unzips 2 models in
-                          ~/.whisper-models, tiny and small.
+                          ~/.whisper-models: ggml-tiny.bin and
+                          ggml-small-q5_1.bin (quantized small).
                           You can download bigger models and
                           point to them here
 

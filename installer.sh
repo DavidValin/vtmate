@@ -1,278 +1,481 @@
 #!/bin/sh
+# vtmate installer - POSIX sh (bash/dash/zsh on Linux and macOS, Git Bash on Windows)
+#
+#   curl -fsSL https://raw.githubusercontent.com/DavidValin/vtmate/main/installer.sh | sh
+#   sh installer.sh [--scope user|system] [--prefix DIR] [--variant cpu|vulkan|cuda]
+#                   [--version TAG] [--yes] [--dry-run] [--uninstall] [--help]
+#
+# Layout (fixed locations, the binary is put on $PATH):
+#   Linux/macOS  user:   ~/.local/bin/vtmate          ~/.local/lib/vtmate/*.so
+#                system: /usr/local/bin/vtmate        /usr/local/lib/vtmate/*.so
+#   Windows      user:   %LOCALAPPDATA%\Programs\vtmate\{bin,lib}
+#                system: %ProgramFiles%\vtmate\{bin,lib}
+# The Linux cuda binary finds its libraries through its rpath
+# ($ORIGIN/../lib/vtmate); on Windows the lib directory is added to PATH.
 set -e
 
 REPO="DavidValin/vtmate"
 APP="vtmate"
+MARK="# added by vtmate installer"
 
 # -------------------------
-# Get latest version
+# Arguments
 # -------------------------
-if command -v curl >/dev/null 2>&1; then
-  VERSION=$(curl -s https://api.github.com/repos/$REPO/releases/latest \
-    | grep '"tag_name":' | cut -d '"' -f 4)
-elif command -v wget >/dev/null 2>&1; then
-  VERSION=$(wget -qO- https://api.github.com/repos/$REPO/releases/latest \
-    | grep '"tag_name":' | cut -d '"' -f 4)
-else
-  echo "Need curl or wget"
-  exit 1
-fi
+SCOPE=""; PREFIX=""; VARIANT=""; VERSION=""; YES=0; DRY_RUN=0; UNINSTALL=0
+usage() {
+  sed -n '2,15p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'
+  cat <<EOF
 
-[ -z "$VERSION" ] && { echo "Failed to fetch version"; exit 1; }
+Options:
+  --scope user|system   install for this user (default) or system-wide (sudo / Administrator)
+  --prefix DIR          custom prefix: DIR/bin and DIR/lib/vtmate (implies --scope user)
+  --variant NAME        force cpu, vulkan or cuda instead of auto-detection
+  --version TAG         install a specific release tag instead of the latest
+  --yes                 answer yes to every question (reinstall, uninstall)
+  --dry-run             detect, select and report; download and install nothing
+  --uninstall           remove the program, its libraries, PATH entries and ~/.vtmate
+  --help                this text
+EOF
+}
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --scope)     SCOPE="$2"; shift 2 ;;
+    --scope=*)   SCOPE="${1#*=}"; shift ;;
+    --prefix)    PREFIX="$2"; shift 2 ;;
+    --prefix=*)  PREFIX="${1#*=}"; shift ;;
+    --variant)   VARIANT="$2"; shift 2 ;;
+    --variant=*) VARIANT="${1#*=}"; shift ;;
+    --version)   VERSION="$2"; shift 2 ;;
+    --version=*) VERSION="${1#*=}"; shift ;;
+    --yes|-y)    YES=1; shift ;;
+    --dry-run)   DRY_RUN=1; shift ;;
+    --uninstall) UNINSTALL=1; shift ;;
+    --help|-h)   usage; exit 0 ;;
+    *) echo "Unknown option: $1"; usage; exit 1 ;;
+  esac
+done
+case "$SCOPE" in ""|user|system) ;; *) echo "❌ --scope must be user or system"; exit 1 ;; esac
+case "$VARIANT" in ""|cpu|vulkan|cuda) ;; *) echo "❌ --variant must be cpu, vulkan or cuda"; exit 1 ;; esac
+[ -n "$PREFIX" ] && SCOPE="user"
 
-echo "Version: $VERSION"
+# -------------------------
+# Helpers
+# -------------------------
+say()  { printf '%s\n' "$*"; }
+warn() { printf '⚠️  %s\n' "$*"; }
+die()  { printf '❌ %s\n' "$*" >&2; exit 1; }
 
-BASE_URL="https://github.com/$REPO/releases/download/$VERSION"
+have_tty() { [ -r /dev/tty ] && [ -w /dev/tty ]; }
+
+# ask "question" "default"  -> prints the answer (default when non-interactive)
+ask() {
+  if [ "$YES" -eq 1 ] || ! have_tty; then printf '%s' "$2"; return; fi
+  printf '%s ' "$1" > /dev/tty
+  read -r a < /dev/tty || a=""
+  [ -z "$a" ] && a="$2"
+  printf '%s' "$a"
+}
+# confirm "question" "y|n"
+confirm() {
+  [ "$YES" -eq 1 ] && return 0
+  case "$(ask "$1 [y/N]" "$2")" in y|Y|yes|YES) return 0 ;; *) return 1 ;; esac
+}
+
+fetch() { # url -> stdout
+  if command -v curl >/dev/null 2>&1; then curl -fsSL "$1"
+  elif command -v wget >/dev/null 2>&1; then wget -qO- "$1"
+  else die "Need curl or wget"; fi
+}
+url_exists() { # HEAD only - a GET here would silently pull the whole asset
+  if command -v curl >/dev/null 2>&1; then
+    [ "$(curl -sIL -o /dev/null -w '%{http_code}' "$1")" = "200" ]
+  else
+    wget --spider -q "$1"
+  fi
+}
+download() { # url dest
+  if command -v curl >/dev/null 2>&1; then curl -fL --progress-bar -o "$2" "$1"; else wget -q --show-progress -O "$2" "$1"; fi
+}
 
 # -------------------------
 # OS / ARCH
 # -------------------------
 OS="$(uname -s 2>/dev/null || echo unknown)"
 ARCH="$(uname -m 2>/dev/null || echo unknown)"
-
 case "$OS" in
-  Linux*) OS_NAME="linux" ;;
+  Linux*)  OS_NAME="linux" ;;
   Darwin*) OS_NAME="macos" ;;
   MINGW*|MSYS*|CYGWIN*) OS_NAME="windows" ;;
-  *) echo "Unsupported OS: $OS"; exit 1 ;;
+  *) die "Unsupported OS: $OS" ;;
 esac
-
-# Release assets use the target-triple spelling: x86_64 / aarch64.
 case "$ARCH" in
-  x86_64|amd64) ARCH_NAME="x86_64" ;;
+  x86_64|amd64)  ARCH_NAME="x86_64" ;;
   arm64|aarch64) ARCH_NAME="aarch64" ;;
-  *) echo "Unsupported arch: $ARCH"; exit 1 ;;
+  *) die "Unsupported arch: $ARCH" ;;
 esac
+WSL=0
+if [ "$OS_NAME" = "linux" ] && grep -qi microsoft /proc/version 2>/dev/null; then WSL=1; fi
 
-echo "OS=$OS_NAME ARCH=$ARCH_NAME"
-
-# -------------------------
-# GPU detection (HARDENED VERSION)
-# -------------------------
-CUDA=0
-VULKAN=0
-
-detect_cuda() {
-
-  # 1. Standard PATH (Linux / WSL / Git Bash)
-  if command -v nvidia-smi >/dev/null 2>&1; then
-    return 0
-  fi
-
-  # 2. Windows known install paths
-  if [ -f "/c/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe" ]; then
-    return 0
-  fi
-
-  if [ -f "/cygdrive/c/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe" ]; then
-    return 0
-  fi
-
-  # 3. Windows registry (strong signal)
-  if command -v reg >/dev/null 2>&1; then
-    reg query "HKLM\SOFTWARE\NVIDIA Corporation\Global\NVTweak" >/dev/null 2>&1 && return 0
-  fi
-
-  # 4. Execution probe fallback
-  if command -v nvidia-smi.exe >/dev/null 2>&1; then
-    nvidia-smi.exe -L >/dev/null 2>&1 && return 0
-  fi
-
-  return 1
-}
-
-detect_vulkan() {
-
-  # 1. PATH
-  if command -v vulkaninfo >/dev/null 2>&1; then
-    return 0
-  fi
-
-  # 2. Windows system install
-  if [ -f "/c/Windows/System32/vulkaninfo.exe" ]; then
-    return 0
-  fi
-
-  # 3. Vulkan SDK install (Windows)
-  if ls "/c/Program Files/Vulkan SDK/"*/Bin/vulkaninfo.exe >/dev/null 2>&1; then
-    return 0
-  fi
-
-  # 4. Execution probe
-  if command -v vulkaninfo.exe >/dev/null 2>&1; then
-    vulkaninfo.exe >/dev/null 2>&1 && return 0
-  fi
-
-  return 1
-}
-
-detect_cuda && CUDA=1
-detect_vulkan && VULKAN=1
-
-echo "CUDA=$CUDA VULKAN=$VULKAN"
+VTMATE_HOME="$HOME/.vtmate"
+MANIFEST="$VTMATE_HOME/install-manifest"
 
 # -------------------------
-# Candidate selection
+# Install locations
 # -------------------------
-# Assets are named ${APP}-<version>-<os>-<arch>[-<variant>].<tgz|zip> and
-# hold the binary (plus any bundled DLLs on Windows) at top level.
-CANDIDATES=""
-PREFIX="${APP}-${VERSION}-${OS_NAME}-${ARCH_NAME}"
+winpath() { cygpath -u "$1" 2>/dev/null || printf '%s' "$1"; }
 
-if [ "$OS_NAME" = "macos" ]; then
-  CANDIDATES="${PREFIX}.tgz"
-fi
-
-# -------------------------
-# Linux (x86_64 / aarch64): cuda -> vulkan -> cpu, best available first
-# -------------------------
-if [ "$OS_NAME" = "linux" ]; then
-
-  if [ "$CUDA" -eq 1 ]; then
-    CANDIDATES="${PREFIX}-cuda.tgz"
-  fi
-
-  if [ "$VULKAN" -eq 1 ]; then
-    CANDIDATES="${CANDIDATES} ${PREFIX}-vulkan.tgz"
-  fi
-
-  CANDIDATES="${CANDIDATES} ${PREFIX}-cpu.tgz"
-fi
-
-# -------------------------
-# Windows x86_64
-# -------------------------
-if [ "$OS_NAME" = "windows" ] && [ "$ARCH_NAME" = "x86_64" ]; then
-
-  if [ "$CUDA" -eq 1 ]; then
-    CANDIDATES="${PREFIX}-cuda.zip"
-  fi
-
-  if [ "$VULKAN" -eq 1 ]; then
-    CANDIDATES="${CANDIDATES} ${PREFIX}-vulkan.zip"
-  fi
-
-  CANDIDATES="${CANDIDATES} ${PREFIX}-cpu.zip"
-fi
-
-[ -z "$CANDIDATES" ] && { echo "No candidates built"; exit 1; }
-
-echo "Candidates: $CANDIDATES"
-
-# -------------------------
-# Find first valid binary
-# -------------------------
-FOUND_URL=""
-FOUND_BIN=""
-
-for B in $CANDIDATES; do
-  URL="$BASE_URL/$B"
-
-  if command -v curl >/dev/null 2>&1; then
-    CODE=$(curl -s -o /dev/null -w "%{http_code}" "$URL")
-    if [ "$CODE" = "200" ]; then
-      FOUND_URL="$URL"
-      FOUND_BIN="$B"
-      break
-    fi
-  else
-    wget --spider -q "$URL" && {
-      FOUND_URL="$URL"
-      FOUND_BIN="$B"
-      break
-    }
-  fi
-done
-
-if [ -z "$FOUND_URL" ]; then
-  echo "❌ No valid binary found"
-  exit 1
-fi
-
-echo "Selected: $FOUND_BIN"
-
-# -------------------------
-# Download
-# -------------------------
-TMP_FILE="/tmp/$FOUND_BIN"
-
-if command -v curl >/dev/null 2>&1; then
-  curl -fL -o "$TMP_FILE" "$FOUND_URL"
-else
-  wget -O "$TMP_FILE" "$FOUND_URL"
-fi
-
-# -------------------------
-# Validate download sanity
-# -------------------------
-MIN_SIZE=100000  # 100 KB minimum (adjust if your binaries are smaller)
-
-FILE_SIZE=$(wc -c < "$TMP_FILE" 2>/dev/null || echo 0)
-
-if [ "$FILE_SIZE" -lt "$MIN_SIZE" ]; then
-  echo "❌ Download too small or invalid ($FILE_SIZE bytes)"
-  exit 1
-fi
-
-# Detect HTML error pages (GitHub fallback / proxy / 404 HTML)
-if head -c 20 "$TMP_FILE" 2>/dev/null | grep -qi "<html"; then
-  echo "❌ Download appears to be an HTML error page"
-  exit 1
-fi
-
-echo "Download sanity check passed ($FILE_SIZE bytes)"
-
-# -------------------------
-# Install
-# -------------------------
-# The asset is an archive with the binary at top level (Windows: vtmate.exe
-# plus the DLLs the CUDA/ORT variants need beside it), so unpack it into a
-# scratch directory first.
-EXTRACT_DIR="/tmp/${APP}-extract.$$"
-rm -rf "$EXTRACT_DIR"
-mkdir -p "$EXTRACT_DIR"
-
-case "$FOUND_BIN" in
-  *.tgz)
-    tar -xzf "$TMP_FILE" -C "$EXTRACT_DIR"
-    ;;
-  *.zip)
-    if command -v unzip >/dev/null 2>&1; then
-      unzip -q -o "$TMP_FILE" -d "$EXTRACT_DIR"
-    elif command -v powershell.exe >/dev/null 2>&1; then
-      powershell.exe -NoProfile -Command \
-        "Expand-Archive -Force -LiteralPath '$(cygpath -w "$TMP_FILE" 2>/dev/null || echo "$TMP_FILE")' -DestinationPath '$(cygpath -w "$EXTRACT_DIR" 2>/dev/null || echo "$EXTRACT_DIR")'"
+resolve_dirs() { # sets BIN_DIR LIB_DIR SUDO
+  SUDO=""
+  if [ -n "$PREFIX" ]; then
+    BIN_DIR="$PREFIX/bin"; LIB_DIR="$PREFIX/lib/$APP"
+  elif [ "$OS_NAME" = "windows" ]; then
+    if [ "$SCOPE" = "system" ]; then
+      root="$(winpath "${ProgramFiles:-C:\\Program Files}")/$APP"
     else
-      echo "❌ Need unzip or powershell to extract $FOUND_BIN"
-      exit 1
+      root="$(winpath "${LOCALAPPDATA:-$HOME/AppData/Local}")/Programs/$APP"
     fi
-    ;;
-  *)
-    echo "❌ Unknown archive type: $FOUND_BIN"
-    exit 1
-    ;;
+    BIN_DIR="$root/bin"; LIB_DIR="$root/lib"
+  else
+    if [ "$SCOPE" = "system" ]; then
+      BIN_DIR="/usr/local/bin"; LIB_DIR="/usr/local/lib/$APP"
+    else
+      BIN_DIR="$HOME/.local/bin"; LIB_DIR="$HOME/.local/lib/$APP"
+    fi
+  fi
+  if [ "$SCOPE" = "system" ] && [ "$OS_NAME" != "windows" ] && [ "$(id -u)" -ne 0 ]; then
+    command -v sudo >/dev/null 2>&1 || die "system-wide install needs root or sudo"
+    SUDO="sudo"
+  fi
+}
+
+# run a command with sudo when the target needs it
+priv() { if [ -n "$SUDO" ]; then $SUDO "$@"; else "$@"; fi; }
+
+# -------------------------
+# PATH persistence
+# -------------------------
+path_has() { case ":$PATH:" in *":$1:"*) return 0 ;; *) return 1 ;; esac; }
+
+shell_rc() {
+  case "$(basename "${SHELL:-sh}")" in
+    zsh)  echo "$HOME/.zshrc" ;;
+    fish) echo "$HOME/.config/fish/config.fish" ;;
+    bash) if [ "$OS_NAME" = "macos" ]; then echo "$HOME/.bash_profile"; else echo "$HOME/.bashrc"; fi ;;
+    *)    echo "$HOME/.profile" ;;
+  esac
+}
+
+add_to_path() { # dir...
+  if [ "$OS_NAME" = "windows" ]; then
+    target="User"; [ "$SCOPE" = "system" ] && target="Machine"
+    for d in "$@"; do
+      w="$(cygpath -w "$d" 2>/dev/null || printf '%s' "$d")"
+      powershell.exe -NoProfile -Command "
+        \$p = [Environment]::GetEnvironmentVariable('Path', '$target');
+        if ((\$p -split ';') -notcontains '$w') {
+          [Environment]::SetEnvironmentVariable('Path', (\$p.TrimEnd(';') + ';$w'), '$target') }" \
+        || warn "could not add $w to the $target PATH; add it yourself"
+    done
+    say "PATH updated for new terminals (open a new one)."
+    return
+  fi
+  rc="$(shell_rc)"; mkdir -p "$(dirname "$rc")"
+  for d in "$@"; do
+    path_has "$d" && continue
+    grep -s "$MARK" "$rc" 2>/dev/null | grep -qF "$d" && continue
+    if [ "$(basename "$rc")" = "config.fish" ]; then
+      printf '\nfish_add_path "%s" %s\n' "$d" "$MARK" >> "$rc"
+    else
+      printf '\nexport PATH="%s:$PATH" %s\n' "$d" "$MARK" >> "$rc"
+    fi
+    say "Added $d to PATH in $rc (open a new shell or: source $rc)"
+  done
+}
+
+remove_from_path() { # dir...
+  if [ "$OS_NAME" = "windows" ]; then
+    for target in User Machine; do
+      for d in "$@"; do
+        w="$(cygpath -w "$d" 2>/dev/null || printf '%s' "$d")"
+        powershell.exe -NoProfile -Command "
+          \$p = [Environment]::GetEnvironmentVariable('Path', '$target');
+          if (\$p) { \$n = ((\$p -split ';') | Where-Object { \$_ -and \$_ -ne '$w' }) -join ';';
+            if (\$n -ne \$p) { [Environment]::SetEnvironmentVariable('Path', \$n, '$target') } }" 2>/dev/null || true
+      done
+    done
+    return
+  fi
+  for rc in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.zshrc" "$HOME/.profile" "$HOME/.config/fish/config.fish"; do
+    [ -f "$rc" ] && grep -qs "$MARK" "$rc" || continue
+    grep -v "$MARK" "$rc" > "$rc.vtmate.tmp" && mv "$rc.vtmate.tmp" "$rc"
+    say "Removed vtmate PATH entry from $rc"
+  done
+}
+
+# -------------------------
+# Existing installation
+# -------------------------
+installed_files() { [ -f "$MANIFEST" ] && cat "$MANIFEST"; command -v "$APP" 2>/dev/null; true; }
+
+detect_existing() {
+  FOUND=""
+  [ -d "$VTMATE_HOME" ] && FOUND="$VTMATE_HOME"
+  b="$(command -v "$APP" 2>/dev/null || true)"; [ -n "$b" ] && FOUND="$FOUND $b"
+  [ -f "$MANIFEST" ] && FOUND="$FOUND (manifest: $MANIFEST)"
+  [ -n "$FOUND" ]
+}
+
+remove_installed() { # from manifest + anything at the resolved locations
+  if [ -f "$MANIFEST" ]; then
+    while IFS= read -r f; do
+      [ -n "$f" ] || continue
+      if [ -e "$f" ]; then
+        if [ -w "$(dirname "$f")" ]; then rm -f "$f"; else sudo rm -f "$f" 2>/dev/null || rm -f "$f"; fi
+        say "Removed $f"
+      fi
+    done < "$MANIFEST"
+  fi
+  # Our own files at the resolved locations (older installs without a
+  # manifest). Anything else in $LIB_DIR - e.g. CUDA libraries a user dropped
+  # there - is left alone; --uninstall removes the directory.
+  for f in "$BIN_DIR/$APP" "$BIN_DIR/$APP.exe" "$LIB_DIR"/libonnxruntime* "$LIB_DIR"/onnxruntime*.dll; do
+    [ -e "$f" ] && { priv rm -f "$f"; say "Removed $f"; }
+  done
+  [ -d "$LIB_DIR" ] && priv rmdir "$LIB_DIR" 2>/dev/null || true
+}
+
+backup_settings() {
+  [ -f "$VTMATE_HOME/settings" ] || return 0
+  ts="$(date +%Y-%m-%d_%H-%M-%S)"
+  cp -p "$VTMATE_HOME/settings" "$VTMATE_HOME/settings.backup.$ts"
+  warn "Your settings were backed up to $VTMATE_HOME/settings.backup.$ts"
+  warn "vtmate starts with fresh default settings; copy your agents, keys and choices back from the backup (or rename it to 'settings' to restore it as is)."
+}
+
+reset_vtmate_home() { # keep settings backups and read-files, drop everything else
+  [ -d "$VTMATE_HOME" ] || return 0
+  for e in "$VTMATE_HOME"/* "$VTMATE_HOME"/.[!.]*; do
+    [ -e "$e" ] || continue
+    case "$(basename "$e")" in settings.backup.*|read-files) continue ;; esac
+    rm -rf "$e"
+  done
+}
+
+# -------------------------
+# Uninstall
+# -------------------------
+if [ "$UNINSTALL" -eq 1 ]; then
+  [ -z "$SCOPE" ] && SCOPE="user"
+  resolve_dirs
+  say "This removes vtmate, its libraries, its PATH entries and the whole $VTMATE_HOME directory (settings, models, read-files)."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    say "Would remove:"; installed_files | sed 's/^/  /'; say "  $BIN_DIR/$APP*"; say "  $LIB_DIR"; say "  $VTMATE_HOME"; exit 0
+  fi
+  confirm "Uninstall vtmate?" "n" || { say "Aborted."; exit 0; }
+  remove_installed
+  [ -d "$LIB_DIR" ] && { priv rm -rf "$LIB_DIR"; say "Removed $LIB_DIR"; }
+  remove_from_path "$BIN_DIR" "$LIB_DIR"
+  rm -rf "$VTMATE_HOME"
+  say "✅ vtmate uninstalled."
+  exit 0
+fi
+
+# -------------------------
+# Version
+# -------------------------
+if [ -z "$VERSION" ]; then
+  VERSION="$(fetch "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name":' | cut -d '"' -f 4)"
+  [ -n "$VERSION" ] || die "Failed to fetch the latest version"
+fi
+# VTMATE_BASE_URL overrides the download location (testing against a mirror).
+BASE_URL="${VTMATE_BASE_URL:-https://github.com/$REPO/releases/download/$VERSION}"
+say "vtmate $VERSION - $OS_NAME/$ARCH_NAME$([ "$WSL" -eq 1 ] && echo ' (WSL)')"
+[ "$WSL" -eq 1 ] && warn "Running under WSL: this installs the Linux build inside WSL. For GPU use you need NVIDIA's WSL2 driver on the Windows side; the native Windows build is a separate download."
+
+# -------------------------
+# GPU detection: driver, then the runtime the cuda variant actually needs
+# -------------------------
+detect_cuda_driver() {
+  command -v nvidia-smi >/dev/null 2>&1 && return 0
+  [ -f "/c/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe" ] && return 0
+  [ -f "/c/Windows/System32/nvidia-smi.exe" ] && return 0
+  command -v reg >/dev/null 2>&1 && reg query "HKLM\\SOFTWARE\\NVIDIA Corporation\\Global\\NVTweak" >/dev/null 2>&1 && return 0
+  command -v nvidia-smi.exe >/dev/null 2>&1 && nvidia-smi.exe -L >/dev/null 2>&1 && return 0
+  return 1
+}
+detect_vulkan() {
+  command -v vulkaninfo >/dev/null 2>&1 && return 0
+  [ -f "/c/Windows/System32/vulkaninfo.exe" ] && return 0
+  ls "/c/Program Files/Vulkan SDK/"*/Bin/vulkaninfo.exe >/dev/null 2>&1 && return 0
+  [ "$OS_NAME" = "linux" ] && ls /usr/lib/libvulkan.so.1 /usr/lib/*/libvulkan.so.1 /usr/lib64/libvulkan.so.1 >/dev/null 2>&1 && return 0
+  command -v vulkaninfo.exe >/dev/null 2>&1 && vulkaninfo.exe >/dev/null 2>&1 && return 0
+  return 1
+}
+# have_so libcudart.so.12 -> found through ldconfig, LD_LIBRARY_PATH or the usual CUDA dirs
+have_so() {
+  ldconfig -p 2>/dev/null | grep -q "$1" && return 0
+  dirs="$(printf '%s' "${LD_LIBRARY_PATH:-}" | tr ':' ' ') /usr/local/cuda/lib64 /opt/cuda/lib64 /opt/cuda/targets/x86_64-linux/lib /usr/lib/x86_64-linux-gnu /usr/lib64 /usr/lib $LIB_DIR"
+  for d in $dirs; do [ -e "$d/$1" ] && return 0; done
+  return 1
+}
+have_dll() { # cudart64_*.dll on PATH or in the CUDA toolkit
+  for d in $(printf '%s' "$PATH" | tr ':' ' ') "$(winpath "${CUDA_PATH:-}")/bin"; do
+    ls "$d"/$1 >/dev/null 2>&1 && return 0
+  done
+  return 1
+}
+cuda_runtime_missing() { # prints what is missing for the cuda variant
+  if [ "$OS_NAME" = "linux" ]; then
+    for l in libcudart.so.12 libcublas.so.12 libcublasLt.so.12 libcudnn.so.9; do have_so "$l" || printf '%s ' "$l"; done
+  elif [ "$OS_NAME" = "windows" ]; then
+    for l in "cudart64_*.dll" "cufft64_*.dll" "curand64_*.dll"; do have_dll "$l" || printf '%s ' "$l"; done
+  fi
+}
+
+CUDA=0; VULKAN=0
+detect_cuda_driver && CUDA=1
+detect_vulkan && VULKAN=1
+say "Detected: NVIDIA driver=$([ $CUDA -eq 1 ] && echo yes || echo no)  Vulkan=$([ $VULKAN -eq 1 ] && echo yes || echo no)"
+
+# -------------------------
+# Scope (ask unless given)
+# -------------------------
+if [ -z "$SCOPE" ]; then
+  if [ "$OS_NAME" = "windows" ]; then
+    hint="1) this user (%LOCALAPPDATA%\\Programs\\vtmate)  2) all users (%ProgramFiles%\\vtmate, run as Administrator)"
+  else
+    hint="1) this user (~/.local)  2) system-wide (/usr/local, needs sudo)"
+  fi
+  case "$(ask "Install for: $hint  [1]" "1")" in 2|system) SCOPE="system" ;; *) SCOPE="user" ;; esac
+fi
+resolve_dirs
+say "Binary:    $BIN_DIR/$APP$([ "$OS_NAME" = windows ] && echo .exe)"
+say "Libraries: $LIB_DIR"
+
+# -------------------------
+# Candidates: cuda -> vulkan -> cpu, best available first
+# -------------------------
+PREFIX_NAME="${APP}-${VERSION}-${OS_NAME}-${ARCH_NAME}"
+EXT="tgz"; [ "$OS_NAME" = "windows" ] && EXT="zip"
+CANDIDATES=""
+if [ "$OS_NAME" = "macos" ]; then
+  CANDIDATES="${PREFIX_NAME}.${EXT}"
+elif [ -n "$VARIANT" ]; then
+  CANDIDATES="${PREFIX_NAME}-${VARIANT}.${EXT}"
+else
+  if [ "$CUDA" -eq 1 ]; then
+    missing="$(cuda_runtime_missing)"
+    if [ -n "$missing" ]; then
+      warn "NVIDIA driver found, but the cuda build also needs: $missing"
+      warn "Install the CUDA Toolkit 12.x$([ "$OS_NAME" = linux ] && echo ' and cuDNN 9') and rerun, or force it with --variant cuda. Falling back to vulkan/cpu."
+    else
+      CANDIDATES="${PREFIX_NAME}-cuda.${EXT}"
+    fi
+  fi
+  [ "$VULKAN" -eq 1 ] && CANDIDATES="$CANDIDATES ${PREFIX_NAME}-vulkan.${EXT}"
+  CANDIDATES="$CANDIDATES ${PREFIX_NAME}-cpu.${EXT}"
+fi
+say "Candidates: $CANDIDATES"
+
+# -------------------------
+# Existing install -> reinstall?
+# -------------------------
+REINSTALL=0
+if detect_existing; then
+  say "vtmate is already installed:$FOUND"
+  if [ "$DRY_RUN" -eq 0 ]; then
+    if [ "$YES" -eq 0 ] && ! have_tty; then die "existing installation found; rerun with --yes to reinstall"; fi
+    confirm "Reinstall? (settings are backed up, $VTMATE_HOME is reset, read-files are kept)" "n" || { say "Aborted."; exit 0; }
+    REINSTALL=1
+  fi
+fi
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  say "Dry run: nothing downloaded or installed."
+  for B in $CANDIDATES; do url_exists "$BASE_URL/$B" && { say "Would install: $B"; break; }; done
+  exit 0
+fi
+
+# -------------------------
+# Install: try candidates in order, keep the first one that starts
+# -------------------------
+TMP_DIR="${TMPDIR:-/tmp}/${APP}-install.$$"
+mkdir -p "$TMP_DIR"
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+extract() { # archive dir
+  case "$1" in
+    *.tgz) tar -xzf "$1" -C "$2" ;;
+    *.zip)
+      if command -v unzip >/dev/null 2>&1; then unzip -q -o "$1" -d "$2"
+      elif command -v powershell.exe >/dev/null 2>&1; then
+        powershell.exe -NoProfile -Command "Expand-Archive -Force -LiteralPath '$(cygpath -w "$1")' -DestinationPath '$(cygpath -w "$2")'"
+      else die "Need unzip or powershell to extract $1"; fi ;;
+  esac
+}
+
+smoke_test() { # binary
+  if [ "$OS_NAME" = "windows" ]; then
+    PATH="$LIB_DIR:$PATH" "$1" --list-voices >/dev/null 2>&1
+  else
+    "$1" --list-voices >/dev/null 2>&1
+  fi
+}
+
+install_from() { # extracted dir -> 0 on success (files recorded in manifest)
+  src="$1"
+  bin="$src/$APP"; [ "$OS_NAME" = "windows" ] && bin="$src/$APP.exe"
+  [ -f "$bin" ] || { warn "$(basename "$bin") not found in archive"; return 1; }
+  priv mkdir -p "$BIN_DIR" "$LIB_DIR"
+  mkdir -p "$VTMATE_HOME"; : > "$MANIFEST"
+  priv cp "$bin" "$BIN_DIR/"
+  priv chmod +x "$BIN_DIR/$(basename "$bin")"
+  echo "$BIN_DIR/$(basename "$bin")" >> "$MANIFEST"
+  for f in "$src"/*.so "$src"/*.so.* "$src"/*.dll; do
+    [ -e "$f" ] || continue
+    priv cp -P "$f" "$LIB_DIR/"
+    echo "$LIB_DIR/$(basename "$f")" >> "$MANIFEST"
+  done
+  if smoke_test "$BIN_DIR/$(basename "$bin")"; then return 0; fi
+  warn "$(basename "$bin") from $CUR could not start on this machine"
+  while IFS= read -r f; do priv rm -f "$f"; done < "$MANIFEST"
+  rm -f "$MANIFEST"
+  return 1
+}
+
+if [ "$REINSTALL" -eq 1 ]; then
+  backup_settings
+  remove_installed
+  reset_vtmate_home
+fi
+
+INSTALLED=""
+say "Looking for a matching build in $VERSION ..."
+for CUR in $CANDIDATES; do
+  url="$BASE_URL/$CUR"
+  url_exists "$url" || { say "Not in this release: $CUR"; continue; }
+  say "Downloading $CUR ..."
+  download "$url" "$TMP_DIR/$CUR"
+  size="$(wc -c < "$TMP_DIR/$CUR" 2>/dev/null || echo 0)"
+  [ "$size" -ge 100000 ] || { warn "download too small ($size bytes), skipping"; continue; }
+  head -c 20 "$TMP_DIR/$CUR" | grep -qi "<html" && { warn "download is an HTML error page, skipping"; continue; }
+  rm -rf "$TMP_DIR/x"; mkdir -p "$TMP_DIR/x"
+  extract "$TMP_DIR/$CUR" "$TMP_DIR/x"
+  if install_from "$TMP_DIR/x"; then INSTALLED="$CUR"; break; fi
+  rm -f "$TMP_DIR/$CUR"
+done
+[ -n "$INSTALLED" ] || die "No variant of vtmate $VERSION could be installed on this machine"
+
+# -------------------------
+# PATH + notes
+# -------------------------
+if [ "$OS_NAME" = "windows" ]; then add_to_path "$BIN_DIR" "$LIB_DIR"; else add_to_path "$BIN_DIR"; fi
+
+case "$INSTALLED" in
+  *-cuda.*)
+    say "Installed the cuda build. It needs the CUDA 12 runtime$([ "$OS_NAME" = linux ] && echo ' and cuDNN 9') on this machine (system-wide or copied into $LIB_DIR)." ;;
+  *-vulkan.*)
+    say "Installed the vulkan build. It needs the Vulkan loader (libvulkan.so.1 / vulkan-1.dll) from your GPU driver." ;;
 esac
-
-case "$OS_NAME" in
-  windows)
-    INSTALL_DIR="$HOME/bin"
-    mkdir -p "$INSTALL_DIR"
-    [ -f "$EXTRACT_DIR/$APP.exe" ] || { echo "❌ $APP.exe not found in archive"; exit 1; }
-    # Everything in the archive: the exe and the DLLs it must sit next to.
-    cp "$EXTRACT_DIR"/* "$INSTALL_DIR/"
-    ;;
-  *)
-    INSTALL_DIR="/usr/local/bin"
-    [ -w "$INSTALL_DIR" ] || INSTALL_DIR="$HOME/.local/bin"
-    mkdir -p "$INSTALL_DIR"
-
-    [ -f "$EXTRACT_DIR/$APP" ] || { echo "❌ $APP not found in archive"; exit 1; }
-    cp "$EXTRACT_DIR/$APP" "$INSTALL_DIR/$APP"
-    chmod +x "$INSTALL_DIR/$APP"
-    ;;
-esac
-
-rm -rf "$EXTRACT_DIR" "$TMP_FILE"
-
-echo "Installed to: $INSTALL_DIR"
-echo "Done."
+say "✅ Installed $INSTALLED to $BIN_DIR"
+path_has "$BIN_DIR" || say "Open a new terminal, then run: $APP"

@@ -52,7 +52,7 @@ pub fn ensure_assets_env() {
   // Check if the expected files already exist
   let bin_path = kokoro_assets_dir.join("0.bin");
   let onnx_path = kokoro_assets_dir.join("0.onnx");
-  let whisper_small_path = whisper_dir.join("ggml-small.bin");
+  let whisper_small_path = whisper_dir.join("ggml-small-q5_1.bin");
   let whisper_tiny_path = whisper_dir.join("ggml-tiny.bin");
 
   let all_exist = bin_path.exists()
@@ -430,7 +430,7 @@ fn embedded_kokoro_0_onnx() -> &'static [u8] {
 }
 
 fn embedded_whisper_small() -> &'static [u8] {
-  include_bytes!(concat!(env!("OUT_DIR"), "/embedded/ggml-small.bin"))
+  include_bytes!(concat!(env!("OUT_DIR"), "/embedded/ggml-small-q5_1.bin"))
 }
 
 fn embedded_whisper_tiny() -> &'static [u8] {

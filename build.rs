@@ -30,8 +30,10 @@ fn find_url_for_file(file_name: &str) -> Option<String> {
     "ggml-tiny.bin" => {
       Some("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin".to_string())
     }
-    "ggml-small.bin" => {
-      Some("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin".to_string())
+    // 5-bit quantized small model: ~2.5x smaller than ggml-small.bin and
+    // faster on the CPU for a small accuracy cost.
+    "ggml-small-q5_1.bin" => {
+      Some("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin".to_string())
     }
     "0.onnx" => {
       Some("https://github.com/DavidValin/kokoro-micro/raw/main/models/0.onnx".to_string())
@@ -96,8 +98,8 @@ fn init_expected_hashes() -> HashMap<&'static str, &'static str> {
     "7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5",
   );
   m.insert(
-    "ggml-small.bin",
-    "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+    "ggml-small-q5_1.bin",
+    "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb",
   );
   m.insert(
     "ggml-tiny.bin",
@@ -366,6 +368,14 @@ fn link_espeak_optional_libs(out_dir: &Path) {
 }
 
 fn main() {
+  // Linux: ALSA error-handler shim, see csrc/alsa_error_shim.c. Compiled with
+  // the target C compiler (cc honours CC_<target> / CC from the build images).
+  if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
+    println!("cargo:rerun-if-changed=csrc/alsa_error_shim.c");
+    cc::Build::new()
+      .file("csrc/alsa_error_shim.c")
+      .compile("vtmate_alsa_shim");
+  }
 
   // -----------------------------
   // Optional: Link prebuilt Whisper/GGML/OpenBLAS if available
@@ -461,7 +471,7 @@ fn main() {
   let needed_files = [
     (".cache/k/0.bin", "0.bin"),
     (".cache/k/0.onnx", "0.onnx"),
-    (".whisper-models/ggml-small.bin", "ggml-small.bin"),
+    (".whisper-models/ggml-small-q5_1.bin", "ggml-small-q5_1.bin"),
     (".whisper-models/ggml-tiny.bin", "ggml-tiny.bin"),
   ];
   let home = get_home_dir();

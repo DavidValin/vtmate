@@ -68,6 +68,30 @@ pub fn ensure_alsa_plugin_dir() {
 #[cfg(not(target_os = "linux"))]
 pub fn ensure_alsa_plugin_dir() {}
 
+/// Route libasound's own error messages ("ALSA lib pcm_dmix.c:...: unable to
+/// open slave" and friends, printed while cpal probes PCMs) through
+/// `crate::log::log` instead of straight to stderr. The variadic C callback
+/// lives in csrc/alsa_error_shim.c; it calls back into `vtmate_alsa_log`.
+#[cfg(target_os = "linux")]
+pub fn install_alsa_error_handler() {
+  unsafe extern "C" {
+    fn vtmate_install_alsa_error_handler();
+  }
+  unsafe { vtmate_install_alsa_error_handler() };
+}
+#[cfg(not(target_os = "linux"))]
+pub fn install_alsa_error_handler() {}
+
+#[cfg(target_os = "linux")]
+#[unsafe(no_mangle)]
+pub extern "C" fn vtmate_alsa_log(msg: *const std::ffi::c_char) {
+  if msg.is_null() {
+    return;
+  }
+  let line = unsafe { std::ffi::CStr::from_ptr(msg) }.to_string_lossy();
+  crate::log::log("warning", &line);
+}
+
 pub fn pick_input_stream(host: &cpal::Host) -> Result<(cpal::Device, cpal::Stream), String> {
   let err = || {
     "No usable microphone stream could be opened.\n".to_string()

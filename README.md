@@ -92,9 +92,17 @@ Thinking / reasoning is disabled on local servers so replies start speaking righ
 
 ## Installation
 
-### 📌 1. **Download vtmate**
-- `https://github.com/DavidValin/vtmate/releases`
-- Move the binary to a folder in your $PATH so you can use `vtmate` command anywhere
+### 📌 1. **Install vtmate**
+
+One line, on Linux, macOS and Windows (Git Bash):
+```
+curl -fsSL https://raw.githubusercontent.com/DavidValin/vtmate/main/installer.sh | sh
+```
+The installer detects your OS, CPU and GPU (CUDA, Vulkan or CPU), asks whether to install for your user or system-wide, downloads the matching release, puts `vtmate` on your `$PATH` and its libraries in a fixed location (`<prefix>/lib/vtmate` on Linux, `...\vtmate\lib` on Windows). If the chosen GPU build cannot start on your machine it falls back to the next one. Reinstalling backs up `~/.vtmate/settings` to `~/.vtmate/settings.backup.<time>`.
+
+Options: `--scope user|system`, `--prefix DIR`, `--variant cpu|vulkan|cuda`, `--version TAG`, `--yes`, `--dry-run`, `--uninstall` (also removes `~/.vtmate`).
+
+Or download a release by hand from `https://github.com/DavidValin/vtmate/releases` and put the binary in a folder in your $PATH (keep the `.so`/`.dll` files of the cuda build next to it).
 
 ### 📌 2. **Install llm engine (needed for ai responses)**
 
@@ -336,7 +344,7 @@ vtmate self contains (no need for manual installation) espeak-ng-data, the whisp
 whisper models:
 ```
 - `~/.whisper-models/ggml-tiny.bin`
-- `~/.whisper-models/ggml-small.bin`
+- `~/.whisper-models/ggml-small-q5_1.bin`
 ```
 
 kokoro model files:
@@ -393,7 +401,7 @@ supertonic files (Supertonic 3, https://huggingface.co/Supertone/supertonic-3):
 * If you want to avoid sound interruptions you can use `ptt` mode or increase the `sound_threshold_peak` for your microphone levels.
 * If you want to use OpenTTS, start the docker service first: `docker run --rm --platform=linux/amd64 -p 5500:5500 synesthesiam/opentts:all` (it will pull the image the first time). Adjust the platform as needed depending on your hardware.
 * If you have problems starting vtmate you can remove `~/vtmate/settings` so it recreates the default configuration
-* By default whisper tiny is used (from ~/.whisper-models/ggml-small.bin). If you need better speech recognition, download a better whisper model and update the `whisper_model_path` setting.
+* By default whisper tiny is used (`~/.whisper-models/ggml-tiny.bin`). For better speech recognition point the `whisper_model_path` setting to the bundled 5-bit quantized small model `~/.whisper-models/ggml-small-q5_1.bin`, or download a bigger whisper model and point to it.
 
 If you need help:
 
@@ -456,7 +464,7 @@ Run `vtmate --list-voices` to print every voice for every language and TTS syste
 Do you have GPU? (nvidia? an apple computer?) Great! then vtmate speed is at lighting speed =)
 
 * To be able to use acceleration, pick the built version for your hardware from [Releases list](https://github.com/DavidValin/vtmate/releases)
-* For CUDA install CUDA Toolkit. For Vulkan install VULKAN SDK
+* For CUDA install the CUDA Toolkit (12.x). The Linux CUDA build also needs cuDNN 9 installed (the Windows build bundles it). For Vulkan install VULKAN SDK
 
 ```
 macOS:            ✅ CPU    ✅ Metal

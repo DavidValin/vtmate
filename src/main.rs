@@ -31,6 +31,7 @@ use crate::conversation::Command;
 static START_INSTANT: OnceLock<Instant> = OnceLock::new();
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  crate::audio::install_alsa_error_handler();
   crate::audio::ensure_alsa_plugin_dir();
 
   let mut args = crate::config::Args::parse();
