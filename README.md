@@ -56,6 +56,9 @@ https://github.com/user-attachments/assets/8b9e982c-ba97-4aeb-8e55-1db6a92bc164
 - 📌 Interface with `OpenTTS` system (requires external docker service)
 - 📌 Source code in the replies (text inside ``` blocks) is shown on screen but never spoken
 - 📌 Use any gguf model from huggingface.com (using llama-server), any ollama model, or a hosted provider (OpenAI, Anthropic, Google, Groq, Mistral, OpenRouter, DeepSeek, xAI)
+- 📌 Run in background mode and chat with llm via voice, ask about selection, read selected text or turn your speech into text pasted into screen
+
+* Background mode features can be used to assist your daily routine with ai powered voice responses while you use other apps, voice read your favourite books or articles, write emails via voice and even replace paid tools like Superwhisper
 
 ## How it works
 
