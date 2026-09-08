@@ -176,6 +176,35 @@ ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 ```
 
+### Reusable system prompts
+
+A long system prompt is easier to write and to share between agents in its own `[system_prompt]` section. The block has a `name` and then the prompt body fenced between two lines of three or more dashes, and agents pull it in with `@<name>`:
+
+```
+[system_prompt]
+name = planner
+---
+You assist the user in the creation of a plan based on the user's goal.
+
+When defining the plan follow these format standards:
+  1. The plan is composed by tasks and subtasks.
+  2. Each task has the format: "[ ] <task name>".
+  3. Subtasks are indented with 2 spaces below the parent task.
+  4. Before defining a plan, make sure you have the relevant
+     information from the user.
+---
+
+[agent]
+name = planner
+...
+system_prompt = @planner
+```
+
+* The body is taken exactly as written: blank lines, indentation, quotes and lines starting with `[` are all kept. Because it already has real new lines, `\n` inside a block is left alone.
+* Close a body that itself contains a `---` line with a longer fence (`----`), the same way as markdown code fences.
+* Define as many blocks as you want, in any order, and reference one from as many agents as you want.
+* Inline prompts keep working exactly as before: `system_prompt = "You are a nice ai agent\nreply nicely"` turns `\n` into a new line. Start an inline prompt with `@@` if you need it to begin with a literal `@`.
+
 * By default all agents are set in `PTT` mode, you have to keep `SPACE` pressed to talk. If you want to use `LIVE` mode, make sure you adjust your microphone levels correctly and adjust `sound_threshold_peak` and `end_silence_ms` settings to your need
 * Source code in an agent's reply is not spoken: anything wrapped in ``` fences is shown but skipped. Reading a file with `-r` does speak it, since the code is part of what you asked to have read.
 * Voice mixing is supported for kokoro TTS system only, you can create a voice by mixing 2 kokoro voices by percentage. Example mixing 50% of bm_daniel and 50% of am_puck: set voice name to `bm_daniel.5+am_puck.5`

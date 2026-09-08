@@ -4572,7 +4572,7 @@ checksum = "6a02e4885ed3bc0f2de90ea6dd45ebcbb66dacffe03547fadbb0eeae2770887d"
 
 [[package]]
 name = "vtmate"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "arboard",
@@ -4615,6 +4615,7 @@ dependencies = [
  "urlencoding",
  "uuid",
  "whisper-rs",
+ "whisper-rs-sys",
  "windows-sys 0.59.0",
  "x11rb",
 ]

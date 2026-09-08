@@ -88,16 +88,20 @@ pub fn log(msg_type: &str, msg: &str) {
 //  ggml / whisper.cpp bridge
 // ------------------------------------------------------------------
 
-// ggml_log_level, from ggml.h.
-const GGML_LOG_LEVEL_DEBUG: u32 = 1;
-const GGML_LOG_LEVEL_INFO: u32 = 2;
-const GGML_LOG_LEVEL_WARN: u32 = 3;
-const GGML_LOG_LEVEL_ERROR: u32 = 4;
-const GGML_LOG_LEVEL_CONT: u32 = 5;
+// ggml_log_level, from ggml.h. Typed with the generated alias, not u32: what
+// C enum bindgen lands on depends on the target (c_int under MSVC), and a
+// callback whose signature does not match exactly is a compile error there.
+type GgmlLogLevel = whisper_rs_sys::ggml_log_level;
+
+const GGML_LOG_LEVEL_DEBUG: GgmlLogLevel = 1;
+const GGML_LOG_LEVEL_INFO: GgmlLogLevel = 2;
+const GGML_LOG_LEVEL_WARN: GgmlLogLevel = 3;
+const GGML_LOG_LEVEL_ERROR: GgmlLogLevel = 4;
+const GGML_LOG_LEVEL_CONT: GgmlLogLevel = 5;
 
 /// The level of the last message that carried one: ggml continues a line by
 /// logging the rest of it at GGML_LOG_LEVEL_CONT, which has no level itself.
-static LAST_GGML_LEVEL: AtomicU32 = AtomicU32::new(GGML_LOG_LEVEL_INFO);
+static LAST_GGML_LEVEL: AtomicU32 = AtomicU32::new(GGML_LOG_LEVEL_INFO as u32);
 
 /// Take over the single C log callback that ggml and whisper.cpp share.
 ///
@@ -115,7 +119,7 @@ pub fn install_ggml_log_callback() {
 }
 
 unsafe extern "C" fn ggml_log_trampoline(
-  level: u32,
+  level: GgmlLogLevel,
   text: *const std::os::raw::c_char,
   _user_data: *mut std::os::raw::c_void,
 ) {
@@ -126,9 +130,9 @@ unsafe extern "C" fn ggml_log_trampoline(
   let msg = unsafe { std::ffi::CStr::from_ptr(text) }.to_string_lossy();
 
   let level = if level == GGML_LOG_LEVEL_CONT {
-    LAST_GGML_LEVEL.load(Ordering::Relaxed)
+    LAST_GGML_LEVEL.load(Ordering::Relaxed) as GgmlLogLevel
   } else {
-    LAST_GGML_LEVEL.store(level, Ordering::Relaxed);
+    LAST_GGML_LEVEL.store(level as u32, Ordering::Relaxed);
     level
   };
 

@@ -101,7 +101,9 @@ pub fn conversation_thread(
       send_user_message_ui(&tx_ui, &prompt, false);
       push_user_message(&conversation_history, &prompt);
       perform_save(&conversation_history, &settings_clone);
-      let system_prompt = settings.system_prompt.replace("\\n", "\n");
+      // already expanded by load_settings (inline escapes) or taken
+      // verbatim from a [system_prompt] block
+      let system_prompt = settings.system_prompt.clone();
       let messages = create_basic_messages(system_prompt, prompt.clone());
 
       let my_interrupt = interrupt_counter.load(Ordering::SeqCst);
@@ -463,7 +465,7 @@ pub fn conversation_thread(
         let system_prompt = state.system_prompt.lock().unwrap().clone();
         let hist = conversation_history.lock().unwrap();
         let mut messages = Vec::new();
-        messages.push(ChatMessage{role:"system".to_string(), content:system_prompt.replace("\\n", "\n"), agent_name:None});
+        messages.push(ChatMessage{role:"system".to_string(), content:system_prompt.clone(), agent_name:None});
 
         for m in hist.iter() {
           messages.push(m.clone());
@@ -861,7 +863,7 @@ fn handle_reply(
   user_msg: String,
 ) -> Option<String> {
   // Build messages for LLM
-  let system_prompt = settings.system_prompt.replace("\\n", "\n");
+  let system_prompt = settings.system_prompt.clone();
   let messages =
     create_full_context_messages(system_prompt, user_msg.clone(), conversation_history);
 

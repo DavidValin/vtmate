@@ -11,6 +11,7 @@ use cpal::Device;
 use cpal::traits::DeviceTrait;
 use serde::Deserialize;
 use serde_ini::from_str;
+use std::collections::HashMap;
 use std::fs::{File, create_dir_all, read_to_string};
 use std::io::Write;
 use std::panic;
@@ -73,6 +74,27 @@ section, then one [agent] section per agent.
   shift+f5, cmd+alt+r (modifiers: ctrl, alt/option, shift,
   cmd/super, cmdorctrl).
 
+[system_prompt]  (optional, as many as you want)
+  A named multiline system prompt that agents pull in with
+  `system_prompt = @<name>`. The block holds a `name` and then
+  the prompt body fenced between two lines of three or more
+  dashes:
+
+      [system_prompt]
+      name = planner
+      ---
+      You assist the user in the creation of a plan.
+
+      Follow these format standards:
+        1. The plan is composed by tasks and subtasks.
+        2. Each task has the format: "[ ] <task name>".
+      ---
+
+  The body is taken verbatim: blank lines, indentation and
+  lines starting with '[' are kept, and no \n escape is
+  expanded (it already has real new lines). Close a body that
+  itself contains '---' with a longer fence ('----').
+
 Explanation on the [agent] fields:
 
   * name:                 a short name for the agent
@@ -134,7 +156,12 @@ Explanation on the [agent] fields:
   ------------------------------------------------------------
   * system_prompt:        the system prompt to be sent to
                           the llm when querying it.
-                          Use \n for new lines
+                          Use \n for new lines.
+                          Write `@<name>` instead to use a
+                          [system_prompt] block, which keeps
+                          its new lines as written (start an
+                          inline prompt with `@@` for a
+                          literal '@').
   ------------------------------------------------------------
   * sound_threshold_peak: a value between 0 and 1 which will
                           be used as a peak base to detect
@@ -322,33 +349,80 @@ impl DaemonSettings {
   }
 }
 
-/// The `[general]` and `[daemon]` blocks cut out of a settings file, plus
-/// everything else (the `[agent]` sections) untouched.
+/// The `[general]`, `[daemon]` and `[system_prompt]` blocks cut out of a
+/// settings file, plus everything else (the `[agent]` sections) untouched.
 #[derive(Debug, Clone, Default)]
 pub struct LeadingSections {
   pub general: Option<String>,
   pub daemon: Option<String>,
   pub rest: String,
-  /// Section headers that are none of [general], [daemon], [agent]
-  /// (typos, wrong case...). Reported by `load_settings`.
+  /// Bodies of the `[system_prompt]` blocks, keyed by their `name`. Agents
+  /// pull them in with `system_prompt = @<name>`.
+  pub prompts: HashMap<String, String>,
+  /// Malformed `[system_prompt]` blocks (no name, no fence, duplicated
+  /// name...). Reported by `load_settings`.
+  pub prompt_errors: Vec<String>,
+  /// Section headers that are none of [general], [daemon], [system_prompt],
+  /// [agent] (typos, wrong case...). Reported by `load_settings`.
   pub unknown: Vec<String>,
 }
 
-/// Separate the `[general]` and `[daemon]` sections from the `[agent]`
-/// sections. A section starts at a line that is exactly its header and ends
-/// at the next line starting with '['. Text before any header stays in `rest`.
+/// Separate the `[general]`, `[daemon]` and `[system_prompt]` sections from
+/// the `[agent]` sections. A section starts at a line that is exactly its
+/// header and ends at the next line starting with '['. Text before any header
+/// stays in `rest`.
+///
+/// A `[system_prompt]` block is `key = value` lines (only `name` is read)
+/// followed by the prompt body fenced between two lines of three or more
+/// dashes. The body is taken verbatim and is never scanned for headers, so it
+/// may hold lines starting with '['. The closing fence must be at least as
+/// long as the opening one, so a body containing `---` opens with `----`.
 pub fn split_leading_sections(text: &str) -> LeadingSections {
   #[derive(PartialEq)]
   enum Cur {
     Rest,
     General,
     Daemon,
+    /// Inside a [system_prompt], before its opening fence.
+    PromptKeys,
+    /// Inside the fenced body of a [system_prompt].
+    PromptBody,
   }
   let mut out = LeadingSections::default();
   let mut cur = Cur::Rest;
+  // The [system_prompt] block being read.
+  let mut prompt_name: Option<String> = None;
+  let mut prompt_body = String::new();
+  let mut fence_len = 0usize;
+
   for line in text.split_inclusive('\n') {
     let t = line.trim();
+    // Body lines are verbatim: only the closing fence ends them, so a '['
+    // at the start of a line is just text.
+    if cur == Cur::PromptBody {
+      if is_fence(t) && t.len() >= fence_len {
+        finish_prompt(
+          &mut out,
+          prompt_name.take(),
+          take_body(&mut prompt_body),
+          true,
+        );
+        cur = Cur::Rest;
+      } else {
+        prompt_body.push_str(line);
+      }
+      continue;
+    }
+    if cur == Cur::PromptKeys && is_fence(t) {
+      fence_len = t.len();
+      cur = Cur::PromptBody;
+      continue;
+    }
     if t.starts_with('[') && t.ends_with(']') {
+      if cur == Cur::PromptKeys {
+        // a new section started before the body fence
+        finish_prompt(&mut out, prompt_name.take(), String::new(), false);
+      }
       // headers are matched case-insensitively and re-emitted canonical
       cur = match t.to_ascii_lowercase().as_str() {
         "[general]" => {
@@ -358,6 +432,11 @@ pub fn split_leading_sections(text: &str) -> LeadingSections {
         "[daemon]" => {
           out.daemon.get_or_insert_with(String::new);
           Cur::Daemon
+        }
+        "[system_prompt]" => {
+          prompt_name = None;
+          prompt_body.clear();
+          Cur::PromptKeys
         }
         "[agent]" => {
           let body_len = line.trim_end_matches(['\r', '\n']).len();
@@ -377,9 +456,132 @@ pub fn split_leading_sections(text: &str) -> LeadingSections {
       Cur::Rest => out.rest.push_str(line),
       Cur::General => out.general.as_mut().unwrap().push_str(line),
       Cur::Daemon => out.daemon.as_mut().unwrap().push_str(line),
+      Cur::PromptKeys => {
+        if let Some(v) = prompt_key_value(line, "name") {
+          prompt_name = Some(v);
+        }
+      }
+      Cur::PromptBody => unreachable!("handled above"),
+    }
+  }
+  if cur == Cur::PromptKeys || cur == Cur::PromptBody {
+    finish_prompt(
+      &mut out,
+      prompt_name.take(),
+      take_body(&mut prompt_body),
+      false,
+    );
+  }
+  out
+}
+
+/// A fence line: three or more dashes and nothing else.
+fn is_fence(trimmed_line: &str) -> bool {
+  trimmed_line.len() >= 3 && trimmed_line.bytes().all(|b| b == b'-')
+}
+
+/// `key = value` inside a [system_prompt] header, quotes and comments handled
+/// like everywhere else. `None` when the line is not that key.
+fn prompt_key_value(line: &str, key: &str) -> Option<String> {
+  let trimmed = line.trim_start();
+  if trimmed.starts_with('#') || trimmed.starts_with(';') {
+    return None;
+  }
+  let (k, v) = line.split_once('=')?;
+  if k.trim() != key {
+    return None;
+  }
+  let v = v.trim();
+  let v = if v.len() >= 2 && v.starts_with('"') && v.ends_with('"') {
+    &v[1..v.len() - 1]
+  } else {
+    v
+  };
+  Some(v.trim().to_string())
+}
+
+/// Take the accumulated body, dropping the line ending that belongs to the
+/// closing fence. Everything else is kept byte for byte.
+fn take_body(body: &mut String) -> String {
+  let mut out = std::mem::take(body);
+  if out.ends_with('\n') {
+    out.pop();
+    if out.ends_with('\r') {
+      out.pop();
     }
   }
   out
+}
+
+/// Record a finished `[system_prompt]` block, or why it was rejected.
+fn finish_prompt(out: &mut LeadingSections, name: Option<String>, body: String, terminated: bool) {
+  if !terminated {
+    out.prompt_errors.push(format!(
+      "[system_prompt] {} is not closed: its body must be fenced between two lines of three or more dashes",
+      name
+        .as_deref()
+        .map(|n| format!("'{}'", n))
+        .unwrap_or_else(|| "block".to_string())
+    ));
+    return;
+  }
+  let Some(name) = name else {
+    out
+      .prompt_errors
+      .push("a [system_prompt] block has no 'name'".to_string());
+    return;
+  };
+  if name.is_empty()
+    || !name
+      .chars()
+      .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+  {
+    out.prompt_errors.push(format!(
+      "invalid [system_prompt] name '{}': use letters, digits, '_' or '-'",
+      name
+    ));
+    return;
+  }
+  if out.prompts.insert(name.clone(), body).is_some() {
+    out
+      .prompt_errors
+      .push(format!("duplicated [system_prompt] name '{}'", name));
+  }
+}
+
+/// Expand an agent's `system_prompt` value. `@name` is the body of the
+/// matching `[system_prompt]` block, taken verbatim: it already holds real
+/// new lines, so no escape is expanded in it. `@@` starts an inline prompt
+/// with a literal '@'. Anything else is an inline prompt, where `\n` becomes
+/// a new line as it always has.
+pub fn resolve_system_prompt(
+  value: &str,
+  prompts: &HashMap<String, String>,
+) -> Result<String, String> {
+  let trimmed = value.trim();
+  if let Some(rest) = trimmed.strip_prefix("@@") {
+    return Ok(format!("@{}", rest).replace("\\n", "\n"));
+  }
+  if let Some(name) = trimmed.strip_prefix('@') {
+    let name = name.trim();
+    return prompts.get(name).cloned().ok_or_else(|| {
+      let mut defined: Vec<&str> = prompts.keys().map(|s| s.as_str()).collect();
+      defined.sort_unstable();
+      if defined.is_empty() {
+        format!(
+          "unknown system_prompt '@{}': no [system_prompt] section is defined",
+          name
+        )
+      } else {
+        format!(
+          "unknown system_prompt '@{}': defined ones are {}",
+          name,
+          defined.join(", ")
+        )
+      }
+    });
+  }
+  Ok(value.replace("\\n", "\n"))
 }
 
 /// Rewrite an INI block as `key=value` lines: whitespace trimmed, one layer
@@ -546,8 +748,25 @@ pub fn persist_selected_agent(settings_path: &std::path::Path, name: &str) -> st
   let mut in_general = false;
   let mut found_section = false;
   let mut replaced = false;
+  // [system_prompt] bodies are copied through untouched: a line of theirs
+  // starting with '[' is text, not a section header.
+  let mut in_prompt_keys = false;
+  let mut prompt_fence: Option<usize> = None;
   for line in text.split_inclusive('\n') {
     let t = line.trim();
+    if let Some(len) = prompt_fence {
+      if is_fence(t) && t.len() >= len {
+        prompt_fence = None;
+      }
+      out.push_str(line);
+      continue;
+    }
+    if in_prompt_keys && is_fence(t) {
+      prompt_fence = Some(t.len());
+      in_prompt_keys = false;
+      out.push_str(line);
+      continue;
+    }
     let ending = if line.ends_with("\r\n") {
       "\r\n"
     } else if line.ends_with('\n') {
@@ -562,6 +781,7 @@ pub fn persist_selected_agent(settings_path: &std::path::Path, name: &str) -> st
         replaced = true;
       }
       in_general = t == "[general]";
+      in_prompt_keys = t.eq_ignore_ascii_case("[system_prompt]");
       if in_general {
         found_section = true;
       }
@@ -688,7 +908,7 @@ pub fn load_settings(
   let sections = split_leading_sections(&read_to_string(settings_path)?);
   if !sections.unknown.is_empty() {
     let msg = format!(
-      "unknown section {} in {}: expected [general], [daemon] or [agent]",
+      "unknown section {} in {}: expected [general], [daemon], [system_prompt] or [agent]",
       sections.unknown.join(", "),
       settings_path.display()
     );
@@ -696,6 +916,19 @@ pub fn load_settings(
     thread::sleep(Duration::from_millis(30));
     return Err(Error::msg(msg));
   }
+  // Malformed [system_prompt] blocks are a file syntax problem, like an
+  // unknown section: report them all and give up before parsing agents.
+  if !sections.prompt_errors.is_empty() {
+    let msg = format!(
+      "in {}:\n{}",
+      settings_path.display(),
+      sections.prompt_errors.join("\n")
+    );
+    print!("❌ {}", msg);
+    thread::sleep(Duration::from_millis(30));
+    return Err(Error::msg(msg));
+  }
+  let prompts = sections.prompts;
   let ini_contents = sections.rest;
   // Split on the section header "[agent]"
   let blocks: Vec<&str> = ini_contents
@@ -705,6 +938,7 @@ pub fn load_settings(
 
   let mut agents = Vec::new();
   let mut errors: Vec<String> = Vec::new();
+  let mut prompt_ref_errors: Vec<String> = Vec::new();
   for block in blocks {
     // Preprocess the block to remove surrounding quotes from values
     let clean_section = clean_ini_block(block);
@@ -728,6 +962,13 @@ pub fn load_settings(
     };
     // Sanitize quoted string values in AgentSettings before validation
     sanitize_agent_settings(&mut agent);
+
+    // Expand `system_prompt = @name` into the body of its [system_prompt]
+    // block, or the `\n` escapes of an inline prompt, before validating it.
+    match resolve_system_prompt(&agent.system_prompt, &prompts) {
+      Ok(prompt) => agent.system_prompt = prompt,
+      Err(e) => prompt_ref_errors.push(format!("Agent {}: {}", agent.name, e)),
+    }
 
     // Validate individual agent
     if let Err(e) =
@@ -810,6 +1051,13 @@ pub fn load_settings(
     agents.push(agent);
   }
 
+  if !prompt_ref_errors.is_empty() {
+    let msg = prompt_ref_errors.join("\n");
+    print!("❌ {}", msg);
+    thread::sleep(Duration::from_millis(30));
+    return Err(Error::msg(msg));
+  }
+
   if !errors.is_empty() {
     print!("❌ {}", &errors.join("\n").to_string());
     thread::sleep(Duration::from_millis(30));
@@ -863,6 +1111,20 @@ tts_background_combo = ctrl+alt+r
 stt_and_paste_background_ptt_combo = ctrl+alt+s
 llm_background_reset = ctrl+q
 
+[system_prompt]
+name = concise_assistant
+---
+You are a neutral, helpful AI assistant.
+Follow the subject of the conversation with special attention to the user
+request. Provide accurate, concise answers.
+
+Rules:
+  1. Keep replies under 30 words.
+  2. If a longer answer is required, limit it to 250 words.
+  3. Assume no prior context unless the user supplies it.
+  4. Do not mention yourself.
+---
+
 [agent]
 name = main agent
 language = en
@@ -872,7 +1134,7 @@ voice_speed = 1.1
 provider = ollama
 baseurl = http://127.0.0.1:11434
 model = llama3.2:3b
-system_prompt = "You are a neutral, helpful AI assistant. Follow the subject of the conversation with special attention to the user request. Provide accurate, concise answers. Keep replies ≤30 words; if a longer answer is required, limit it to 250 words. Assume no prior context unless the user supplies it, and do not mention yourself."
+system_prompt = @concise_assistant
 sound_threshold_peak = 0.12
 end_silence_ms = 2500
 ptt = true

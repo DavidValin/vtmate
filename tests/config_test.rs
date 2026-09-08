@@ -8,6 +8,9 @@ mod tts {
   pub fn get_all_available_languages() -> Vec<&'static str> {
     vec!["en"]
   }
+  pub fn voice_styles_dir_for(_tts: &str) -> Option<std::path::PathBuf> {
+    None
+  }
   pub fn get_voices_for(_tts: &str, lang: &str) -> Vec<String> {
     // Provide a voice matching the config
     if lang == "en" {
@@ -159,7 +162,7 @@ fn leading_sections_are_split_out_and_agents_still_parse() {
   assert_eq!(daemon.llm_background_ptt_combo, "ctrl+alt+q");
   assert_eq!(daemon.tts_background_combo, "ctrl+alt+r");
   assert_eq!(daemon.stt_and_paste_background_ptt_combo, "ctrl+alt+s");
-  assert_eq!(daemon.llm_background_reset, "ctrl+escape");
+  assert_eq!(daemon.llm_background_reset, DaemonSettings::default().llm_background_reset);
 }
 
 #[test]
@@ -310,7 +313,7 @@ voice_speed = 5.0
   assert_eq!(agent.model, "llama3.2:3b");
   assert_eq!(
     agent.system_prompt,
-    "You are a helpful assistant.\\nYou assist the user without questions"
+    "You are a helpful assistant.\nYou assist the user without questions"
   );
   assert_eq!(agent.ptt, true);
   assert_eq!(agent.sound_threshold_peak, 0.1);
@@ -384,7 +387,7 @@ voice_speed = 5.0
   assert_eq!(agent.model, "llama3.2:3b");
   assert_eq!(
     agent.system_prompt,
-    "You are a helpful assistant.\\nYou assist the user without questions"
+    "You are a helpful assistant.\nYou assist the user without questions"
   );
   assert_eq!(agent.ptt, true);
   assert_eq!(agent.sound_threshold_peak, 0.1);
@@ -407,4 +410,180 @@ fn unknown_section_is_reported_and_headers_are_case_insensitive() {
   assert!(sections.unknown.is_empty());
   assert!(sections.general.is_some() && sections.daemon.is_some());
   assert!(sections.rest.starts_with("[agent]\n"), "{:?}", sections.rest);
+}
+
+
+// ---------------------------------------------------------------
+//  [system_prompt] blocks
+// ---------------------------------------------------------------
+
+/// An agent block whose `system_prompt` line is `prompt`.
+fn agent_with_prompt(name: &str, prompt: &str) -> String {
+  format!(
+    "[agent]\nname = {}\nlanguage = en\ntts = kokoro\nvoice = bf_alice\nprovider = ollama\nbaseurl = http://127.0.0.1:11434\nmodel = llama3.2:3b\nsystem_prompt = {}\nsound_threshold_peak = 0.1\nend_silence_ms = 2000\nptt = true\nwhisper_model_path = ~/.whisper-models/ggml-tiny.bin\nvoice_speed = 5.0\n",
+    name, prompt
+  )
+}
+
+#[test]
+fn system_prompt_block_is_referenced_with_at_and_kept_verbatim() {
+  let contents = format!(
+    "[system_prompt]\nname = planner\n---\nYou assist the user.\n\nStandards:\n  1. Tasks and subtasks.\n  2. Each task is \"[ ] <task name>\".\n---\n\n{}",
+    agent_with_prompt("planner", "@planner")
+  );
+  let sections = split_leading_sections(&contents);
+  assert!(sections.prompt_errors.is_empty(), "{:?}", sections.prompt_errors);
+  assert_eq!(sections.prompts.len(), 1);
+  // the block never reaches the text that gets split on [agent]
+  assert!(
+    sections.rest.trim_start().starts_with("[agent]"),
+    "{:?}",
+    sections.rest
+  );
+
+  let path = temp_settings(&contents);
+  let agents = load_settings(&path, &default_args()).expect("agent with @ref parses");
+  assert_eq!(
+    agents[0].system_prompt,
+    "You assist the user.\n\nStandards:\n  1. Tasks and subtasks.\n  2. Each task is \"[ ] <task name>\"."
+  );
+}
+
+#[test]
+fn block_body_keeps_backslash_n_but_inline_prompt_expands_it() {
+  // a multiline block already has real new lines: \n stays as typed
+  let contents = format!(
+    "[system_prompt]\nname = raw\n---\nline one\nliteral \\n stays\n---\n\n{}{}",
+    agent_with_prompt("block", "@raw"),
+    agent_with_prompt("inline", "You are nice\\nreply nicely")
+  );
+  let path = temp_settings(&contents);
+  let agents = load_settings(&path, &default_args()).unwrap();
+  assert_eq!(agents[0].system_prompt, "line one\nliteral \\n stays");
+  assert_eq!(agents[1].system_prompt, "You are nice\nreply nicely");
+}
+
+#[test]
+fn inline_prompts_keep_working() {
+  let path = temp_settings(&format!("{}\n{}", AGENT_A, AGENT_B));
+  let agents = load_settings(&path, &default_args()).unwrap();
+  assert_eq!(agents[0].system_prompt, "You are a helpful assistant.");
+
+  // quoted, and a literal leading '@' via the @@ escape. Only the first
+  // character is escaped: a '@' anywhere else needs nothing.
+  let contents = format!(
+    "{}{}",
+    agent_with_prompt("quoted", "\"You are @home\\nbe brief\""),
+    agent_with_prompt("at", "@@everyone listen")
+  );
+  let path = temp_settings(&contents);
+  let agents = load_settings(&path, &default_args()).unwrap();
+  assert_eq!(agents[0].system_prompt, "You are @home\nbe brief");
+  assert_eq!(agents[1].system_prompt, "@everyone listen");
+}
+
+#[test]
+fn body_may_contain_headers_comments_and_keys() {
+  let body = "[agent] is just text here\n# not a comment\n; neither is this\nkey = value\n  [ ] indented task";
+  let contents = format!(
+    "[system_prompt]\nname = tricky\n---\n{}\n---\n\n{}",
+    body,
+    agent_with_prompt("a", "@tricky")
+  );
+  let sections = split_leading_sections(&contents);
+  assert!(sections.unknown.is_empty(), "{:?}", sections.unknown);
+  assert_eq!(sections.rest.matches("[agent]").count(), 1);
+
+  let path = temp_settings(&contents);
+  let agents = load_settings(&path, &default_args()).unwrap();
+  assert_eq!(agents.len(), 1);
+  assert_eq!(agents[0].system_prompt, body);
+}
+
+#[test]
+fn a_longer_fence_wraps_a_body_containing_three_dashes() {
+  let contents = format!(
+    "[system_prompt]\nname = md\n----\nintro\n---\noutro\n----\n\n{}",
+    agent_with_prompt("a", "@md")
+  );
+  let path = temp_settings(&contents);
+  let agents = load_settings(&path, &default_args()).unwrap();
+  assert_eq!(agents[0].system_prompt, "intro\n---\noutro");
+}
+
+#[test]
+fn blocks_can_be_declared_after_the_agents_that_use_them() {
+  let contents = format!(
+    "{}\n[system_prompt]\nname = late\n---\ndefined below\n---\n",
+    agent_with_prompt("a", "@late")
+  );
+  let path = temp_settings(&contents);
+  let agents = load_settings(&path, &default_args()).unwrap();
+  assert_eq!(agents[0].system_prompt, "defined below");
+}
+
+#[test]
+fn malformed_blocks_and_unknown_refs_are_reported() {
+  let cases: [(&str, &str); 4] = [
+    // unterminated fence
+    (
+      "[system_prompt]\nname = a\n---\nbody with no closing fence\n",
+      "is not closed",
+    ),
+    // no name
+    ("[system_prompt]\n---\nbody\n---\n", "has no 'name'"),
+    // duplicated name
+    (
+      "[system_prompt]\nname = dup\n---\none\n---\n[system_prompt]\nname = dup\n---\ntwo\n---\n",
+      "duplicated [system_prompt] name 'dup'",
+    ),
+    // invalid name
+    (
+      "[system_prompt]\nname = two words\n---\nbody\n---\n",
+      "invalid [system_prompt] name",
+    ),
+  ];
+  for (block, expected) in cases {
+    let path = temp_settings(&format!("{}\n{}", block, agent_with_prompt("a", "hi")));
+    let err = load_settings(&path, &default_args())
+      .unwrap_err()
+      .to_string();
+    assert!(err.contains(expected), "{} -> {}", expected, err);
+  }
+
+  let path = temp_settings(&format!(
+    "[system_prompt]\nname = known\n---\nbody\n---\n\n{}",
+    agent_with_prompt("a", "@missing")
+  ));
+  let err = load_settings(&path, &default_args())
+    .unwrap_err()
+    .to_string();
+  assert!(err.contains("unknown system_prompt '@missing'"), "{}", err);
+  assert!(err.contains("known"), "{}", err);
+}
+
+#[test]
+fn system_prompt_header_is_case_insensitive() {
+  let sections = split_leading_sections("[SYSTEM_PROMPT]\nname = a\n---\nbody\n---\n");
+  assert!(sections.unknown.is_empty(), "{:?}", sections.unknown);
+  assert_eq!(sections.prompts.get("a").map(|s| s.as_str()), Some("body"));
+}
+
+#[test]
+fn persist_selected_agent_leaves_prompt_blocks_untouched() {
+  // a body holding lines that look like headers and like the key we rewrite
+  let contents = format!(
+    "[general]\nselected_agent = a\n\n[system_prompt]\nname = p\n---\n[general]\nselected_agent = NOT THIS\n---\n\n{}",
+    agent_with_prompt("a", "@p")
+  );
+  let path = temp_settings(&contents);
+  persist_selected_agent(&path, "b").unwrap();
+  let written = std::fs::read_to_string(&path).unwrap();
+  assert!(written.contains("selected_agent = b"), "{}", written);
+  assert!(written.contains("selected_agent = NOT THIS"), "{}", written);
+  assert_eq!(load_general_settings(&path).unwrap().selected_agent, "b");
+  assert_eq!(
+    load_settings(&path, &default_args()).unwrap()[0].system_prompt,
+    "[general]\nselected_agent = NOT THIS"
+  );
 }
