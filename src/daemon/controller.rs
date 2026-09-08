@@ -249,6 +249,13 @@ impl Controller {
       crate::log::log("info", "nothing selected to read");
       return;
     };
+    // Reading it aloud uses the selection up: the next message must not
+    // silently carry the text that was just read.
+    self.sent_selection_stamp = match self.desktop.selection_stamp() {
+      SelectionAge::At(now) => Some(now),
+      _ => None,
+    };
+    self.sent_selection_text = Some(text.clone());
     let phrases: Vec<String> = crate::util::split_text_for_tts(&text)
       .into_iter()
       .map(|(_, tts)| tts)

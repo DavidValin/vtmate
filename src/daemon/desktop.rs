@@ -4,7 +4,7 @@
 
 #[cfg(not(target_os = "linux"))]
 use enigo::{Direction, Key, Keyboard};
-use enigo::{Enigo, Settings};
+use enigo::{Enigo, Keyboard as _, Settings};
 #[cfg(target_os = "linux")]
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -42,7 +42,6 @@ pub struct Desktop {
   /// before vtmate started.
   #[cfg(target_os = "linux")]
   selection_stamp: Arc<Mutex<SelectionAge>>,
-  #[cfg_attr(target_os = "linux", allow(dead_code))]
   enigo: Option<Enigo>,
 }
 
@@ -197,7 +196,42 @@ impl Desktop {
 
   /// Put `text` on the clipboard, paste it at the cursor, restore the
   /// previous clipboard text.
+  /// Put the dictated text where the cursor is.
+  ///
+  /// On Linux it is typed out rather than pasted: `Ctrl+V` is not the paste
+  /// shortcut everywhere (every terminal uses `Ctrl+Shift+V`, so a plain
+  /// paste silently does nothing there), and typing leaves the clipboard
+  /// untouched instead of borrowing it and putting it back.
+  #[cfg(target_os = "linux")]
   pub fn paste_text(&mut self, text: &str) {
+    let _ = wait_modifiers_released(Duration::from_millis(1000));
+    match self.enigo.as_mut() {
+      Some(enigo) => match enigo.text(text) {
+        Ok(()) => return,
+        Err(e) => crate::log::log(
+          "warning",
+          &format!(
+            "could not type the text ({}), falling back to the clipboard",
+            e
+          ),
+        ),
+      },
+      None => crate::log::log(
+        "warning",
+        "input simulation unavailable, falling back to the clipboard",
+      ),
+    }
+    self.paste_via_clipboard(text);
+  }
+
+  #[cfg(not(target_os = "linux"))]
+  pub fn paste_text(&mut self, text: &str) {
+    self.paste_via_clipboard(text);
+  }
+
+  /// Paste by borrowing the clipboard: used on Windows and macOS, and as a
+  /// fallback on Linux when the keystrokes cannot be simulated.
+  fn paste_via_clipboard(&mut self, text: &str) {
     let _ = wait_modifiers_released(Duration::from_millis(1000));
     let old = self.clipboard.as_mut().and_then(|c| c.get_text().ok());
     match self.clipboard.as_mut() {

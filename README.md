@@ -1,6 +1,6 @@
 ## vtmate
 
-![vtmate](https://github.com/DavidValin/vtmate/raw/main/banner.png)
+![vtmate](banner.png)
 
 The final AI voice conversational system all running in your terminal! vtmate is a Powerful terminal-based voice ai toolkit with many realistic voices, extremely low latency, 41 languages supported. Allows you to voice conversate with local ai models (or cloud based), pipe data and save into files. 
 
@@ -31,7 +31,7 @@ https://github.com/user-attachments/assets/8b9e982c-ba97-4aeb-8e55-1db6a92bc164
 
 </details>
 
-![vtmate screenshot](https://github.com/DavidValin/vtmate/raw/main/preview.png)
+![vtmate screenshot](preview.png)
 
 ![how it works](https://github.com/DavidValin/vtmate/raw/main/docs/en/diagrams/how-it-works.png)
 
@@ -148,7 +148,7 @@ selected_agent = main agent
 llm_background_ptt_combo = ctrl+alt+a
 tts_background_combo = ctrl+alt+r
 stt_and_paste_background_ptt_combo = ctrl+alt+s
-llm_background_reset = ctrl+escape
+llm_background_reset = ctrl+q
 ```
 
 * `selected_agent` is the agent vtmate starts with. It is updated automatically every time you switch agents with `ARROW_LEFT` / `ARROW_RIGHT` (in the terminal or while attached to the daemon), so the next start picks the same agent. `-a <agent>` overrides it for one run without changing the file; a debate picks its agents per turn and never changes it either.
@@ -345,11 +345,11 @@ Shortcuts (change them in the `[daemon]` section of `~/.vtmate/settings`):
 | `llm_background_ptt_combo` | `ctrl+alt+a` | hold to talk. On release your speech is transcribed and, if some text is selected anywhere on the desktop, the selection is appended after the speech (speech first, blank line, selection). The whole thing is sent to the agent as one message and the reply is spoken. Pressing it while a reply is playing interrupts the reply. The selection is sent once: what you selected since your previous message. Select the text again to send it a second time, and nothing is appended when nothing is selected. |
 | `tts_background_combo` | `ctrl+alt+r` | read the selected text aloud (no LLM). Press again while it is speaking to stop. Reading uses the selection up, so it is not appended to your next message as well. |
 | `stt_and_paste_background_ptt_combo` | `ctrl+alt+s` | hold to talk. On release your speech is transcribed and written at the cursor of the application you are in. On Linux it is typed out, so it works in terminals too (where `Ctrl+V` is not the paste shortcut) and your clipboard is left alone; on Windows and macOS it is pasted through the clipboard, whose previous text is put back afterwards. No LLM, nothing spoken. |
-| `llm_background_reset` | `ctrl+escape` | like `ESCAPE` in the terminal: press once to stop the speech, twice within a second to also reset the conversation (history cleared). A desktop notification "Conversation restarted!" confirms the reset. |
+| `llm_background_reset` | `ctrl+q` | like `ESCAPE` in the terminal: press once to stop the speech, twice within a second to also reset the conversation (history cleared). A desktop notification "Conversation restarted!" confirms the reset. |
 
 Shortcuts are written as modifiers joined by `+`: `ctrl`, `alt` (or `option`), `shift`, `cmd` (or `super`), `cmdorctrl`, plus a key: letters, digits, `f1`..`f12`, `escape`, `space`, `tab`, arrows... e.g. `ctrl+alt+a`, `shift+f5`, `cmd+alt+r`.
 
-* When starting, the daemon grabs all four shortcuts. If any is already taken by another application (some desktops bind `ctrl+escape`, for example) the daemon does not start and `vtmate --daemon` lists the taken shortcuts so you can change them.
+* When starting, the daemon grabs all four shortcuts. If any is already taken by another application (some desktops bind `ctrl+q` or `ctrl+alt` combinations, for example) the daemon does not start and `vtmate --daemon` lists the taken shortcuts so you can change them.
 * The agent that replies is the daemon's selected agent: run `vtmate` to attach, press `ARROW_LEFT` / `ARROW_RIGHT` to switch (this is remembered in `selected_agent`), then `Ctrl+C` to detach. Attached you get the full terminal view: the live transcript, the status bar and the usual keys (`SPACE` push-to-talk, `ESCAPE`, `u`, arrows, `Ctrl+D`). `Ctrl+C` only detaches; the daemon keeps running until `vtmate --daemon-stop`.
 * Only one daemon runs at a time. Its files live in `~/.vtmate`: `daemon.pid`, `daemon.sock` (Linux/macOS) and `daemon.log` (diagnostics only, never the conversation).
 * The daemon always works in push-to-talk mode: the microphone is only open while a shortcut is held.
@@ -357,7 +357,7 @@ Shortcuts are written as modifiers joined by `+`: `ctrl`, `alt` (or `option`), `
 Platform notes:
 
 * Linux: X11 only (Wayland has no global shortcuts nor a readable selection; under Wayland run vtmate in an X11 session). The selection is the primary selection (whatever is highlighted), no `Ctrl+C` needed.
-* Windows / macOS: the selection is read by simulating `Ctrl+C` / `Cmd+C` and the clipboard is restored afterwards (text only). On macOS the vtmate binary needs the Accessibility permission (System Settings → Privacy & Security → Accessibility) to simulate keys. On Windows, `ctrl+alt` is the same as `AltGr` on some keyboard layouts and `ctrl+escape` opens the Start menu: rebind those if the daemon reports them as taken.
+* Windows / macOS: the selection is read by simulating `Ctrl+C` / `Cmd+C` and the clipboard is restored afterwards (text only). On macOS the vtmate binary needs the Accessibility permission (System Settings → Privacy & Security → Accessibility) to simulate keys. On Windows, `ctrl+alt` is the same as `AltGr` on some keyboard layouts: rebind those if the daemon reports them as taken.
 * `vtmate --daemon` detaches from the terminal. To start it at login use your session autostart, a systemd user unit, a launchd agent or the Task Scheduler running `vtmate --daemon`.
 
 ###  Read mode (file to speech)

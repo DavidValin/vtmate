@@ -67,8 +67,8 @@ section, then one [agent] section per agent.
   * stt_and_paste_background_ptt_combo: hold to talk; on release the
                                        transcript is pasted at the
                                        cursor (ctrl+alt+s)
-  * llm_background_reset:              reset the daemon conversation
-                                       (ctrl+escape)
+  * llm_background_reset:              stop the speech; twice in a row
+                                       resets the conversation (ctrl+q)
   Combos are written as modifiers joined by '+', e.g. ctrl+alt+a,
   shift+f5, cmd+alt+r (modifiers: ctrl, alt/option, shift,
   cmd/super, cmdorctrl).
@@ -260,7 +260,7 @@ pub const OPENTTS_BASE_URL_DEFAULT: &str = "http://127.0.0.1:5500/api/tts?&vocod
 pub const DAEMON_LLM_PTT_DEFAULT: &str = "ctrl+alt+a";
 pub const DAEMON_TTS_DEFAULT: &str = "ctrl+alt+r";
 pub const DAEMON_PASTE_PTT_DEFAULT: &str = "ctrl+alt+s";
-pub const DAEMON_RESET_DEFAULT: &str = "ctrl+escape";
+pub const DAEMON_RESET_DEFAULT: &str = "ctrl+q";
 
 /// `[general]` section of the settings file.
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -861,7 +861,7 @@ selected_agent = main agent
 llm_background_ptt_combo = ctrl+alt+a
 tts_background_combo = ctrl+alt+r
 stt_and_paste_background_ptt_combo = ctrl+alt+s
-llm_background_reset = ctrl+escape
+llm_background_reset = ctrl+q
 
 [agent]
 name = main agent
