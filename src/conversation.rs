@@ -1266,7 +1266,7 @@ pub fn save_conversation(
   let hist = history.lock().unwrap();
   let mut content = String::new();
 
-  content.push_str(crate::ui::get_banner());
+  content.push_str(crate::ui::get_banner_plain());
   content.push_str("\n\n");
 
   for msg in hist.iter() {

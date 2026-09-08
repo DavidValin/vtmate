@@ -28,11 +28,29 @@ pub static STOP_STREAM: AtomicBool = AtomicBool::new(false);
 pub const USER_LABEL: &str = "\x1b[47;30mUSER:\x1b[0m";
 pub const ASSIST_LABEL: &str = "\x1b[48;5;22;37mASSISTANT:\x1b[0m";
 
+/// The vtmate mark (a chevron and level bars) beside the wordmark, drawn
+/// with block characters and coloured for the terminal.
 pub fn get_banner() -> &'static str {
-  r#"
- _    _ _______ _______ _______ _______ _______
-  \  /     |    |  |  | |_____|    |    |______
-   \/      |    |  |  | |     |    |    |______"#
+  concat!(
+    "\n",
+    "\u{1b}[38;5;49m\u{2588}\u{2588}       \u{1b}[38;5;83m\u{2588}\u{1b}[38;5;83m\u{2588} \u{1b}[38;5;119m\u{2588}\u{1b}[38;5;119m\u{2588} \u{1b}[38;5;155m\u{2588}\u{1b}[38;5;155m\u{2588}     \u{1b}[0m\n",
+    "\u{1b}[38;5;49m \u{2588}\u{2588}   \u{1b}[38;5;48m\u{2588}\u{1b}[38;5;48m\u{2588} \u{1b}[38;5;83m\u{2588}\u{1b}[38;5;83m\u{2588} \u{1b}[38;5;119m\u{2588}\u{1b}[38;5;119m\u{2588} \u{1b}[38;5;155m\u{2588}\u{1b}[38;5;155m\u{2588} \u{1b}[38;5;191m\u{2588}\u{1b}[38;5;191m\u{2588}  \u{1b}[38;5;255m\u{2588}   \u{2588} \u{2580}\u{2580}\u{2588}\u{2580}\u{2580} \u{2588}\u{2584} \u{2584}\u{2588} \u{2584}\u{2580}\u{2580}\u{2580}\u{2584} \u{2580}\u{2580}\u{2588}\u{2580}\u{2580} \u{2588}\u{2580}\u{2580}\u{2580}\u{2580}\u{1b}[0m\n",
+    "\u{1b}[38;5;49m  \u{2588}\u{2588}  \u{1b}[38;5;48m\u{2588}\u{1b}[38;5;48m\u{2588} \u{1b}[38;5;83m\u{2588}\u{1b}[38;5;83m\u{2588} \u{1b}[38;5;119m\u{2588}\u{1b}[38;5;119m\u{2588} \u{1b}[38;5;155m\u{2588}\u{1b}[38;5;155m\u{2588} \u{1b}[38;5;191m\u{2588}\u{1b}[38;5;191m\u{2588}  \u{1b}[38;5;255m\u{2588}   \u{2588}   \u{2588}   \u{2588} \u{2580} \u{2588} \u{2588}\u{2584}\u{2584}\u{2584}\u{2588}   \u{2588}   \u{2588}\u{2580}\u{2580}\u{2580} \u{1b}[0m\n",
+    "\u{1b}[38;5;49m \u{2588}\u{2588}   \u{1b}[38;5;48m\u{2588}\u{1b}[38;5;48m\u{2588} \u{1b}[38;5;83m\u{2588}\u{1b}[38;5;83m\u{2588} \u{1b}[38;5;119m\u{2588}\u{1b}[38;5;119m\u{2588} \u{1b}[38;5;155m\u{2588}\u{1b}[38;5;155m\u{2588} \u{1b}[38;5;191m\u{2588}\u{1b}[38;5;191m\u{2588}  \u{1b}[38;5;255m \u{2580}\u{2584}\u{2580}    \u{2588}   \u{2588}   \u{2588} \u{2588}   \u{2588}   \u{2588}   \u{2588}\u{2584}\u{2584}\u{2584}\u{2584}\u{1b}[0m\n",
+    "\u{1b}[38;5;49m\u{2588}\u{2588}       \u{1b}[38;5;83m\u{2588}\u{1b}[38;5;83m\u{2588} \u{1b}[38;5;119m\u{2588}\u{1b}[38;5;119m\u{2588}        \u{1b}[0m\n"
+  )
+}
+
+/// The same banner without colour, for the conversation files `-s` writes.
+pub fn get_banner_plain() -> &'static str {
+  concat!(
+    "\n",
+    "\u{2588}\u{2588}       \u{2588}\u{2588} \u{2588}\u{2588} \u{2588}\u{2588}\n",
+    " \u{2588}\u{2588}   \u{2588}\u{2588} \u{2588}\u{2588} \u{2588}\u{2588} \u{2588}\u{2588} \u{2588}\u{2588}  \u{2588}   \u{2588} \u{2580}\u{2580}\u{2588}\u{2580}\u{2580} \u{2588}\u{2584} \u{2584}\u{2588} \u{2584}\u{2580}\u{2580}\u{2580}\u{2584} \u{2580}\u{2580}\u{2588}\u{2580}\u{2580} \u{2588}\u{2580}\u{2580}\u{2580}\u{2580}\n",
+    "  \u{2588}\u{2588}  \u{2588}\u{2588} \u{2588}\u{2588} \u{2588}\u{2588} \u{2588}\u{2588} \u{2588}\u{2588}  \u{2588}   \u{2588}   \u{2588}   \u{2588} \u{2580} \u{2588} \u{2588}\u{2584}\u{2584}\u{2584}\u{2588}   \u{2588}   \u{2588}\u{2580}\u{2580}\u{2580}\n",
+    " \u{2588}\u{2588}   \u{2588}\u{2588} \u{2588}\u{2588} \u{2588}\u{2588} \u{2588}\u{2588} \u{2588}\u{2588}   \u{2580}\u{2584}\u{2580}    \u{2588}   \u{2588}   \u{2588} \u{2588}   \u{2588}   \u{2588}   \u{2588}\u{2584}\u{2584}\u{2584}\u{2584}\n",
+    "\u{2588}\u{2588}       \u{2588}\u{2588} \u{2588}\u{2588}\n"
+  )
 }
 
 const CHAR_DELAY_MS: u64 = 4;
@@ -371,7 +389,27 @@ fn stream_chunk<W: Write>(
   let (cols, term_height) = terminal::size().unwrap_or((80, 24));
   let max_width = cols as usize;
 
+  // Colour codes take no room on screen, so pausing on them only makes the
+  // reveal crawl: the animation is paced by the characters you can actually see.
+  let mut in_escape = false;
   for ch in chunk.chars() {
+    let visible_char = if in_escape {
+      if ('@'..='~').contains(&ch) {
+        in_escape = false;
+      }
+      false
+    } else if ch == '\u{1b}' {
+      in_escape = true;
+      false
+    } else {
+      true
+    };
+    // Buffer a colour sequence whole: redrawing the line halfway through one
+    // would send the terminal a truncated escape and make it flicker.
+    if !visible_char {
+      buffer.last_mut().unwrap().push(ch);
+      continue;
+    }
     let is_newline_or_wrap =
       ch == '\n' || get_visible_len_for(buffer.last().unwrap()) + 1 > max_width;
 
@@ -422,7 +460,9 @@ fn stream_chunk<W: Write>(
       return;
     }
 
-    thread::sleep(Duration::from_millis(CHAR_DELAY_MS));
+    if visible_char {
+      thread::sleep(Duration::from_millis(CHAR_DELAY_MS));
+    }
   }
 }
 
