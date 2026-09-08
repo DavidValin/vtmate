@@ -101,13 +101,15 @@ jobs:
         # cuda_installer: the local (self-contained) installer file name.
         # 12.x embeds the bundled driver version in it; 13.x dropped that.
         #
-        # runner: the cuda variants are pinned to windows-2025 (VS 2022,
-        # MSVC 14.4x) instead of windows-latest. windows-latest moved to an
-        # image carrying Visual Studio 18 / MSVC 14.51 (_MSC_VER 195x), and
-        # nvcc refuses a host compiler newer than the toolkit knows about:
-        # CUDA 12.8 predates VS 18 entirely, so crt/host_config.h stops the
-        # compile ("unsupported Microsoft Visual Studio version") and CMake's
-        # CUDA compiler-id test fails before whisper-rs-sys builds a line.
+        # runner: the cuda variants ask for windows-2025 rather than
+        # windows-latest, because nvcc refuses a host compiler newer than its
+        # toolkit knows about and CUDA 12.8 predates Visual Studio 18. That
+        # pin is not sufficient on its own - as of 2026-09 both labels
+        # provision the same windows-2025-vs2026 image (VS 18, MSVC 14.51,
+        # _MSC_VER 1951), so build_windows.ps1 also picks an older side-by-side
+        # toolset, or falls back to -allow-unsupported-compiler, whenever the
+        # image's MSVC is past the toolkit's ceiling. Keep the label anyway:
+        # if the images split again, this is the one that carries VS 2022.
         # The non-CUDA variants have no such ceiling and stay on latest.
         include:
           - { variant: cpu,    runner: windows-latest }

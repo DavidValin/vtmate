@@ -1550,6 +1550,17 @@ ENV CUDNN_PATH=/usr/local/cudnn
 # Unlike the musl images this needs no protobuf/abseil/re2 prebuild (ORT fetches
 # its own), no musl locale shim, and no ORT_USE_CXX20_STD_CHRONO patch - noble
 # ships GCC 13, which has std::chrono operator<< for time_point.
+#
+# --compile-no-warning-as-error is not redundant with the
+# -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF below: ORT re-asserts the property per
+# target (onnxruntime_configure_target in its cmake/CMakeLists.txt), which wins
+# over the cache variable, and CMake turns it into nvcc's -Werror all-warnings.
+# Every toolkit bump can then break the build on a warning in ORT's own code -
+# CUDA 13.3 flags #68 "integer conversion resulted in a change of sign" in
+# contrib_ops/cuda/quantization/matmul_4bits.cu, which 12.8 never emitted. The
+# command-line option is the one form the target property cannot override. ORT
+# is a dependency here, not something this repo develops, so its warnings are
+# not ours to gate on; its explicit --Werror default-stream-launch still holds.
 ENV ONNX_DIR=/onnxruntime
 ENV ONNX_SRC=/onnxruntime-src
 COPY provider-search-fallback.patch /tmp/provider-search-fallback.patch
@@ -1575,6 +1586,7 @@ RUN set -eux; \
     patch -p1 -d $ONNX_SRC < /tmp/provider-search-fallback.patch; \
     cd $ONNX_SRC; \
     cmake ./cmake -B $ONNX_DIR \
+      --compile-no-warning-as-error \
       -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_CXX_STANDARD=20 \
       -DCMAKE_CXX_STANDARD_REQUIRED=ON \

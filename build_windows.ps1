@@ -266,6 +266,96 @@ if ($WITH_CUDA) {
     }
 
     # ------------------------------------------------------
+    # HOST COMPILER CEILING
+    # nvcc rejects any MSVC newer than the toolkit knows about: CUDA 12.8's
+    # include/crt/host_config.h stops below _MSC_VER 1950 ("only the versions
+    # between 2017 and 2022 are supported"), while the hosted images now ship
+    # Visual Studio 18 with MSVC 14.51 (19.51). cuda12 therefore dies inside
+    # CMake's CUDA compiler-id test, long before anything of ours compiles;
+    # cuda13's toolkit accepts the same compiler and is unaffected.
+    #
+    # No runner label dodges this any more - windows-latest and windows-2025
+    # both provision windows-2025-vs2026 - so adapt to whatever the image has:
+    # build against an older toolset when the VS install still carries one
+    # (side-by-side toolsets stay usable under the newest VS), and otherwise
+    # take nvcc's own override. The ceiling is read from the toolkit rather
+    # than hardcoded, so this stops applying by itself once a toolkit that
+    # accepts the runner's MSVC is pinned.
+    # ------------------------------------------------------
+    # The guard is one line, e.g. "#if _MSC_VER < 1910 || _MSC_VER >= 1950";
+    # match it whole rather than the first _MSC_VER comparison in the file.
+    $hostConfig = Join-Path $cuda_root "include\crt\host_config.h"
+    $msvcCeiling = $null
+    if (Test-Path $hostConfig) {
+        $m = Select-String -Path $hostConfig `
+                -Pattern '_MSC_VER\s*<\s*\d+\s*\|\|\s*_MSC_VER\s*(>=?)\s*(\d+)' |
+             Select-Object -First 1
+        if ($m) {
+            $msvcCeiling = [int]$m.Matches[0].Groups[2].Value
+            if ($m.Matches[0].Groups[1].Value -eq '>') { $msvcCeiling += 1 }
+        }
+    }
+
+    # cl.exe 19.51.36231.0 -> _MSC_VER 1951.
+    $clVer = (Get-Command cl.exe).Version
+    $clMscVer = if ($clVer) { $clVer.Major * 100 + $clVer.Minor } else { 0 }
+
+    if (-not $msvcCeiling) {
+        Write-Host "could not read the MSVC ceiling from $hostConfig - assuming the host compiler is supported"
+    }
+    elseif ($clMscVer -lt $msvcCeiling) {
+        Write-Host "host compiler _MSC_VER $clMscVer is below CUDA's ceiling of $msvcCeiling - no toolset override needed"
+    }
+    else {
+        Write-Host "host compiler _MSC_VER $clMscVer is at or above CUDA $CUDA_MM's ceiling of $msvcCeiling"
+
+        # Toolset directories are named 14.<mm>.<build> and map to _MSC_VER
+        # 19<mm>, e.g. 14.44.35207 -> 1944.
+        $toolsets = Get-ChildItem (Join-Path $VS_PATH "VC\Tools\MSVC") -Directory -ErrorAction SilentlyContinue |
+                    ForEach-Object {
+                        if ($_.Name -match '^\d+\.(\d+)\.') {
+                            [pscustomobject]@{ Name = $_.Name; MscVer = 1900 + [int]$matches[1] }
+                        }
+                    } |
+                    Where-Object { $_.MscVer -lt $msvcCeiling } |
+                    Sort-Object MscVer -Descending
+
+        if ($toolsets) {
+            $pick = $toolsets[0]
+            $vcvarsVer = ($pick.Name -split '\.')[0..1] -join '.'
+            Write-Host "using side-by-side MSVC toolset $($pick.Name) (_MSC_VER $($pick.MscVer))"
+
+            # Reload the MSVC environment on that toolset so a directly invoked
+            # cl.exe matches, and export VCToolsVersion so the MSBuild the VS
+            # generator drives compiles the .cu files with it too.
+            $vsdev = Join-Path $VS_PATH "Common7\Tools\VsDevCmd.bat"
+            cmd /c "`"$vsdev`" -arch=amd64 -host_arch=amd64 -vcvars_ver=$vcvarsVer && set" | ForEach-Object {
+                if ($_ -match "^(.*?)=(.*)$") {
+                    Set-Item -Path "Env:$($matches[1])" -Value $matches[2]
+                }
+            }
+            $env:VCToolsVersion = $pick.Name
+            $env:CMAKE_GENERATOR_TOOLSET = "host=x64,version=$($pick.Name)"
+
+            $reloaded = (Get-Command cl.exe).Version
+            Write-Host "cl.exe: $((Get-Command cl.exe).Source) ($reloaded)"
+            if ($reloaded.Major * 100 + $reloaded.Minor -ge $msvcCeiling) {
+                Write-Error "asked VsDevCmd for toolset $vcvarsVer but cl.exe is still $reloaded"
+                exit 1
+            }
+        }
+        else {
+            # Nothing older is installed. -allow-unsupported-compiler is
+            # NVIDIA's own escape hatch for exactly this - it only defeats the
+            # host_config.h version check - and NVCC_PREPEND_FLAGS reaches
+            # every nvcc invocation, including the ones CMake and MSBuild make
+            # for us inside whisper-rs-sys.
+            Write-Host "WARNING: no MSVC toolset below $msvcCeiling is installed; building with -allow-unsupported-compiler"
+            $env:NVCC_PREPEND_FLAGS = ("-allow-unsupported-compiler " + $env:NVCC_PREPEND_FLAGS).Trim()
+        }
+    }
+
+    # ------------------------------------------------------
     # cuDNN (required by the ONNX Runtime CUDA execution provider).
     # Pulled from NVIDIA's public redist mirror - no developer login needed.
     # ------------------------------------------------------
