@@ -604,7 +604,11 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
   let _ = terminal::enable_raw_mode();
   env_logger::init();
-  whisper_rs::install_logging_hooks();
+  // Not whisper_rs::install_logging_hooks(): it hands ggml's and whisper.cpp's
+  // logs to the `log` crate through a backend feature release builds do not
+  // enable, which silently dropped them - including the message behind a fatal
+  // CUDA error. crate::log's callback always writes errors to stderr.
+  crate::log::install_ggml_log_callback();
 
   // ---------------------------------------------------
   // Load Settings

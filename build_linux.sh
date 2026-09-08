@@ -1542,10 +1542,12 @@ ENV CUDNN_PATH=/usr/local/cudnn
 # dlopens from the executable's directory, so those two ship beside the binary
 # (staged in the cargo step, packaged in build_linux_glibc_variant); the core
 # itself stays static. An untrimmed CUDA EP build is what overran CI time
-# limits, so it is cut down to what an ASR/TTS workload needs: three consumer
-# GPU architectures (the list build_windows.ps1 uses), no flash /
-# memory-efficient / lean attention kernels (the cutlass-heavy bulk of a CUDA
-# EP build) and no NHWC ops.
+# limits, so it is cut down to what an ASR/TTS workload needs: four consumer
+# GPU architectures - Turing, Ampere, Ada, Blackwell, matching the CUDAARCHS
+# the cargo step gives ggml - no flash / memory-efficient / lean attention
+# kernels (the cutlass-heavy bulk of a CUDA EP build) and no NHWC ops. ORT
+# turns those numbers into -real, so the provider carries SASS and no PTX:
+# every architecture it is meant to run on has to be listed here.
 #
 # Unlike the musl images this needs no protobuf/abseil/re2 prebuild (ORT fetches
 # its own), no musl locale shim, and no ORT_USE_CXX20_STD_CHRONO patch - noble
@@ -1572,7 +1574,7 @@ RUN set -eux; \
         -DCMAKE_CUDA_HOST_COMPILER=/usr/bin/g++ \
         -DCUDAToolkit_ROOT=/usr/local/cuda \
         -DCUDNN_PATH=/usr/local/cudnn \
-        -DCMAKE_CUDA_ARCHITECTURES=75;86;89 \
+        -DCMAKE_CUDA_ARCHITECTURES=75;86;89;120 \
         -Donnxruntime_USE_FLASH_ATTENTION=OFF \
         -Donnxruntime_USE_MEMORY_EFFICIENT_ATTENTION=OFF \
         -Donnxruntime_USE_LEAN_ATTENTION=OFF \
@@ -1881,6 +1883,20 @@ DOCKERFILE
       # not inherit the CI runner CPU (see cmake/ggml-portable.cmake).
       # No-op on arm64: the include only acts on x86_64.
       export CMAKE_PROJECT_INCLUDE=/work/cmake/ggml-portable.cmake
+      if [[ "${VARIANT}" == cuda* ]]; then
+        # No apostrophes here either - still inside the single-quoted script.
+        # The ggml default list leaves Turing as PTX only (75-virtual, real
+        # SASS from 86 up), so an sm_75 card JITs at the first kernel launch,
+        # and a driver refuses PTX newer than itself: built with the 13.3
+        # toolkit, that fails on a CUDA 13.0 driver with "the provided PTX was
+        # compiled with an unsupported toolchain" - which ggml surfaces as a
+        # bare CUDA error. Ship real SASS for the three architectures the ORT
+        # provider is built for, plus PTX from the top one so newer GPUs still
+        # have something to JIT from. CUDAARCHS is the CMake environment seed
+        # for CMAKE_CUDA_ARCHITECTURES; setting it also disables the ggml
+        # fallback, which only applies when that variable is not defined.
+        export CUDAARCHS="75-real;86-real;89-real;120-real;120-virtual"
+      fi
       if [ "${DEBUG_SYMBOLS}" = "1" ]; then
         # Diagnostic build: keep symbol names and line tables so a gdb/coredumpctl
         # backtrace of a crash names Rust and C++ frames instead of "??".

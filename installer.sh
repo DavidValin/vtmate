@@ -377,6 +377,23 @@ CUDA=0; VULKAN=0
 detect_cuda_driver && CUDA=1
 detect_vulkan && VULKAN=1
 say "Detected: NVIDIA driver=$([ $CUDA -eq 1 ] && echo yes || echo no)  Vulkan=$([ $VULKAN -eq 1 ] && echo yes || echo no)"
+# Say which CUDA major this machine can actually run, not just that a driver
+# exists: with two cuda builds to choose between, "why that one?" is the first
+# question a failing GPU install raises.
+if [ "$CUDA" -eq 1 ]; then
+  drv="$(driver_cuda_max)"
+  say "  NVIDIA driver reaches CUDA ${drv:-unknown}.x"
+  for m in 13 12; do
+    miss="$(cuda_runtime_missing "$m")"
+    if [ -n "$miss" ]; then
+      say "  cuda$m runtime: incomplete - missing $miss"
+    elif [ -n "$drv" ] && [ "$drv" -lt "$m" ]; then
+      say "  cuda$m runtime: present, but out of the driver's reach"
+    else
+      say "  cuda$m runtime: complete"
+    fi
+  done
+fi
 
 # -------------------------
 # Scope (ask unless given)

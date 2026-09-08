@@ -402,6 +402,21 @@ if ($WITH_CUDA) {
     }
 
     # ------------------------------------------------------
+    # GPU ARCHITECTURES
+    # ggml's default list leaves Turing (sm_75) as PTX only, with real SASS
+    # only from 86 up, so a Turing card has to JIT at the first kernel launch -
+    # and a driver older than the toolkit refuses PTX it does not know ("the
+    # provided PTX was compiled with an unsupported toolchain"), which ggml
+    # reports as a bare CUDA error with no further detail. Ship real SASS for
+    # the architectures this project targets, plus PTX from the top one so
+    # newer GPUs still have something to JIT from. CUDAARCHS is CMake's
+    # environment seed for CMAKE_CUDA_ARCHITECTURES; defining it also takes
+    # ggml's own "if (NOT DEFINED ...)" default out of play.
+    # ------------------------------------------------------
+    $env:CUDAARCHS = "75-real;86-real;89-real;120-real;120-virtual"
+    Write-Host "CUDAARCHS = $env:CUDAARCHS"
+
+    # ------------------------------------------------------
     # cuDNN (required by the ONNX Runtime CUDA execution provider).
     # Pulled from NVIDIA's public redist mirror - no developer login needed.
     # ------------------------------------------------------
