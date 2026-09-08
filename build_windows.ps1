@@ -48,93 +48,28 @@ $ONNX_BUILD     = Join-Path $ONNX_SRC "build-static"
 $UPLOAD_ENABLED = $true
 
 # ==========================================================
-# CLEAN OLD BUILDS
+# HELPERS
 # ==========================================================
-Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $OPENBLAS_DIR, $ONNX_SRC, $ONNX_BUILD, $env:CARGO_TARGET_DIR, $TARGET_DIR, $DIST_DIR
-
-# ==========================================================
-# LOCATE VISUAL STUDIO / LOAD MSVC ENVIRONMENT
-# Located via vswhere rather than a hardcoded install path: the edition
-# and version of Visual Studio on the GitHub runners changes without
-# notice (windows-latest moved off VS2022 Enterprise), but vswhere itself
-# lives at a fixed location on every machine that has VS installed.
-# ==========================================================
-$vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
-if (-not (Test-Path $vswhere)) {
-    Write-Error "vswhere.exe not found at $vswhere - is Visual Studio installed?"
-    exit 1
+# The _MSC_VER a CUDA toolkit refuses to go up to, read from its
+# include/crt/host_config.h. The guard there is a single line, e.g.
+#   #if _MSC_VER < 1910 || _MSC_VER >= 1950
+# Returns $null when the file is missing or shaped differently; callers read
+# that as "unknown", not as "anything goes".
+function Get-CudaMsvcCeiling([string]$HostConfig) {
+    if (-not $HostConfig -or -not (Test-Path $HostConfig)) { return $null }
+    $m = Select-String -Path $HostConfig `
+            -Pattern '_MSC_VER\s*<\s*\d+\s*\|\|\s*_MSC_VER\s*(>=?)\s*(\d+)' |
+         Select-Object -First 1
+    if (-not $m) { return $null }
+    $ceiling = [int]$m.Matches[0].Groups[2].Value
+    if ($m.Matches[0].Groups[1].Value -eq '>') { $ceiling += 1 }
+    return $ceiling
 }
-
-$vsArgs  = @("-latest", "-products", "*",
-             "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64")
-$VS_PATH = & $vswhere @vsArgs -property installationPath
-if (-not $VS_PATH) {
-    Write-Error "No Visual Studio install with the C++ x64 toolset was found."
-    exit 1
-}
-$VS_VERSION = & $vswhere @vsArgs -property installationVersion
-$VS_MAJOR   = ($VS_VERSION -split '\.')[0]
-Write-Host "Visual Studio: $VS_PATH (version $VS_VERSION)"
-
-if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
-    Write-Host "=== Loading MSVC environment (x64) ==="
-
-    $vsdev = Join-Path $VS_PATH "Common7\Tools\VsDevCmd.bat"
-    if (-not (Test-Path $vsdev)) {
-        Write-Error "VsDevCmd.bat not found at $vsdev"
-        exit 1
-    }
-
-    # Import the environment VsDevCmd sets up into this PowerShell session.
-    cmd /c "`"$vsdev`" -arch=amd64 -host_arch=amd64 && set" | ForEach-Object {
-        if ($_ -match "^(.*?)=(.*)$") {
-            Set-Item -Path "Env:$($matches[1])" -Value $matches[2]
-        }
-    }
-
-    if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
-        Write-Error "Loaded VsDevCmd from $vsdev but cl.exe is still not on PATH."
-        exit 1
-    }
-}
-Write-Host "cl.exe: $((Get-Command cl.exe).Source)"
-
-# ==========================================================
-# CHECK REQUIRED TOOLS
-# ==========================================================
-foreach ($tool in "cl.exe","cmake","git","cargo","powershell") {
-    if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
-        Write-Error "ERROR: Required tool $tool not found."
-        exit 1
-    }
-}
-
-# ==========================================================
-# RESOLVE CMAKE GENERATOR
-# The generator name is version-specific ("Visual Studio 17 2022",
-# "Visual Studio 18 ...") and the runner image upgrades VS without warning,
-# so ask the installed CMake which generator matches the installed VS major
-# version instead of hardcoding one.
-# ==========================================================
-$genMatch = cmake --help |
-            Select-String -Pattern "Visual Studio $VS_MAJOR [0-9]{4}" |
-            Select-Object -First 1
-if (-not $genMatch) {
-    Write-Error "Installed CMake has no generator for Visual Studio $VS_MAJOR. Upgrade CMake."
-    exit 1
-}
-$CMAKE_GENERATOR = $genMatch.Matches[0].Value
-Write-Host "CMake generator: $CMAKE_GENERATOR"
-
-# cmake-rs (espeak-rs-sys, whisper-rs-sys) reads CMAKE_GENERATOR from the
-# environment and supplies -Ax64 / -Thost=x64 itself, so this single export
-# keeps the crate sub-builds on the same toolchain as ours.
-$env:CMAKE_GENERATOR = $CMAKE_GENERATOR
-
-$env:CARGO_BUILD_JOBS = 1
 
 # ==========================================================
 # DETERMINE VARIANT
+# The variant is settled before anything else because the CUDA toolkit it
+# names constrains which Visual Studio the build may use (see below).
 # ==========================================================
 switch ($VARIANT) {
     "cpu" {
@@ -172,6 +107,183 @@ switch ($VARIANT) {
         exit 1
     }
 }
+
+# ==========================================================
+# CLEAN OLD BUILDS
+# ==========================================================
+Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $OPENBLAS_DIR, $ONNX_SRC, $ONNX_BUILD, $env:CARGO_TARGET_DIR, $TARGET_DIR, $DIST_DIR
+
+# ==========================================================
+# LOCATE VISUAL STUDIO / LOAD MSVC ENVIRONMENT
+# Located via vswhere rather than a hardcoded install path: the edition
+# and version of Visual Studio on the GitHub runners changes without
+# notice (windows-latest moved off VS2022 Enterprise), but vswhere itself
+# lives at a fixed location on every machine that has VS installed.
+#
+# For a CUDA variant the newest install is not automatically the usable one.
+# nvcc rejects any host compiler past the ceiling its toolkit shipped with
+# (include/crt/host_config.h), and every current hosted image - windows-latest
+# and windows-2025 alike - provisions windows-2025-vs2026: Visual Studio 18,
+# MSVC 14.51, _MSC_VER 1951, while CUDA 12.8 stops below 1950. So read the
+# ceiling out of the toolkit and pick the newest install that clears it (CI
+# installs VS 2022 Build Tools beside VS 18 for the cuda12 job), then a
+# side-by-side toolset inside the newest install, and only then fall back to
+# nvcc's own -allow-unsupported-compiler.
+# ==========================================================
+$vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+if (-not (Test-Path $vswhere)) {
+    Write-Error "vswhere.exe not found at $vswhere - is Visual Studio installed?"
+    exit 1
+}
+
+# The _MSC_VER this variant's toolkit refuses to go up to, or $null when the
+# variant uses no CUDA / the toolkit is not installed yet (a local build that
+# lets the CUDA section install it; the re-check there catches a mismatch).
+$MSVC_CEILING = $null
+if ($WITH_CUDA) {
+    $cudaRoots = @()
+    if ($env:CUDA_PATH) { $cudaRoots += $env:CUDA_PATH }
+    $cudaRoots += (Get-ChildItem "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v$CUDA_MAJOR.*" `
+                        -Directory -ErrorAction SilentlyContinue |
+                   Sort-Object Name -Descending | ForEach-Object { $_.FullName })
+    foreach ($root in $cudaRoots) {
+        $MSVC_CEILING = Get-CudaMsvcCeiling (Join-Path $root "include\crt\host_config.h")
+        if ($MSVC_CEILING) {
+            Write-Host "CUDA at $root accepts MSVC below _MSC_VER $MSVC_CEILING"
+            break
+        }
+    }
+    if (-not $MSVC_CEILING) {
+        Write-Host "no CUDA $CUDA_MAJOR host_config.h found yet - not constraining the Visual Studio choice"
+    }
+}
+
+# Every install carrying the C++ x64 toolset, newest first, each tagged with
+# the toolsets it has. Toolset directories are named 14.<mm>.<build> and map
+# to _MSC_VER 19<mm>: 14.44.35207 -> 1944, 14.51.36231 -> 1951. Do not read
+# this off cl.exe - its file version reports the 14.x form, which compares
+# against the ceiling as a much smaller number and silently passes.
+$vsArgs   = @("-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64")
+$installs = @()
+foreach ($path in (& $vswhere @vsArgs -all -property installationPath)) {
+    if (-not $path) { continue }
+    $toolsets = @(Get-ChildItem (Join-Path $path "VC\Tools\MSVC") -Directory -ErrorAction SilentlyContinue |
+                  ForEach-Object {
+                      if ($_.Name -match '^14\.(\d+)\.') {
+                          [pscustomobject]@{ Name = $_.Name; MscVer = 1900 + [int]$matches[1] }
+                      }
+                  } | Sort-Object MscVer -Descending)
+    if (-not $toolsets) { continue }
+    $installs += [pscustomobject]@{
+        Path     = $path
+        Version  = (& $vswhere -path $path -property installationVersion)
+        Toolsets = $toolsets
+    }
+}
+if (-not $installs) {
+    Write-Error "No Visual Studio install with the C++ x64 toolset was found."
+    exit 1
+}
+$installs = @($installs | Sort-Object { [int](($_.Version -split '\.')[0]) } -Descending)
+
+$VS_PICK            = $installs[0]
+$VCVARS_VER         = $null     # -vcvars_ver, when an older toolset in the same install is needed
+$CUDA_HOST_OVERRIDE = $false    # nvcc -allow-unsupported-compiler, last resort
+
+if ($MSVC_CEILING) {
+    $compatible = $installs | Where-Object { $_.Toolsets[0].MscVer -lt $MSVC_CEILING } | Select-Object -First 1
+    if ($compatible) {
+        $VS_PICK = $compatible
+    }
+    else {
+        $sideBySide = $installs[0].Toolsets | Where-Object { $_.MscVer -lt $MSVC_CEILING } | Select-Object -First 1
+        if ($sideBySide) {
+            $VCVARS_VER = ($sideBySide.Name -split '\.')[0..1] -join '.'
+            Write-Host "no Visual Studio defaults to an MSVC below $MSVC_CEILING - using side-by-side toolset $($sideBySide.Name)"
+        }
+        else {
+            $CUDA_HOST_OVERRIDE = $true
+            Write-Host "WARNING: no installed MSVC is below _MSC_VER $MSVC_CEILING; nvcc will need -allow-unsupported-compiler"
+        }
+    }
+}
+
+$VS_PATH    = $VS_PICK.Path
+$VS_VERSION = $VS_PICK.Version
+$VS_MAJOR   = ($VS_VERSION -split '\.')[0]
+Write-Host "Visual Studio: $VS_PATH (version $VS_VERSION, MSVC $($VS_PICK.Toolsets[0].Name))"
+
+# Reload the environment unless cl.exe already comes from the chosen install
+# on the chosen toolset - with several installs present, whatever happens to
+# be on PATH is not necessarily the one selected above.
+$clNow = Get-Command cl.exe -ErrorAction SilentlyContinue
+if ($VCVARS_VER -or -not $clNow -or -not $clNow.Source.StartsWith($VS_PATH, [System.StringComparison]::OrdinalIgnoreCase)) {
+    Write-Host "=== Loading MSVC environment (x64) ==="
+
+    $vsdev = Join-Path $VS_PATH "Common7\Tools\VsDevCmd.bat"
+    if (-not (Test-Path $vsdev)) {
+        Write-Error "VsDevCmd.bat not found at $vsdev"
+        exit 1
+    }
+
+    # -vcvars_ver also exports VCToolsVersion, which is what makes MSBuild -
+    # and so the .cu compiles the Visual Studio generator drives - use that
+    # toolset rather than the install's newest.
+    $vsdevArgs = "-arch=amd64 -host_arch=amd64"
+    if ($VCVARS_VER) { $vsdevArgs += " -vcvars_ver=$VCVARS_VER" }
+
+    # Import the environment VsDevCmd sets up into this PowerShell session.
+    cmd /c "`"$vsdev`" $vsdevArgs && set" | ForEach-Object {
+        if ($_ -match "^(.*?)=(.*)$") {
+            Set-Item -Path "Env:$($matches[1])" -Value $matches[2]
+        }
+    }
+
+    if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
+        Write-Error "Loaded VsDevCmd from $vsdev but cl.exe is still not on PATH."
+        exit 1
+    }
+}
+Write-Host "cl.exe: $((Get-Command cl.exe).Source)"
+
+# The toolset actually in effect, in _MSC_VER terms, for the CUDA re-check.
+$HOST_MSC_VER = $VS_PICK.Toolsets[0].MscVer
+if ($env:VCToolsVersion -match '^14\.(\d+)\.') { $HOST_MSC_VER = 1900 + [int]$matches[1] }
+Write-Host "host compiler: MSVC $env:VCToolsVersion (_MSC_VER $HOST_MSC_VER)"
+
+# ==========================================================
+# CHECK REQUIRED TOOLS
+# ==========================================================
+foreach ($tool in "cl.exe","cmake","git","cargo","powershell") {
+    if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
+        Write-Error "ERROR: Required tool $tool not found."
+        exit 1
+    }
+}
+
+# ==========================================================
+# RESOLVE CMAKE GENERATOR
+# The generator name is version-specific ("Visual Studio 17 2022",
+# "Visual Studio 18 ...") and the runner image upgrades VS without warning,
+# so ask the installed CMake which generator matches the installed VS major
+# version instead of hardcoding one.
+# ==========================================================
+$genMatch = cmake --help |
+            Select-String -Pattern "Visual Studio $VS_MAJOR [0-9]{4}" |
+            Select-Object -First 1
+if (-not $genMatch) {
+    Write-Error "Installed CMake has no generator for Visual Studio $VS_MAJOR. Upgrade CMake."
+    exit 1
+}
+$CMAKE_GENERATOR = $genMatch.Matches[0].Value
+Write-Host "CMake generator: $CMAKE_GENERATOR"
+
+# cmake-rs (espeak-rs-sys, whisper-rs-sys) reads CMAKE_GENERATOR from the
+# environment and supplies -Ax64 / -Thost=x64 itself, so this single export
+# keeps the crate sub-builds on the same toolchain as ours.
+$env:CMAKE_GENERATOR = $CMAKE_GENERATOR
+
+$env:CARGO_BUILD_JOBS = 1
 
 Write-Host "`n============================================"
 Write-Host "Building variant: $VARIANT"
@@ -266,93 +378,27 @@ if ($WITH_CUDA) {
     }
 
     # ------------------------------------------------------
-    # HOST COMPILER CEILING
-    # nvcc rejects any MSVC newer than the toolkit knows about: CUDA 12.8's
-    # include/crt/host_config.h stops below _MSC_VER 1950 ("only the versions
-    # between 2017 and 2022 are supported"), while the hosted images now ship
-    # Visual Studio 18 with MSVC 14.51 (19.51). cuda12 therefore dies inside
-    # CMake's CUDA compiler-id test, long before anything of ours compiles;
-    # cuda13's toolkit accepts the same compiler and is unaffected.
-    #
-    # No runner label dodges this any more - windows-latest and windows-2025
-    # both provision windows-2025-vs2026 - so adapt to whatever the image has:
-    # build against an older toolset when the VS install still carries one
-    # (side-by-side toolsets stay usable under the newest VS), and otherwise
-    # take nvcc's own override. The ceiling is read from the toolkit rather
-    # than hardcoded, so this stops applying by itself once a toolkit that
-    # accepts the runner's MSVC is pinned.
+    # HOST COMPILER CEILING (re-check)
+    # The Visual Studio selection above already honoured this toolkit's
+    # ceiling - unless the toolkit was not installed at that point, which is
+    # the case when the block above just installed it. Read it again now, and
+    # if the compiler this build settled on is past it, take nvcc's own
+    # override: -allow-unsupported-compiler defeats the host_config.h check
+    # only, and NVCC_PREPEND_FLAGS reaches every nvcc invocation, including
+    # the ones CMake and MSBuild make for us inside whisper-rs-sys. It is a
+    # last resort - NVIDIA does not test that combination - so say so loudly.
     # ------------------------------------------------------
-    # The guard is one line, e.g. "#if _MSC_VER < 1910 || _MSC_VER >= 1950";
-    # match it whole rather than the first _MSC_VER comparison in the file.
-    $hostConfig = Join-Path $cuda_root "include\crt\host_config.h"
-    $msvcCeiling = $null
-    if (Test-Path $hostConfig) {
-        $m = Select-String -Path $hostConfig `
-                -Pattern '_MSC_VER\s*<\s*\d+\s*\|\|\s*_MSC_VER\s*(>=?)\s*(\d+)' |
-             Select-Object -First 1
-        if ($m) {
-            $msvcCeiling = [int]$m.Matches[0].Groups[2].Value
-            if ($m.Matches[0].Groups[1].Value -eq '>') { $msvcCeiling += 1 }
-        }
+    if (-not $MSVC_CEILING) {
+        $MSVC_CEILING = Get-CudaMsvcCeiling (Join-Path $cuda_root "include\crt\host_config.h")
+        if ($MSVC_CEILING -and $HOST_MSC_VER -ge $MSVC_CEILING) { $CUDA_HOST_OVERRIDE = $true }
     }
-
-    # cl.exe 19.51.36231.0 -> _MSC_VER 1951.
-    $clVer = (Get-Command cl.exe).Version
-    $clMscVer = if ($clVer) { $clVer.Major * 100 + $clVer.Minor } else { 0 }
-
-    if (-not $msvcCeiling) {
-        Write-Host "could not read the MSVC ceiling from $hostConfig - assuming the host compiler is supported"
+    if ($CUDA_HOST_OVERRIDE) {
+        Write-Host "WARNING: MSVC _MSC_VER $HOST_MSC_VER is past CUDA $CUDA_MM's ceiling of $MSVC_CEILING - building with -allow-unsupported-compiler"
+        $env:NVCC_PREPEND_FLAGS = ("-allow-unsupported-compiler " + $env:NVCC_PREPEND_FLAGS).Trim()
+        Write-Host "NVCC_PREPEND_FLAGS = $env:NVCC_PREPEND_FLAGS"
     }
-    elseif ($clMscVer -lt $msvcCeiling) {
-        Write-Host "host compiler _MSC_VER $clMscVer is below CUDA's ceiling of $msvcCeiling - no toolset override needed"
-    }
-    else {
-        Write-Host "host compiler _MSC_VER $clMscVer is at or above CUDA $CUDA_MM's ceiling of $msvcCeiling"
-
-        # Toolset directories are named 14.<mm>.<build> and map to _MSC_VER
-        # 19<mm>, e.g. 14.44.35207 -> 1944.
-        $toolsets = Get-ChildItem (Join-Path $VS_PATH "VC\Tools\MSVC") -Directory -ErrorAction SilentlyContinue |
-                    ForEach-Object {
-                        if ($_.Name -match '^\d+\.(\d+)\.') {
-                            [pscustomobject]@{ Name = $_.Name; MscVer = 1900 + [int]$matches[1] }
-                        }
-                    } |
-                    Where-Object { $_.MscVer -lt $msvcCeiling } |
-                    Sort-Object MscVer -Descending
-
-        if ($toolsets) {
-            $pick = $toolsets[0]
-            $vcvarsVer = ($pick.Name -split '\.')[0..1] -join '.'
-            Write-Host "using side-by-side MSVC toolset $($pick.Name) (_MSC_VER $($pick.MscVer))"
-
-            # Reload the MSVC environment on that toolset so a directly invoked
-            # cl.exe matches, and export VCToolsVersion so the MSBuild the VS
-            # generator drives compiles the .cu files with it too.
-            $vsdev = Join-Path $VS_PATH "Common7\Tools\VsDevCmd.bat"
-            cmd /c "`"$vsdev`" -arch=amd64 -host_arch=amd64 -vcvars_ver=$vcvarsVer && set" | ForEach-Object {
-                if ($_ -match "^(.*?)=(.*)$") {
-                    Set-Item -Path "Env:$($matches[1])" -Value $matches[2]
-                }
-            }
-            $env:VCToolsVersion = $pick.Name
-            $env:CMAKE_GENERATOR_TOOLSET = "host=x64,version=$($pick.Name)"
-
-            $reloaded = (Get-Command cl.exe).Version
-            Write-Host "cl.exe: $((Get-Command cl.exe).Source) ($reloaded)"
-            if ($reloaded.Major * 100 + $reloaded.Minor -ge $msvcCeiling) {
-                Write-Error "asked VsDevCmd for toolset $vcvarsVer but cl.exe is still $reloaded"
-                exit 1
-            }
-        }
-        else {
-            # Nothing older is installed. -allow-unsupported-compiler is
-            # NVIDIA's own escape hatch for exactly this - it only defeats the
-            # host_config.h version check - and NVCC_PREPEND_FLAGS reaches
-            # every nvcc invocation, including the ones CMake and MSBuild make
-            # for us inside whisper-rs-sys.
-            Write-Host "WARNING: no MSVC toolset below $msvcCeiling is installed; building with -allow-unsupported-compiler"
-            $env:NVCC_PREPEND_FLAGS = ("-allow-unsupported-compiler " + $env:NVCC_PREPEND_FLAGS).Trim()
-        }
+    elseif ($MSVC_CEILING) {
+        Write-Host "host compiler _MSC_VER $HOST_MSC_VER clears CUDA $CUDA_MM's ceiling of $MSVC_CEILING"
     }
 
     # ------------------------------------------------------

@@ -228,6 +228,44 @@ jobs:
           "$root\bin"             | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
           & "$root\bin\nvcc.exe" --version
 
+      # ----------------------
+      # Host compiler for CUDA 12.
+      #
+      # nvcc refuses any MSVC past the ceiling its toolkit shipped with, and
+      # CUDA 12.8 predates Visual Studio 18: crt/host_config.h stops it with
+      # "only the versions between 2017 and 2022 (inclusive) are supported".
+      # No runner label avoids that any more - windows-latest and
+      # windows-2025 both provision windows-2025-vs2026, which carries 14.51
+      # and no older toolset - so bring the compiler with us. VS 2022 Build
+      # Tools installs as a separate instance next to VS 18, and
+      # build_windows.ps1 picks the newest install whose MSVC clears the
+      # toolkit's ceiling. cuda13's toolkit accepts 14.51, hence cuda12 only.
+      - name: Install VS 2022 build tools (CUDA 12 host compiler)
+        if: matrix.variant == 'cuda12'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          choco install visualstudio2022buildtools -y --no-progress --package-parameters `
+            "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --quiet --norestart --nocache"
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $bt = & $vswhere -products * -version "[17.0,18.0)" `
+                  -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+                  -property installationPath | Select-Object -First 1
+          if (-not $bt) { throw "VS 2022 with the C++ x64 toolset not found after install" }
+          Write-Host "VS 2022: $bt"
+
+          # The toolkit installed its MSBuild integration into whichever VS
+          # existed at the time (and on a cache hit the installer never runs),
+          # so seed the new instance from the copy inside the toolkit itself -
+          # without these .props/.targets CMake's Visual Studio generator
+          # fails with "No CUDA toolset found".
+          $src = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ matrix.cuda_mm }}\extras\visual_studio_integration\MSBuildExtensions"
+          if (-not (Test-Path $src)) { throw "CUDA MSBuild integration not found at $src" }
+          $dst = Join-Path $bt "MSBuild\Microsoft\VC\v170\BuildCustomizations"
+          New-Item -ItemType Directory -Force -Path $dst | Out-Null
+          Copy-Item "$src\*" $dst -Force
+          Get-ChildItem $dst -Filter "CUDA*" | ForEach-Object { Write-Host "  $($_.Name)" }
+
       - name: Prepare AI models
         shell: cmd
         run: |
