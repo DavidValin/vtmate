@@ -177,7 +177,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 ```
 
 * By default all agents are set in `PTT` mode, you have to keep `SPACE` pressed to talk. If you want to use `LIVE` mode, make sure you adjust your microphone levels correctly and adjust `sound_threshold_peak` and `end_silence_ms` settings to your need
-* Source code is never sent to TTS: anything wrapped in ``` fences (in LLM replies or in files read with `-r`) is displayed but skipped when speaking.
+* Source code in an agent's reply is not spoken: anything wrapped in ``` fences is shown but skipped. Reading a file with `-r` does speak it, since the code is part of what you asked to have read.
 * Voice mixing is supported for kokoro TTS system only, you can create a voice by mixing 2 kokoro voices by percentage. Example mixing 50% of bm_daniel and 50% of am_puck: set voice name to `bm_daniel.5+am_puck.5`
 
 To see explanation of each field:
@@ -345,7 +345,7 @@ Shortcuts (change them in the `[daemon]` section of `~/.vtmate/settings`):
 | setting | default | what it does |
 |---|---|---|
 | `llm_background_ptt_combo` | `ctrl+alt+a` | hold to talk. On release your speech is transcribed and, if some text is selected anywhere on the desktop, the selection is appended after the speech (speech first, blank line, selection). The whole thing is sent to the agent as one message and the reply is spoken. Pressing it while a reply is playing interrupts the reply. The selection is sent once: what you selected since your previous message. Select the text again to send it a second time, and nothing is appended when nothing is selected. |
-| `tts_background_combo` | `ctrl+alt+r` | read the selected text aloud (no LLM). Press again while it is speaking to stop. Reading uses the selection up, so it is not appended to your next message as well. |
+| `tts_background_combo` | `ctrl+alt+r` | read the selected text aloud (no LLM), including any code in it. Press again while it is speaking to stop. Reading uses the selection up, so it is not appended to your next message as well. |
 | `stt_and_paste_background_ptt_combo` | `ctrl+alt+s` | hold to talk. On release your speech is transcribed and written at the cursor of the application you are in. On Linux it is typed out, so it works in terminals too (where `Ctrl+V` is not the paste shortcut) and your clipboard is left alone; on Windows and macOS it is pasted through the clipboard, whose previous text is put back afterwards. No LLM, nothing spoken. |
 | `llm_background_reset` | `ctrl+q` | like `ESCAPE` in the terminal: press once to stop the speech, twice within a second to also reset the conversation (history cleared). A desktop notification "Conversation restarted!" confirms the reset. |
 

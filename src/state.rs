@@ -23,6 +23,16 @@ pub struct UiState {
 pub struct PlaybackState {
   pub paused: Arc<AtomicBool>,
   pub playback_active: Arc<AtomicBool>,
+  /// True while the agent's voice is actually coming out of the speaker.
+  ///
+  /// `playback_active` cannot answer that question: audio arrives in chunks
+  /// and the queue runs dry between them, so it drops to false many times
+  /// during a single phrase. Interrupting by voice in one of those moments
+  /// used to be ignored. This one only drops once nothing has been played for
+  /// a short while, and nothing waits on it, so phrase timing is unaffected.
+  pub speaking: Arc<AtomicBool>,
+  /// Frames of silence emitted since the last real sample, feeding `speaking`.
+  pub silent_frames: Arc<AtomicU64>,
   pub gate_until_ms: Arc<AtomicU64>,
   pub volume: Arc<Mutex<f32>>,
 }
@@ -124,6 +134,8 @@ impl AppState {
       agent_name: Arc::new(Mutex::new(String::new())),
       agents: Arc::new(Vec::new()),
       playback: PlaybackState {
+        speaking: Arc::new(AtomicBool::new(false)),
+        silent_frames: Arc::new(AtomicU64::new(0)),
         paused: Arc::new(AtomicBool::new(false)),
         playback_active: Arc::new(AtomicBool::new(false)),
         gate_until_ms: Arc::new(AtomicU64::new(0)),

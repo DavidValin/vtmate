@@ -73,30 +73,35 @@ pub fn keyboard_thread(
 
           match k.code {
             KeyCode::Up => {
-              // ARROW_UP: previous phrase
-              let curr = rfm.current_phrase.load(Ordering::SeqCst);
-              if curr > 0 {
-                // Stop current playback
+              // One phrase back, in a single atomic step. The reader thread
+              // advances this same counter when a phrase ends, so reading it
+              // and writing it back separately loses one of the two moves.
+              let moved = rfm
+                .current_phrase
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |c| {
+                  if c > 0 { Some(c - 1) } else { None }
+                })
+                .is_ok();
+              if moved {
                 let _ = stop_play_tx.try_send(());
                 interrupt_counter.fetch_add(1, Ordering::SeqCst);
-                // Move to previous phrase
-                rfm.current_phrase.store(curr - 1, Ordering::SeqCst);
                 rfm.tts_paused.store(false, Ordering::SeqCst);
-                // Trigger display update
                 let _ = rfm.display_update_tx.send(());
               }
             }
             KeyCode::Down => {
-              // ARROW_DOWN: next phrase
-              let curr = rfm.current_phrase.load(Ordering::SeqCst);
-              if curr < rfm.phrases_len - 1 {
-                // Stop current playback
+              // One phrase forward, atomically, for the same reason.
+              let last = rfm.phrases_len.saturating_sub(1);
+              let moved = rfm
+                .current_phrase
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |c| {
+                  if c < last { Some(c + 1) } else { None }
+                })
+                .is_ok();
+              if moved {
                 let _ = stop_play_tx.try_send(());
                 interrupt_counter.fetch_add(1, Ordering::SeqCst);
-                // Move to next phrase
-                rfm.current_phrase.store(curr + 1, Ordering::SeqCst);
                 rfm.tts_paused.store(false, Ordering::SeqCst);
-                // Trigger display update
                 let _ = rfm.display_update_tx.send(());
               }
             }
@@ -104,14 +109,18 @@ pub fn keyboard_thread(
               let paused = rfm.tts_paused.load(Ordering::SeqCst);
               if paused {
                 // Resume TTS playback - move index back one element if possible
-                let curr = rfm.current_phrase.load(Ordering::SeqCst);
-                if curr > 0 {
+                let moved = rfm
+                  .current_phrase
+                  .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |c| {
+                    if c > 0 { Some(c - 1) } else { None }
+                  })
+                  .is_ok();
+                if moved {
                   // Immediately abort any ongoing TTS/LLM by incrementing interrupt counter
                   interrupt_counter.fetch_add(1, Ordering::SeqCst);
                   thread::sleep(Duration::from_millis(10));
                   // Stop playback first
                   let _ = stop_play_tx.try_send(());
-                  rfm.current_phrase.store(curr - 1, Ordering::SeqCst);
                   let _ = rfm.display_update_tx.send(());
                 }
                 rfm.tts_paused.store(false, Ordering::SeqCst);

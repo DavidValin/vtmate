@@ -214,6 +214,14 @@ pub fn record_thread(
   }
 }
 
+/// How long after interrupting the agent before another interruption can be
+/// raised. One burst of speech is one interruption, however long you talk.
+const INTERRUPT_COOLDOWN_MS: u64 = 1200;
+
+/// When that hold-off ends. Kept here rather than in `gate_until_ms`, which
+/// the playback thread rewrites constantly and would cut it short.
+static INTERRUPT_GATE_MS: AtomicU64 = AtomicU64::new(0);
+
 // PRIVATE
 // ------------------------------------------------------------------
 
@@ -308,13 +316,30 @@ fn build_input_f32(
           b.extend_from_slice(data);
         }
 
-        if playback_active.load(Ordering::Relaxed) && !stop_sent.load(Ordering::Relaxed) {
+        // Interrupt while the agent is audible. `playback_active` cannot be
+        // used here: it drops every time the queue empties between chunks, so
+        // speaking in one of those gaps (which is most of the start of a
+        // phrase) was silently ignored.
+        let agent_audible = crate::state::GLOBAL_STATE
+          .get()
+          .map(|st| st.playback.speaking.load(Ordering::Relaxed))
+          .unwrap_or_else(|| playback_active.load(Ordering::Relaxed));
+        // One interrupt per burst of speech. Without this hold-off every
+        // audio callback raised another one for as long as you kept talking,
+        // printing a wall of "USER interrupted".
+        let gate_open =
+          crate::util::now_ms(start_instant) >= INTERRUPT_GATE_MS.load(Ordering::Relaxed);
+        if agent_audible && gate_open {
           // silence audio
           let mut vol = volume.lock().unwrap();
           *vol = 0.0;
           interrupt_counter.fetch_add(1, Ordering::SeqCst);
           let _ = tx_ui.send("user_interrupt_show|".to_string());
           stop_sent.store(true, Ordering::Relaxed);
+          INTERRUPT_GATE_MS.store(
+            crate::util::now_ms(start_instant).saturating_add(INTERRUPT_COOLDOWN_MS),
+            Ordering::Relaxed,
+          );
           gate_until_ms.store(
             crate::util::now_ms(start_instant).saturating_add(hangover_ms),
             Ordering::Relaxed,
@@ -493,13 +518,30 @@ fn build_input_i16(
           b.extend_from_slice(&tmp);
         }
 
-        if playback_active.load(Ordering::Relaxed) && !stop_sent.load(Ordering::Relaxed) {
+        // Interrupt while the agent is audible. `playback_active` cannot be
+        // used here: it drops every time the queue empties between chunks, so
+        // speaking in one of those gaps (which is most of the start of a
+        // phrase) was silently ignored.
+        let agent_audible = crate::state::GLOBAL_STATE
+          .get()
+          .map(|st| st.playback.speaking.load(Ordering::Relaxed))
+          .unwrap_or_else(|| playback_active.load(Ordering::Relaxed));
+        // One interrupt per burst of speech. Without this hold-off every
+        // audio callback raised another one for as long as you kept talking,
+        // printing a wall of "USER interrupted".
+        let gate_open =
+          crate::util::now_ms(start_instant) >= INTERRUPT_GATE_MS.load(Ordering::Relaxed);
+        if agent_audible && gate_open {
           // silence audio
           let mut vol = volume.lock().unwrap();
           *vol = 0.0;
           interrupt_counter.fetch_add(1, Ordering::SeqCst);
           let _ = tx_ui.send("user_interrupt_show|".to_string());
           stop_sent.store(true, Ordering::Relaxed);
+          INTERRUPT_GATE_MS.store(
+            crate::util::now_ms(start_instant).saturating_add(INTERRUPT_COOLDOWN_MS),
+            Ordering::Relaxed,
+          );
           gate_until_ms.store(
             crate::util::now_ms(start_instant).saturating_add(hangover_ms),
             Ordering::Relaxed,
@@ -675,13 +717,30 @@ fn build_input_u16(
           b.extend_from_slice(&tmp);
         }
 
-        if playback_active.load(Ordering::Relaxed) && !stop_sent.load(Ordering::Relaxed) {
+        // Interrupt while the agent is audible. `playback_active` cannot be
+        // used here: it drops every time the queue empties between chunks, so
+        // speaking in one of those gaps (which is most of the start of a
+        // phrase) was silently ignored.
+        let agent_audible = crate::state::GLOBAL_STATE
+          .get()
+          .map(|st| st.playback.speaking.load(Ordering::Relaxed))
+          .unwrap_or_else(|| playback_active.load(Ordering::Relaxed));
+        // One interrupt per burst of speech. Without this hold-off every
+        // audio callback raised another one for as long as you kept talking,
+        // printing a wall of "USER interrupted".
+        let gate_open =
+          crate::util::now_ms(start_instant) >= INTERRUPT_GATE_MS.load(Ordering::Relaxed);
+        if agent_audible && gate_open {
           // silence audio
           let mut vol = volume.lock().unwrap();
           *vol = 0.0;
           interrupt_counter.fetch_add(1, Ordering::SeqCst);
           let _ = tx_ui.send("user_interrupt_show|".to_string());
           stop_sent.store(true, Ordering::Relaxed);
+          INTERRUPT_GATE_MS.store(
+            crate::util::now_ms(start_instant).saturating_add(INTERRUPT_COOLDOWN_MS),
+            Ordering::Relaxed,
+          );
           gate_until_ms.store(
             crate::util::now_ms(start_instant).saturating_add(hangover_ms),
             Ordering::Relaxed,

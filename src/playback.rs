@@ -53,6 +53,8 @@ pub fn playback_thread(
 
   let err_fn = |e| crate::log::log("error", &format!("output stream error: {}", e));
 
+  set_speaking_hold(config.sample_rate.0);
+
   let stream = match sample_format {
     SampleFormat::F32 => device.build_output_stream(
       &config,
@@ -104,7 +106,9 @@ pub fn playback_thread(
           }
           if any_real {
             empty_callbacks.store(0, Ordering::Relaxed);
+            mark_speaking(true, 0, 0);
           } else {
+            mark_speaking(false, out.len(), out_channels as usize);
             let n = empty_callbacks.fetch_add(1, Ordering::Relaxed) + 1;
             if n >= 1 {
               playback_active.store(false, Ordering::Relaxed);
@@ -173,7 +177,9 @@ pub fn playback_thread(
 
           if any_real {
             empty_callbacks.store(0, Ordering::Relaxed);
+            mark_speaking(true, 0, 0);
           } else {
+            mark_speaking(false, out.len(), out_channels as usize);
             let n = empty_callbacks.fetch_add(1, Ordering::Relaxed) + 1;
             if n >= 1 {
               playback_active.store(false, Ordering::Relaxed);
@@ -243,7 +249,9 @@ pub fn playback_thread(
 
           if any_real {
             empty_callbacks.store(0, Ordering::Relaxed);
+            mark_speaking(true, 0, 0);
           } else {
+            mark_speaking(false, out.len(), out_channels as usize);
             let n = empty_callbacks.fetch_add(1, Ordering::Relaxed) + 1;
             if n >= 1 {
               playback_active.store(false, Ordering::Relaxed);
@@ -335,6 +343,50 @@ pub fn playback_thread(
       }
     }
   }
+}
+
+/// Keep `speaking` true while the agent's voice is audible.
+///
+/// A phrase arrives as a series of chunks and the queue empties between them,
+/// so "nothing to play right now" happens constantly mid-sentence. Only when
+/// nothing has been played for `SPEAKING_HOLD_MS` is the agent really quiet.
+/// Nothing waits on this flag, so holding it costs no time between phrases.
+const SPEAKING_HOLD_MS: u64 = 200;
+
+fn mark_speaking(any_real: bool, samples: usize, channels: usize) {
+  let Some(state) = crate::state::GLOBAL_STATE.get() else {
+    return;
+  };
+  if any_real {
+    state.playback.silent_frames.store(0, Ordering::Relaxed);
+    state.playback.speaking.store(true, Ordering::Relaxed);
+    return;
+  }
+  if !state.playback.speaking.load(Ordering::Relaxed) {
+    return;
+  }
+  let frames = (samples / channels.max(1)) as u64;
+  let silent = state
+    .playback
+    .silent_frames
+    .fetch_add(frames, Ordering::Relaxed)
+    + frames;
+  if silent >= SPEAKING_HOLD_FRAMES.load(Ordering::Relaxed) {
+    state.playback.speaking.store(false, Ordering::Relaxed);
+  }
+}
+
+/// How many frames of silence mean the agent has stopped talking. Set from the
+/// output sample rate when the stream opens; the default covers 48 kHz.
+pub static SPEAKING_HOLD_FRAMES: std::sync::atomic::AtomicU64 =
+  std::sync::atomic::AtomicU64::new(48_000 * SPEAKING_HOLD_MS / 1000);
+
+/// Called once the real output rate is known.
+pub fn set_speaking_hold(sample_rate: u32) {
+  SPEAKING_HOLD_FRAMES.store(
+    sample_rate as u64 * SPEAKING_HOLD_MS / 1000,
+    Ordering::Relaxed,
+  );
 }
 
 // PRIVATE

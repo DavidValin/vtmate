@@ -32,8 +32,8 @@ pub struct Channels {
   pub tx_tts: Sender<(String, u64, String)>,
   pub rx_tts: Receiver<(String, u64, String)>,
   /// tts -> whoever waits for a phrase to be synthesized (rendezvous)
-  pub tts_done_tx: Sender<()>,
-  pub tts_done_rx: Receiver<()>,
+  pub tts_done_tx: Sender<u64>,
+  pub tts_done_rx: Receiver<u64>,
   /// synthesized audio -> playback
   pub tx_play: Sender<audio::AudioChunk>,
   pub rx_play: Receiver<audio::AudioChunk>,
@@ -52,7 +52,9 @@ impl Channels {
   pub fn new() -> Self {
     let (tx_utt, rx_utt) = bounded::<audio::Utterance>(1);
     let (tx_tts, rx_tts) = unbounded::<(String, u64, String)>();
-    let (tts_done_tx, tts_done_rx) = bounded::<()>(0);
+    // carries the interrupt epoch of the phrase that finished, so a late
+    // report from a phrase that was abandoned cannot be taken for this one
+    let (tts_done_tx, tts_done_rx) = bounded::<u64>(0);
     let (tx_play, rx_play) = bounded::<audio::AudioChunk>(1);
     let (tx_ui, rx_ui) = bounded::<String>(1);
     let (stop_play_tx, stop_play_rx) = unbounded::<()>();
@@ -90,7 +92,7 @@ pub struct Engine {
   pub tx_ui: Sender<String>,
   pub tx_utt: Sender<audio::Utterance>,
   pub tx_tts: Sender<(String, u64, String)>,
-  pub tts_done_rx: Receiver<()>,
+  pub tts_done_rx: Receiver<u64>,
   pub stop_play_tx: Sender<()>,
   pub tx_cmd_conv: Sender<Command>,
   pub interrupt_counter: Arc<AtomicU64>,

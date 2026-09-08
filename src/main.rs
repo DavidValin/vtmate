@@ -285,12 +285,11 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       }
     });
 
-    // Split content into phrases (by newlines or periods). What TTS gets for
-    // each phrase has fenced ``` source code removed: it is displayed but
-    // never spoken. Computed up front, in order, so the fence state survives
-    // the user jumping between phrases.
+    // Split content into phrases (by newlines or periods). Reading a file
+    // speaks the fenced ``` code as well: you asked for the file to be read,
+    // and the code is part of it. Only an agent's replies skip it.
     let (phrases, tts_texts): (Vec<String>, Vec<String>) =
-      util::split_text_for_tts(&content).into_iter().unzip();
+      util::split_text_for_tts(&content, false).into_iter().unzip();
 
     println!("📖 Reading {} phrases from '{}'", phrases.len(), filename);
 
@@ -368,6 +367,9 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       };
 
     let mut last_idx = 0;
+    // how many times the current phrase has been queued again after being
+    // cancelled before it could be heard
+    let mut retries = 0usize;
 
     // Main TTS loop
     loop {
@@ -390,7 +392,17 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         for i in 0..idx {
           displayed.push(phrases[i].clone());
         }
+        // show the new phrase as current straight away: waiting until it
+        // starts speaking leaves the highlight a step behind the key presses
+        update_display(&mut out, &displayed, Some(&phrases[idx]));
         drop(displayed);
+      }
+
+      // Which way the reader is travelling, so that phrases with nothing to
+      // speak are stepped over in that direction rather than always forwards.
+      let moving_back = idx < last_idx;
+      if idx != last_idx {
+        retries = 0;
       }
 
       // Always update last_idx to current
@@ -412,49 +424,108 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Text for TTS: code blocks removed, special characters stripped
         let cleaned = tts_texts[idx].clone();
         if cleaned.trim().is_empty() {
-          // Nothing left to speak (e.g. a punctuation-only line or source code) -
-          // skip without waiting on TTS, otherwise the loop would spin on this index forever.
-          if current_phrase.load(Ordering::SeqCst) == idx {
-            current_phrase.fetch_add(1, Ordering::SeqCst);
+          // Nothing to speak here: source code inside ``` fences, or a line of
+          // punctuation. Step over it, but in the direction of travel. Always
+          // stepping forwards made it impossible to move back past a code
+          // block: pressing UP landed on it and it immediately jumped forward
+          // again. It is still shown, it is just never spoken.
+          let mut displayed = displayed_phrases.lock().unwrap();
+          if !moving_back && !displayed.contains(phrase) {
+            displayed.push(phrase.clone());
           }
+          drop(displayed);
+          let step_to = if moving_back && idx > 0 {
+            idx - 1
+          } else {
+            idx + 1
+          };
+          // only if nothing moved underneath us: a key press between the check
+          // and the write used to skip a phrase
+          let _ = current_phrase.compare_exchange(
+            idx,
+            step_to,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+          );
         } else {
           // Show this phrase as current (highlighted) - THIS IS WHEN IT STARTS PLAYING
           let displayed = displayed_phrases.lock().unwrap();
           update_display(&mut out, &displayed, Some(phrase));
           drop(displayed);
 
+          // Throw away completion signals belonging to a phrase we navigated
+          // away from. The TTS thread reports "done" for an interrupted phrase
+          // too, and that stale signal would end this one the instant it
+          // starts, sending us straight on to the next phrase: going back a
+          // phrase would bounce forward again.
+          while tts_done_rx.try_recv().is_ok() {}
+
           let expected_interrupt = interrupt_counter.load(Ordering::SeqCst);
           tx_tts
             .send((cleaned, expected_interrupt, settings.voice.clone()))
             .unwrap();
 
-          // Wait for TTS synthesis to complete or navigation
+          // Wait for the synthesiser to report that THIS phrase is ready. The
+          // report carries the phrase's interrupt epoch, so a late report from
+          // a phrase we walked away from is recognised and ignored instead of
+          // being taken as this one's, which used to end the phrase before a
+          // sound came out and jump to the next.
           let mut navigated_away = false;
-          loop {
+          let mut synthesized = false;
+          let synth_deadline = Instant::now() + Duration::from_secs(30);
+          while !synthesized {
+            // keys that cancel out (UP then DOWN) leave us on the same phrase
+            // but cancel the one already queued, so watch the epoch as well
+            if current_phrase.load(Ordering::SeqCst) != idx
+              || interrupt_counter.load(Ordering::SeqCst) != expected_interrupt
+            {
+              navigated_away = true;
+              break;
+            }
+            if should_exit.load(Ordering::SeqCst) {
+              break;
+            }
             match tts_done_rx.try_recv() {
-              Ok(_) => break,
+              Ok(epoch) if epoch == expected_interrupt => synthesized = true,
+              Ok(_) => {} // an abandoned phrase reporting in late
               Err(_) => {
-                // Check if user navigated away
-                if current_phrase.load(Ordering::SeqCst) != idx {
-                  // User navigated, break out
-                  navigated_away = true;
+                if Instant::now() >= synth_deadline {
                   break;
                 }
-                if should_exit.load(Ordering::SeqCst) {
-                  break;
-                }
-                thread::sleep(Duration::from_millis(50));
+                thread::sleep(Duration::from_millis(10));
               }
             }
           }
-
-          // Check if we navigated away before continuing
           if navigated_away {
-            continue; // Skip to next iteration
+            continue; // queue this phrase again, or move to the chosen one
           }
 
-          // Wait a bit to ensure playback has started
-          thread::sleep(Duration::from_millis(100));
+          // Then wait for the sound itself. It follows synthesis within
+          // milliseconds; if it never arrives the phrase was thrown away
+          // somewhere, so queue it again rather than skip it or stall.
+          let start_deadline = Instant::now() + Duration::from_secs(2);
+          while !playback_active.load(Ordering::Relaxed) {
+            if current_phrase.load(Ordering::SeqCst) != idx
+              || interrupt_counter.load(Ordering::SeqCst) != expected_interrupt
+            {
+              navigated_away = true;
+              break;
+            }
+            if should_exit.load(Ordering::SeqCst) {
+              break;
+            }
+            if Instant::now() >= start_deadline {
+              if retries < 2 {
+                retries += 1;
+                navigated_away = true; // send it again
+              }
+              break;
+            }
+            thread::sleep(Duration::from_millis(10));
+          }
+          if navigated_away {
+            continue;
+          }
 
           // NOW wait for playback to finish - PHRASE STAYS HIGHLIGHTED DURING PLAYBACK
           while playback_active.load(Ordering::Relaxed) {
@@ -463,10 +534,15 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
               navigated_away = true;
               break;
             }
+            // interrupted while speaking, but left on this same phrase
+            if interrupt_counter.load(Ordering::SeqCst) != expected_interrupt {
+              navigated_away = true;
+              break;
+            }
             if should_exit.load(Ordering::SeqCst) {
               break;
             }
-            thread::sleep(Duration::from_millis(50));
+            thread::sleep(Duration::from_millis(20));
           }
 
           // Check if we navigated away before marking as completed
@@ -491,15 +567,27 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
           let start_idx = idx;
           // ... existing code remains ...
           // After playback finished
-          if current_phrase.load(Ordering::SeqCst) == start_idx {
-            current_phrase.fetch_add(1, Ordering::SeqCst);
-          }
+          let _ = current_phrase.compare_exchange(
+            start_idx,
+            start_idx + 1,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+          );
         }
       } else {
-        // Empty phrase (e.g. produced by a stray period on its own line) - skip it.
-        if current_phrase.load(Ordering::SeqCst) == idx {
-          current_phrase.fetch_add(1, Ordering::SeqCst);
-        }
+        // Empty phrase (e.g. produced by a stray period on its own line): step
+        // over it the same way, following the direction of travel.
+        let step_to = if moving_back && idx > 0 {
+          idx - 1
+        } else {
+          idx + 1
+        };
+        let _ = current_phrase.compare_exchange(
+          idx,
+          step_to,
+          Ordering::SeqCst,
+          Ordering::SeqCst,
+        );
       }
     }
 

@@ -24,6 +24,11 @@ use std::time::Duration;
 
 pub static STOP_STREAM: AtomicBool = AtomicBool::new(false);
 
+/// Set while the interface is being torn down. The bottom bar is redrawn from
+/// several places and on a timer, so without this it reappears underneath the
+/// parting message, leaving a stale bar above it and a fresh one below.
+pub static UI_SHUTDOWN: AtomicBool = AtomicBool::new(false);
+
 // ANSI labels
 pub const USER_LABEL: &str = "\x1b[47;30mUSER:\x1b[0m";
 pub const ASSIST_LABEL: &str = "\x1b[48;5;22;37mASSISTANT:\x1b[0m";
@@ -473,7 +478,7 @@ fn render_bottom_bar<W: Write>(
   status_line: &Arc<Mutex<String>>,
   y: u16,
 ) -> String {
-  if ui_state.quiet {
+  if ui_state.quiet || UI_SHUTDOWN.load(Ordering::Relaxed) {
     return String::new();
   }
   let state = GLOBAL_STATE.get().expect("AppState not initialized");

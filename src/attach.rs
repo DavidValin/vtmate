@@ -157,9 +157,23 @@ pub fn run(args: &crate::config::Args) -> ! {
 // ------------------------------------------------------------------
 
 fn finish(level: &str, msg: &str) -> ! {
+  // Stop the bottom bar before saying anything: it is drawn on a timer, and a
+  // frame landing after the message would leave a bar under it.
+  crate::ui::UI_SHUTDOWN.store(true, Ordering::Relaxed);
+  thread::sleep(Duration::from_millis(60));
   let _ = terminal::disable_raw_mode();
-  print!("\r\n");
+  // wipe the bar where it sits and put the message in its place
+  let rows = terminal::size().map(|(_, r)| r).unwrap_or(24);
+  let mut out = std::io::stdout();
+  let _ = crossterm::execute!(
+    out,
+    crossterm::cursor::MoveTo(0, rows.saturating_sub(1)),
+    terminal::Clear(terminal::ClearType::CurrentLine),
+    crossterm::cursor::Show
+  );
   crate::log::notice(level, msg);
+  let _ = std::io::Write::flush(&mut out);
+  util::EXIT_LINE_PRINTED.store(true, Ordering::Relaxed);
   thread::sleep(Duration::from_millis(50));
   util::terminate(0);
 }

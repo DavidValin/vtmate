@@ -104,7 +104,7 @@ pub fn tts_thread(
   interrupt_counter: Arc<AtomicU64>,
   rx_tts: Receiver<(String, u64, String)>,
   stop_play_tx: Sender<()>,
-  tx_tts_done: Sender<()>,
+  tx_tts_done: Sender<u64>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   loop {
     crate::log::log("info", "🔄 TTS thread waiting for next phrase...");
@@ -115,6 +115,19 @@ pub fn tts_thread(
           Ok(v) => v,
           Err(_) => break,
         };
+        // Anything queued before the last interruption belongs to a turn the
+        // user has moved on from: drop it, and everything else waiting behind
+        // it, instead of speaking it. Without this, moving to another phrase
+        // still had to sit through the synthesis of the one left behind.
+        if interrupt_counter.load(std::sync::atomic::Ordering::SeqCst) != expected_interrupt {
+          crate::log::log(
+            "debug",
+            "TTS: phrase from a cancelled turn, not spoken",
+          );
+          let _ = stop_play_tx.try_send(());
+          let _ = tx_tts_done.try_send(expected_interrupt);
+          continue;
+        }
         let state = GLOBAL_STATE.get().expect("AppState not initialized");
         // crate::log::log("info", &format!("TTS received phrase (len={}), expected_interrupt={}", phrase.len(), expected_interrupt));
 
@@ -150,19 +163,18 @@ pub fn tts_thread(
         match outcome {
           Ok(o) => {
             if o == crate::tts::SpeakOutcome::Interrupted {
-              // Drain any remaining phrases that might be queued
-              loop {
-                match rx_tts.try_recv() {
-                  Ok(_) => { continue; },
-                  Err(_) => break,
-                }
-              }
+              // Do not empty the queue here. Whatever was queued before the
+              // interruption is recognised and discarded as it is taken off
+              // the queue, one by one, while a phrase queued *after* it (the
+              // one the user just chose) is still wanted. Emptying the queue
+              // threw that one away too, and whoever was waiting for it then
+              // waited for a phrase that no longer existed.
               let _ = stop_play_tx.try_send(());
               // Signal completion before continuing
-              let _ = tx_tts_done.try_send(());
+              let _ = tx_tts_done.try_send(expected_interrupt);
               continue;
             }
-            let _ = tx_tts_done.try_send(());
+            let _ = tx_tts_done.try_send(expected_interrupt);
           }
           Err(_e) => {
             crate::log::log("error", &format!("TTS error. Can't play audio speech. Make sure OpenTTS is running: docker run --rm -p 5500:5500 synesthesiam/opentts:all"));
@@ -170,7 +182,7 @@ pub fn tts_thread(
             // the thread alive — a transient failure (e.g. OpenTTS briefly unreachable)
             // shouldn't permanently kill voice output or drop rx_tts, which would make
             // read-file mode's tx_tts.send(...).unwrap() panic on the next phrase.
-            let _ = tx_tts_done.try_send(());
+            let _ = tx_tts_done.try_send(expected_interrupt);
             continue;
           }
         }

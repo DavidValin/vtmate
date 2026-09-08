@@ -265,7 +265,11 @@ pub fn _strip_ansi(s: &str) -> String {
 /// a phrase, and every '.' inside a line ends one too. Returns
 /// `(display_text, tts_text)` pairs; `tts_text` has fenced ``` code removed
 /// and special characters stripped (it can be empty for code-only phrases).
-pub fn split_text_for_tts(content: &str) -> Vec<(String, String)> {
+/// `skip_code` decides whether fenced ``` code is spoken. An agent's reply
+/// skips it, since hearing brackets and punctuation read out is useless. Text
+/// you asked to have read, with `-r` or the read-aloud shortcut, keeps it: the
+/// code is part of what you asked for.
+pub fn split_text_for_tts(content: &str, skip_code: bool) -> Vec<(String, String)> {
   let mut phrases: Vec<String> = Vec::new();
   let mut current = String::new();
   for line in content.lines() {
@@ -301,13 +305,24 @@ pub fn split_text_for_tts(content: &str) -> Vec<(String, String)> {
   phrases
     .into_iter()
     .map(|p| {
-      let tts = tts_text(&p, &mut in_code);
+      let tts = if skip_code {
+        tts_text(&p, &mut in_code)
+      } else {
+        // keep the code, only drop the fence markers themselves
+        strip_special_chars(&p.replace("```", " "))
+      };
       (p, tts)
     })
     .collect()
 }
 
 static EXIT_HOOK: OnceLock<Box<dyn Fn() + Send + Sync>> = OnceLock::new();
+
+/// Set when the caller has already written the last line the user should read.
+/// Exiting normally wipes the bottom line (that is where the status bar sits),
+/// which would erase that message if the screen had not scrolled it up first.
+pub static EXIT_LINE_PRINTED: std::sync::atomic::AtomicBool =
+  std::sync::atomic::AtomicBool::new(false);
 
 /// Register a function that `terminate` runs before exiting (the daemon uses
 /// it to remove its pid and socket files). Only the first hook is kept.
@@ -322,18 +337,24 @@ pub fn run_exit_hook() {
 }
 
 pub fn terminate(code: i32) -> ! {
+  // no more bottom bars: whatever is on screen now is the last thing shown
+  crate::ui::UI_SHUTDOWN.store(true, std::sync::atomic::Ordering::Relaxed);
   run_exit_hook();
    // Disable raw mode if enabled, to restore terminal state
    let _ = crossterm::terminal::disable_raw_mode();
   // show cursor and clear bottom line before exiting
   let mut stdout = std::io::stdout();
   let (_cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
-  let _ = execute!(
-    stdout,
-    MoveTo(0, rows.saturating_sub(1)),
-    Clear(ClearType::CurrentLine),
-    Show
-  );
+  if EXIT_LINE_PRINTED.load(std::sync::atomic::Ordering::Relaxed) {
+    let _ = execute!(stdout, Show);
+  } else {
+    let _ = execute!(
+      stdout,
+      MoveTo(0, rows.saturating_sub(1)),
+      Clear(ClearType::CurrentLine),
+      Show
+    );
+  }
   stdout.flush().ok();
   thread::sleep(Duration::from_millis(100));
   process::exit(code);

@@ -27,7 +27,7 @@ pub struct ControllerInputs {
   pub rx_client: Receiver<ClientEvent>,
   pub tx_ui: Sender<String>,
   pub tx_tts: Sender<(String, u64, String)>,
-  pub tts_done_rx: Receiver<()>,
+  pub tts_done_rx: Receiver<u64>,
   pub tx_utt: Sender<crate::audio::Utterance>,
   pub stop_play_tx: Sender<()>,
   pub tx_cmd_conv: Sender<crate::conversation::Command>,
@@ -113,7 +113,7 @@ struct Controller {
   hotkeys: HotkeySet,
   tx_ui: Sender<String>,
   tx_tts: Sender<(String, u64, String)>,
-  tts_done_rx: Receiver<()>,
+  tts_done_rx: Receiver<u64>,
   tx_utt: Sender<crate::audio::Utterance>,
   stop_play_tx: Sender<()>,
   tx_cmd_conv: Sender<crate::conversation::Command>,
@@ -256,7 +256,9 @@ impl Controller {
       _ => None,
     };
     self.sent_selection_text = Some(text.clone());
-    let phrases: Vec<String> = crate::util::split_text_for_tts(&text)
+    // reading a selection aloud speaks its code too, like `-r` does: only an
+    // agent's own replies skip over fenced code
+    let phrases: Vec<String> = crate::util::split_text_for_tts(&text, false)
       .into_iter()
       .map(|(_, tts)| tts)
       .filter(|t| !t.trim().is_empty())
