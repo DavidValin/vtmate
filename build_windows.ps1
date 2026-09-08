@@ -193,11 +193,13 @@ foreach ($dir in $TARGET_DIR, $DIST_DIR, $VENDOR_DIR) {
 if ($WITH_CUDA) {
     # One toolkit minor per CUDA major (keep in sync with the windows-x64
     # matrix in .github/workflows/build.yml, which installs it ahead of this
-    # script on CI). Both accept the runners' MSVC: CUDA 12.3 rejected
-    # MSVC >= 19.40 (crt/host_config.h); 12.8 and 13.3 allow VS 2019-2026.
-    # 12.8 is also what Microsoft builds the CUDA 12 ONNX Runtime package
-    # with, so the runtime this variant asks for is never older than what
-    # that package expects. cuDNN and the ORT package follow the major.
+    # script on CI). Each toolkit caps the host MSVC it accepts in
+    # crt/host_config.h - 12.3 rejected MSVC >= 19.40, and 12.8 rejects the
+    # 19.5x that Visual Studio 18 ships - so the CI matrix pins the cuda
+    # variants to a VS 2022 image and a local build needs a VS 2022 toolset
+    # too. 12.8 is also what Microsoft builds the CUDA 12 ONNX Runtime
+    # package with, so the runtime this variant asks for is never older than
+    # what that package expects. cuDNN and the ORT package follow the major.
     switch ($CUDA_MAJOR) {
         12 { $CUDA_VERSION = "12.8.1"; $CUDA_MM = "12.8"; $ORT_PKG = "onnxruntime-win-x64-gpu" }
         13 { $CUDA_VERSION = "13.3.0"; $CUDA_MM = "13.3"; $ORT_PKG = "onnxruntime-win-x64-gpu_cuda13" }
