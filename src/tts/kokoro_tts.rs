@@ -227,10 +227,6 @@ pub const _DEFAULT_KOKORO_VOICES_PER_LANGUAGE: &[(&str, &str)] = &[
 // PRIVATE
 // ------------------------------------------------------------------
 
-// smaller chunks reduce long synth stalls -> fewer underruns/glitches.
-// (Words are variable length; 10–15 is a safer range for real-time streaming.)
-const MAX_CHUNK_SIZE: usize = 10;
-
 impl StreamingTts {
   pub fn new(engine: Arc<Mutex<TtsEngine>>) -> Self {
     Self {
@@ -246,26 +242,6 @@ impl StreamingTts {
     self.voice = voice.to_string();
   }
 
-  fn split_into_chunks(text: &str) -> Vec<String> {
-    let mut chunks = Vec::new();
-    let mut current = String::new();
-    let mut count = 0;
-    for word in text.split_whitespace() {
-      current.push_str(word);
-      current.push(' ');
-      count += 1;
-      if count >= MAX_CHUNK_SIZE {
-        chunks.push(current.trim().to_string());
-        current.clear();
-        count = 0;
-      }
-    }
-    if !current.trim().is_empty() {
-      chunks.push(current.trim().to_string());
-    }
-    chunks
-  }
-
   pub async fn speak_stream(
     &self,
     text: &str,
@@ -278,7 +254,13 @@ impl StreamingTts {
     self.is_speaking.store(true, Ordering::Relaxed);
     self.interrupt_flag.store(false, Ordering::Relaxed);
 
-    let chunks = Self::split_into_chunks(text);
+    // The whole phrase goes to kokoro-micro in one piece. It splits on real
+    // sentence and clause boundaries in any script and packs to the model's
+    // context length, so cutting the text up here first only served to reset
+    // prosody mid-sentence. `util::split_text_for_tts` has already broken the
+    // reply into phrases upstream, which is what keeps playback streaming and
+    // bounds how long an interrupt takes to land.
+    let phrase = text.to_string();
     let engine = self.engine.clone();
     let voice = self.voice.clone();
     let gain = self.gain;
@@ -287,41 +269,34 @@ impl StreamingTts {
 
     let language = language.to_string();
     let handle = thread::spawn(move || {
-      for chunk in chunks {
-        if interrupt_flag_thread.load(Ordering::Relaxed) {
-          break;
-        }
-        if let Ok(mut e) = engine.lock() {
-          if let Ok(mut samples) = e.synthesize_with_options(
-            &chunk,
-            Some(&voice),
-            crate::state::get_speed(),
-            gain,
-            Some(&language),
-          ) {
-            // sanitize output samples (prevents nasty noise if NaN/Inf/out-of-range)
-            for s in &mut samples {
-              if !s.is_finite() {
-                *s = 0.0;
-              } else {
-                *s = s.clamp(-1.0, 1.0);
-              }
-            }
-            let audio = AudioChunk {
-              data: samples,
-              channels: 1,
-              sample_rate: 24000,
-            };
-            // crate::log::log("debug", &format!("[kokoro_tts] Generated chunk: len {} samples, sr {}", audio.data.len(), audio.sample_rate));
-            if interrupt_flag_thread.load(Ordering::Relaxed) {
-              break;
-            }
-            if tx.send(audio).is_err() {
-              break;
-            }
+      if interrupt_flag_thread.load(Ordering::Relaxed) {
+        return;
+      }
+      let Ok(mut e) = engine.lock() else {
+        return;
+      };
+      if let Ok(mut samples) = e.synthesize_with_options(
+        &phrase,
+        Some(&voice),
+        crate::state::get_speed(),
+        gain,
+        Some(&language),
+      ) {
+        // sanitize output samples (prevents nasty noise if NaN/Inf/out-of-range)
+        for s in &mut samples {
+          if !s.is_finite() {
+            *s = 0.0;
+          } else {
+            *s = s.clamp(-1.0, 1.0);
           }
-        } else {
-          break;
+        }
+        let audio = AudioChunk {
+          data: samples,
+          channels: 1,
+          sample_rate: 24000,
+        };
+        if !interrupt_flag_thread.load(Ordering::Relaxed) {
+          let _ = tx.send(audio);
         }
       }
     });
