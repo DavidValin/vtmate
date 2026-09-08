@@ -174,7 +174,6 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 ```
 
 * By default all agents are set in `PTT` mode, you have to keep `SPACE` pressed to talk. If you want to use `LIVE` mode, make sure you adjust your microphone levels correctly and adjust `sound_threshold_peak` and `end_silence_ms` settings to your need
-* ⚠️ Currently you cannot mix kokoro with the supertonic/supersonic tts systems (pick one).
 * Source code is never sent to TTS: anything wrapped in ``` fences (in LLM replies or in files read with `-r`) is displayed but skipped when speaking.
 * Voice mixing is supported for kokoro TTS system only, you can create a voice by mixing 2 kokoro voices by percentage. Example mixing 50% of bm_daniel and 50% of am_puck: set voice name to `bm_daniel.5+am_puck.5`
 
