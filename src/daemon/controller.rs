@@ -3,7 +3,7 @@
 //  paste / reset / read-aloud actions
 // ------------------------------------------------------------------
 
-use super::desktop::Desktop;
+use super::desktop::{Desktop, SelectionAge};
 use super::hotkeys::{Hotkey, HotkeySet};
 use super::server::{ClientEvent, registry};
 use crate::conversation::DaemonAction;
@@ -54,6 +54,8 @@ pub fn controller_thread(inputs: ControllerInputs) {
     key_state: KeyLocalState::default(),
     tts_job: None,
     last_reset_press: None,
+    sent_selection_stamp: None,
+    sent_selection_text: None,
   };
   let rx_hotkey = GlobalHotKeyEvent::receiver();
   loop {
@@ -123,6 +125,10 @@ struct Controller {
   tts_job: Option<JoinHandle<()>>,
   /// Reset hotkey: once stops the speech, twice within a second resets.
   last_reset_press: Option<Instant>,
+  /// The selection sent with the previous message, so the same one is not
+  /// sent again: its X timestamp, and its text for platforms with no stamp.
+  sent_selection_stamp: Option<u32>,
+  sent_selection_text: Option<String>,
 }
 
 impl Controller {
@@ -283,23 +289,51 @@ impl Controller {
     }));
   }
 
-  /// The text selected right now, or nothing when nothing is selected.
-  /// X11 keeps serving the last selected text after the selection is gone,
-  /// so the answer comes from whether the selection still has an owner:
-  /// text still highlighted is sent again, a dropped selection is not.
+  /// The text to attach to this message: what was selected since the previous
+  /// one. X11 keeps serving the last selected text long after the highlight is
+  /// gone and cannot say whether one is still visible, so a selection is only
+  /// attached once. Select the text again to send it again.
   fn current_selection(&mut self) -> Option<String> {
     if !self.desktop.selection_present() {
       crate::log::log("debug", "nothing selected: no text attached");
       return None;
     }
-    let attachment = self.desktop.read_selection();
-    if let Some(a) = &attachment {
+    let age = self.desktop.selection_stamp();
+    let attachment = self.desktop.read_selection()?;
+    let already_sent = match age {
+      // dated by the X server: only a selection newer than the last one counts
+      SelectionAge::At(now) => Some(now) == self.sent_selection_stamp,
+      // left over from before vtmate started watching: not for this message
+      SelectionAge::Older => true,
+      // undatable: the best we can do is refuse to send the same text twice
+      SelectionAge::Unknown => self.sent_selection_text.as_ref() == Some(&attachment),
+    };
+    crate::log::log(
+      "debug",
+      &format!(
+        "selection {:?} (last sent {:?}), {} characters",
+        age,
+        self.sent_selection_stamp,
+        attachment.chars().count()
+      ),
+    );
+    if already_sent {
       crate::log::log(
         "debug",
-        &format!("attaching {} selected characters", a.chars().count()),
+        "this selection was not made since the last message: select the text again to send it",
       );
+      return None;
     }
-    attachment
+    self.sent_selection_stamp = match age {
+      SelectionAge::At(now) => Some(now),
+      _ => None,
+    };
+    self.sent_selection_text = Some(attachment.clone());
+    crate::log::log(
+      "debug",
+      &format!("attaching {} selected characters", attachment.chars().count()),
+    );
+    Some(attachment)
   }
 
   /// Reset hotkey, like ESC in the terminal: once stops the speech (and
@@ -327,6 +361,8 @@ impl Controller {
   fn reset_conversation(&mut self) {
     self.interrupt_speech();
     self.last_reset_press = None;
+    // the selection memory deliberately survives a reset: a selection you did
+    // not touch is still not one you picked for the next message
     if matches!(
       self.active_ptt,
       Some(PttSource::HotkeyLlm) | Some(PttSource::HotkeyPaste)

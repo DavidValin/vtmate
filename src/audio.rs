@@ -3,6 +3,7 @@
 // ------------------------------------------------------------------
 
 use cpal::traits::{DeviceTrait, HostTrait};
+use std::time::{Duration, Instant};
 use std::path::Path;
 
 // API
@@ -160,10 +161,20 @@ impl Drop for QuietProbe {
   }
 }
 
-/// A microphone that can actually be opened. The stream used to test it is
-/// closed before returning: the device must not be held while the models
-/// load, recording opens it on demand.
-pub fn pick_input_stream(host: &cpal::Host) -> Result<cpal::Device, String> {
+/// A microphone that actually delivers audio, together with the configuration
+/// it was verified with. Opening a device is not enough: a device can accept
+/// the settings recording will use and then never hand over a single sample
+/// (ALSA does this when a sound server holds the card), which looks exactly
+/// like a working microphone that hears nothing. So each candidate is asked
+/// for real data in the very configuration recording will use, and one that
+/// stays silent is passed over.
+///
+/// The test stream is closed before returning: the device must not be held
+/// while the models load, recording opens it on demand.
+pub fn pick_input_stream(
+  host: &cpal::Host,
+  preferred_sr: u32,
+) -> Result<(cpal::Device, cpal::SupportedStreamConfig), String> {
   let err = || {
     "No usable microphone stream could be opened.\n".to_string()
       + "    • On MacOS: System Settings → Privacy & Security → Microphone → allow your app/Terminal\n"
@@ -172,46 +183,61 @@ pub fn pick_input_stream(host: &cpal::Host) -> Result<cpal::Device, String> {
   };
   let _quiet = QuietProbe::new();
   let attempt_dev = |dev: cpal::Device,
-                     tried: &mut Vec<String>|
-   -> Option<cpal::Device> {
-    let cfg = match dev.default_input_config() {
+                     tried: &mut Vec<String>,
+                     require_sound: bool|
+   -> Option<(cpal::Device, cpal::SupportedStreamConfig)> {
+    // the configuration recording will use, so the test proves what matters
+    let cfg = match crate::config::pick_input_config(&dev, preferred_sr) {
       Ok(c) => c,
-      Err(e) => {
-        tried.push(attempt(&dev, &e.to_string()));
-        return None;
-      }
+      Err(_) => match dev.default_input_config() {
+        Ok(c) => c,
+        Err(e) => {
+          tried.push(attempt(&dev, &e.to_string()));
+          return None;
+        }
+      },
     };
-    match probe_input(&dev, &cfg) {
-      Ok(stream) => {
+    match probe_input(&dev, &cfg, require_sound) {
+      Ok(()) => {
         log_picked("input", &dev, &cfg);
-        drop(stream);
-        Some(dev)
+        Some((dev, cfg))
       }
       Err(e) => {
-        tried.push(attempt(&dev, &e.to_string()));
+        tried.push(attempt(&dev, &e));
         None
       }
     }
   };
   let mut tried: Vec<String> = Vec::new();
-  let mut default_name = None;
-  if let Some(dev) = host.default_input_device() {
-    default_name = dev.name().ok();
-    if let Some(found) = attempt_dev(dev, &mut tried) {
-      return Ok(found);
+  // First pass: a microphone that hands over real sound. Second pass: accept
+  // one that only produces digital silence, so a muted or very quiet
+  // microphone still starts vtmate instead of failing outright.
+  for require_sound in [true, false] {
+    let mut default_name = None;
+    if let Some(dev) = host.default_input_device() {
+      default_name = dev.name().ok();
+      if let Some(found) = attempt_dev(dev, &mut tried, require_sound) {
+        return Ok(found);
+      }
     }
-  }
-  crate::log::log(
-    "debug",
-    "the default microphone is unusable, looking for another device",
-  );
-  for dev in candidate_devices(
-    host.input_devices().ok().map(|d| d.collect()),
-    Direction::Input,
-    default_name,
-  ) {
-    if let Some(found) = attempt_dev(dev, &mut tried) {
-      return Ok(found);
+    crate::log::log(
+      "debug",
+      "the default microphone is unusable, looking for another device",
+    );
+    for dev in candidate_devices(
+      host.input_devices().ok().map(|d| d.collect()),
+      Direction::Input,
+      default_name,
+    ) {
+      if let Some(found) = attempt_dev(dev, &mut tried, require_sound) {
+        return Ok(found);
+      }
+    }
+    if require_sound {
+      crate::log::log(
+        "debug",
+        "no microphone produced sound; accepting a silent one on a second pass",
+      );
     }
   }
   Err(err() + &tried_report(&tried))
@@ -310,18 +336,66 @@ fn probe_output(
   }
 }
 
+/// Open the microphone exactly as recording will and listen briefly.
+///
+/// A device can accept the settings and then hand over nothing, or hand over
+/// perfect digital silence: on Linux that is what raw ALSA does while a sound
+/// server holds the card, and it is indistinguishable from a working
+/// microphone until you try to speak. A real microphone always carries some
+/// noise, so `require_sound` asks for at least one sample that is not exactly
+/// silent.
 fn probe_input(
   dev: &cpal::Device,
   supported: &cpal::SupportedStreamConfig,
-) -> Result<cpal::Stream, cpal::BuildStreamError> {
+  require_sound: bool,
+) -> Result<(), String> {
+  use cpal::traits::StreamTrait;
+  use std::sync::Arc;
+  use std::sync::atomic::{AtomicBool, Ordering};
   let cfg: cpal::StreamConfig = supported.clone().into();
+  let data = Arc::new(AtomicBool::new(false));
+  let sound = Arc::new(AtomicBool::new(false));
   let quiet = |_e: cpal::StreamError| {};
-  match supported.sample_format() {
-    cpal::SampleFormat::F32 => dev.build_input_stream(&cfg, |_d: &[f32], _| {}, quiet, None),
-    cpal::SampleFormat::I16 => dev.build_input_stream(&cfg, |_d: &[i16], _| {}, quiet, None),
-    cpal::SampleFormat::U16 => dev.build_input_stream(&cfg, |_d: &[u16], _| {}, quiet, None),
-    other => Err(unsupported(other)),
+  macro_rules! watch {
+    ($t:ty, $silent:expr) => {{
+      let (d, s) = (data.clone(), sound.clone());
+      dev.build_input_stream(
+        &cfg,
+        move |buf: &[$t], _| {
+          if buf.is_empty() {
+            return;
+          }
+          d.store(true, Ordering::Relaxed);
+          if buf.iter().any(|v| *v != $silent) {
+            s.store(true, Ordering::Relaxed);
+          }
+        },
+        quiet,
+        None,
+      )
+    }};
   }
+  let stream = match supported.sample_format() {
+    cpal::SampleFormat::F32 => watch!(f32, 0.0),
+    cpal::SampleFormat::I16 => watch!(i16, 0),
+    // unsigned silence sits at the middle of the range, not at zero
+    cpal::SampleFormat::U16 => watch!(u16, 32_768),
+    other => return Err(unsupported(other).to_string()),
+  }
+  .map_err(|e| e.to_string())?;
+  stream.play().map_err(|e| e.to_string())?;
+  let deadline = Instant::now() + Duration::from_millis(700);
+  while Instant::now() < deadline {
+    if sound.load(Ordering::Relaxed) || (!require_sound && data.load(Ordering::Relaxed)) {
+      return Ok(()); // closed on return, recording reopens it on demand
+    }
+    std::thread::sleep(Duration::from_millis(10));
+  }
+  Err(if data.load(Ordering::Relaxed) {
+    "opened but recorded only silence".to_string()
+  } else {
+    "opened but delivered no audio".to_string()
+  })
 }
 
 fn attempt(dev: &cpal::Device, why: &str) -> String {

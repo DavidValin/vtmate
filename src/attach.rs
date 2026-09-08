@@ -135,7 +135,7 @@ pub fn run(args: &crate::config::Args) -> ! {
   let detached_msg = "detached, vtmate daemon still running (stop it with `vtmate --daemon-stop`)";
   loop {
     if let Some(reason) = exit_reason.lock().unwrap().clone() {
-      finish(&format!("{}", reason));
+      finish("info", &format!("{}", reason));
     }
     if event::poll(Duration::from_millis(50)).unwrap_or(false) {
       if let Ok(Event::Key(k)) = event::read() {
@@ -143,10 +143,10 @@ pub fn run(args: &crate::config::Args) -> ! {
           && matches!(k.code, KeyCode::Char('c') | KeyCode::Char('C'));
         if ctrl_c {
           let _ = ipc::write_msg(&mut writer, &ClientMsg::Detach);
-          finish(detached_msg);
+          finish("info", detached_msg);
         }
         if ipc::write_msg(&mut writer, &ClientMsg::Key(k)).is_err() {
-          finish("connection to the daemon lost");
+          finish("error", "connection to the daemon lost");
         }
       }
     }
@@ -156,9 +156,10 @@ pub fn run(args: &crate::config::Args) -> ! {
 // PRIVATE
 // ------------------------------------------------------------------
 
-fn finish(msg: &str) -> ! {
+fn finish(level: &str, msg: &str) -> ! {
   let _ = terminal::disable_raw_mode();
-  print!("\r\n{}\r\n", msg);
+  print!("\r\n");
+  crate::log::notice(level, msg);
   thread::sleep(Duration::from_millis(50));
   util::terminate(0);
 }

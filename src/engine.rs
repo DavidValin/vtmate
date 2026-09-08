@@ -112,14 +112,21 @@ pub fn start(
   log::log("info", &format!("Whisper model path: {}", whisper_path));
 
   let host = cpal::default_host();
-  let in_dev = audio::pick_input_stream(&host).unwrap_or_else(|msg| {
-    log::log("error", &format!("{}", msg));
-    util::terminate(1)
-  });
   let out_dev = audio::pick_output_stream(&host).unwrap_or_else(|msg| {
     log::log("error", &format!("{}", msg));
     util::terminate(1)
   });
+  // the output rate decides which capture configuration is preferred, so the
+  // microphone is chosen and verified against the settings it will really use
+  let out_rate_hint = out_dev
+    .default_output_config()
+    .map(|c| c.sample_rate().0)
+    .unwrap_or(48_000);
+  let (in_dev, in_cfg_supported) =
+    audio::pick_input_stream(&host, out_rate_hint).unwrap_or_else(|msg| {
+      log::log("error", &format!("{}", msg));
+      util::terminate(1)
+    });
   log::log(
     "info",
     &format!(
@@ -140,7 +147,6 @@ pub fn start(
   let out_sample_rate = out_cfg.sample_rate.0;
   let out_channels = out_cfg.channels;
 
-  let in_cfg_supported = config::pick_input_config(&in_dev, out_sample_rate)?;
   let in_cfg: cpal::StreamConfig = in_cfg_supported.clone().into();
 
   log::log(

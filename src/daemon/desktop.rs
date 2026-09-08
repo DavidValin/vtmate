@@ -12,20 +12,38 @@ use std::time::{Duration, Instant};
 // API
 // ------------------------------------------------------------------
 
+/// When the current selection was made, as far as vtmate can tell.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum SelectionAge {
+  /// There is no way to date selections here: not X11, or no XFixes. Callers
+  /// fall back to comparing the text itself.
+  Unknown,
+  /// Nothing has been selected since vtmate started watching, so whatever the
+  /// selection holds was left there earlier and is not for this message.
+  Older,
+  /// The X server's timestamp for the current selection.
+  At(u32),
+}
+
 /// Longest selection appended to a turn / read aloud.
 pub const MAX_SELECTION_CHARS: usize = 20_000;
+
+/// How long the dictated text stays on the clipboard after the paste
+/// keystroke, before the previous content is restored.
+const CLIPBOARD_HOLD_MS: u64 = 1200;
 
 /// Owned and used by the daemon controller thread only. Kept alive for the
 /// whole daemon life: on Linux the clipboard content we set is served by
 /// this process while the `Clipboard` lives.
 pub struct Desktop {
   clipboard: Option<arboard::Clipboard>,
+  /// X server timestamp of the current selection, kept up to date by the
+  /// XFixes watcher; `None` when nothing is selected or it was selected
+  /// before vtmate started.
+  #[cfg(target_os = "linux")]
+  selection_stamp: Arc<Mutex<SelectionAge>>,
   #[cfg_attr(target_os = "linux", allow(dead_code))]
   enigo: Option<Enigo>,
-  /// Whether anything currently owns the PRIMARY selection, i.e. whether
-  /// text is selected right now; fed by the XFixes watcher.
-  #[cfg(target_os = "linux")]
-  selection_present: Arc<Mutex<bool>>,
 }
 
 impl Desktop {
@@ -45,8 +63,8 @@ impl Desktop {
       }
     };
     #[cfg(target_os = "linux")]
-    let selection_present = {
-      let slot = Arc::new(Mutex::new(true));
+    let selection_stamp = {
+      let slot = Arc::new(Mutex::new(SelectionAge::Older));
       spawn_selection_watch(slot.clone());
       slot
     };
@@ -54,19 +72,57 @@ impl Desktop {
       clipboard,
       enigo,
       #[cfg(target_os = "linux")]
-      selection_present,
+      selection_stamp,
+    }
+  }
+
+  /// Identity of the current selection: the X server time at which it was
+  /// made. It changes every time the user selects something, including
+  /// re-selecting the same words, which is what tells a selection made for
+  /// this message apart from one left over from an earlier one.
+  ///
+  /// `None` when it cannot be known (no X11, or an owner that does not answer
+  /// the TIMESTAMP request every selection owner is supposed to answer);
+  /// callers then fall back to comparing the text itself.
+  pub fn selection_stamp(&self) -> SelectionAge {
+    #[cfg(target_os = "linux")]
+    {
+      self
+        .selection_stamp
+        .lock()
+        .map(|s| *s)
+        .unwrap_or(SelectionAge::Unknown)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+      SelectionAge::Unknown
     }
   }
 
   /// Whether text is selected right now. `false` means the selection was
   /// dropped (nothing owns it) and the stale text it held must not be used.
   ///
+  /// Asked of the X server at the moment of the call rather than tracked in
+  /// the background, so it cannot go stale. The owning window is logged, so
+  /// `--verbose` shows which application still claims a selection when one
+  /// is attached unexpectedly.
+  ///
   /// Windows / macOS capture the selection with a copy shortcut at the
   /// moment of the request, so it is always what is highlighted right now.
   pub fn selection_present(&self) -> bool {
     #[cfg(target_os = "linux")]
     {
-      self.selection_present.lock().map(|p| *p).unwrap_or(true)
+      match x11_primary_owner() {
+        Ok(None) => false,
+        Ok(Some(owner)) => {
+          crate::log::log("debug", &format!("selection owned by {}", owner));
+          true
+        }
+        Err(e) => {
+          crate::log::log("debug", &format!("cannot read the selection owner: {}", e));
+          true // no answer from X: fall back to reading the selection
+        }
+      }
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -156,9 +212,35 @@ impl Desktop {
         return;
       }
     }
-    std::thread::sleep(Duration::from_millis(40));
+    // Taking ownership of the clipboard happens on another thread, and the
+    // application we paste into asks whoever owns it at that moment. Pasting
+    // too early hands it the text of the previous owner, so wait until the
+    // clipboard really reads back as ours.
+    let deadline = Instant::now() + Duration::from_millis(1500);
+    let mut owned = false;
+    while Instant::now() < deadline {
+      if self
+        .clipboard
+        .as_mut()
+        .and_then(|c| c.get_text().ok())
+        .as_deref()
+        == Some(text)
+      {
+        owned = true;
+        break;
+      }
+      std::thread::sleep(Duration::from_millis(20));
+    }
+    if !owned {
+      crate::log::log(
+        "warning",
+        "the clipboard did not accept the dictated text; pasting anyway",
+      );
+    }
     self.send_combo('v');
-    std::thread::sleep(Duration::from_millis(250));
+    // The text is fetched lazily, after the keystroke arrives: put the old
+    // clipboard back only once the application has had time to ask for it.
+    std::thread::sleep(Duration::from_millis(CLIPBOARD_HOLD_MS));
     if let (Some(cb), Some(old)) = (self.clipboard.as_mut(), old) {
       let _ = cb.set_text(old);
     }
@@ -247,24 +329,61 @@ pub fn notify(title: &str, body: &str) {
   }
 }
 
-/// Watch the PRIMARY selection through XFixes: it has an owner exactly while
-/// text is selected somewhere, so ownership tells us whether a selection
-/// exists right now, which reading the selection cannot (it keeps serving the
-/// last text an application put there).
+/// Who owns the PRIMARY selection right now: `None` when nothing does, so
+/// nothing is selected anywhere on the desktop. The returned text names the
+/// owning window, for the log.
 #[cfg(target_os = "linux")]
-fn spawn_selection_watch(slot: Arc<Mutex<bool>>) {
+fn x11_primary_owner() -> Result<Option<String>, String> {
+  use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as _};
+  let (conn, _) = x11rb::connect(None).map_err(|e| e.to_string())?;
+  let owner = conn
+    .get_selection_owner(u32::from(AtomEnum::PRIMARY))
+    .map_err(|e| e.to_string())?
+    .reply()
+    .map_err(|e| e.to_string())?
+    .owner;
+  if owner == x11rb::NONE {
+    return Ok(None);
+  }
+  // best effort name, purely for the log
+  let name = conn
+    .get_property(false, owner, AtomEnum::WM_CLASS, AtomEnum::STRING, 0, 64)
+    .ok()
+    .and_then(|c| c.reply().ok())
+    .map(|r| {
+      String::from_utf8_lossy(&r.value)
+        .split('\0')
+        .find(|s| !s.is_empty())
+        .unwrap_or("")
+        .to_string()
+    })
+    .filter(|n| !n.is_empty())
+    .unwrap_or_else(|| "an application".to_string());
+  Ok(Some(format!("{} (window 0x{:x})", name, owner)))
+}
+
+/// Watch selection ownership through XFixes and keep the X server's own
+/// timestamp for the current selection. The server stamps every change, so
+/// this works with every application, unlike asking the owner (which many
+/// answer badly or not at all).
+#[cfg(target_os = "linux")]
+fn spawn_selection_watch(slot: Arc<Mutex<SelectionAge>>) {
   let _ = std::thread::Builder::new()
     .name("selection-watch".into())
     .spawn(move || {
       use x11rb::connection::Connection;
       use x11rb::protocol::Event;
       use x11rb::protocol::xfixes::{ConnectionExt as _, SelectionEventMask};
-      use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as _};
-      let disabled = |why: String| {
+      use x11rb::protocol::xproto::AtomEnum;
+      let slot_for_failure = slot.clone();
+      let disabled = move |why: String| {
+        if let Ok(mut s) = slot_for_failure.lock() {
+          *s = SelectionAge::Unknown;
+        }
         crate::log::log(
           "debug",
           &format!(
-            "selection watch disabled ({}): the selection is read without checking it still exists",
+            "selection timestamps unavailable ({}): falling back to comparing the text",
             why
           ),
         );
@@ -278,14 +397,6 @@ fn spawn_selection_watch(slot: Arc<Mutex<bool>>) {
         Ok(Ok(_)) => {}
         Ok(Err(e)) => return disabled(format!("XFixes: {}", e)),
         Err(e) => return disabled(format!("XFixes: {}", e)),
-      }
-      if let Ok(Ok(r)) = conn
-        .get_selection_owner(u32::from(AtomEnum::PRIMARY))
-        .map(|c| c.reply())
-      {
-        if let Ok(mut s) = slot.lock() {
-          *s = r.owner != x11rb::NONE;
-        }
       }
       let mask = SelectionEventMask::SET_SELECTION_OWNER
         | SelectionEventMask::SELECTION_WINDOW_DESTROY
@@ -301,10 +412,13 @@ fn spawn_selection_watch(slot: Arc<Mutex<bool>>) {
       loop {
         match conn.wait_for_event() {
           Ok(Event::XfixesSelectionNotify(ev)) => {
-            // owner NONE: the selection was dropped (deselected, window
-            // closed). Any other owner: text is selected right now.
             if let Ok(mut s) = slot.lock() {
-              *s = ev.owner != x11rb::NONE;
+              // a new selection was made (or the old one dropped)
+              *s = if ev.owner == x11rb::NONE {
+                SelectionAge::Older
+              } else {
+                SelectionAge::At(ev.selection_timestamp)
+              };
             }
           }
           Ok(_) => {}

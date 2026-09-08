@@ -38,6 +38,30 @@ pub fn set_file_sink(path: &std::path::Path) -> std::io::Result<()> {
   Ok(())
 }
 
+/// A line that answers a command rather than reporting a diagnostic ("you are
+/// now detached"): same look as the log, always shown, and printed straight to
+/// the terminal because it is written while the UI is being torn down.
+pub fn notice(msg_type: &str, msg: &str) {
+  if let Some(sink) = FILE_SINK.get() {
+    if let Ok(mut f) = sink.lock() {
+      let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+      let _ = writeln!(f, "{} [{}] {}", ts, msg_type, msg);
+    }
+  }
+  print!("\r\x1b[K{}  \x1b[90m{}\x1b[0m\r\n", emoji_for(msg_type), msg);
+  let _ = std::io::Write::flush(&mut std::io::stdout());
+}
+
+fn emoji_for(msg_type: &str) -> &'static str {
+  match msg_type {
+    "debug" => "🐛",
+    "info" => "ℹ️",
+    "warning" => "⚠️",
+    "error" => "❌",
+    _ => "",
+  }
+}
+
 pub fn log(msg_type: &str, msg: &str) {
   if !is_verbose() && msg_type != "error" && msg_type != "warning" {
     return;
@@ -48,14 +72,7 @@ pub fn log(msg_type: &str, msg: &str) {
       let _ = writeln!(f, "{} [{}] {}", ts, msg_type, msg);
     }
   }
-  let emoji = match msg_type {
-    "debug" => "🐛",
-    "info" => "ℹ️",
-    "warning" => "⚠️",
-    "error" => "❌",
-    _ => "",
-  };
-  let formatted = format!("\r\x1b[K{}  \x1b[90m{}\x1b[0m\n", emoji, msg);
+  let formatted = format!("\r\x1b[K{}  \x1b[90m{}\x1b[0m\n", emoji_for(msg_type), msg);
   if let Some(sender) = TX_UI.get() {
     // The UI channel is bounded(1) and is drained only by the conversation-mode
     // UI loop, so in read-file mode or while the UI is busy the line may not be
