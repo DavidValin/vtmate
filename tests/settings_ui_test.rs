@@ -606,3 +606,57 @@ fn tab_in_the_form_goes_straight_to_its_done_button() {
   press(&state, KeyCode::Enter);
   assert_eq!(ui(&state).screen, settings_ui::Screen::List);
 }
+
+#[test]
+fn the_arrows_walk_the_prompt_lines_before_leaving_the_field() {
+  let state = session(SETTINGS);
+  settings_ui::open(&state);
+  press(&state, KeyCode::Char('e'));
+  let prompt = settings_ui::FIELDS.len() - 1; // the prompt is the last field
+  for _ in 0..13 {
+    press(&state, KeyCode::Down);
+  }
+  assert_eq!(ui(&state).form.cursor, prompt);
+  // coming down into it, editing starts on the first line
+  assert_eq!(ui(&state).form.caret, 0, "the prompt is entered at its start");
+
+  // give it three lines to walk
+  press(&state, KeyCode::End);
+  press(&state, KeyCode::Enter);
+  type_text(&state, "two");
+  press(&state, KeyCode::Enter);
+  type_text(&state, "three");
+  assert_eq!(ui(&state).form.draft.system_prompt.lines().count(), 3);
+
+  // from the last line, up walks the lines rather than leaving the field
+  press(&state, KeyCode::Up);
+  assert_eq!(ui(&state).form.cursor, prompt, "still in the prompt");
+  press(&state, KeyCode::Up);
+  assert_eq!(ui(&state).form.cursor, prompt, "still in the prompt");
+  // and only once there is no line above does it move to the field before it
+  press(&state, KeyCode::Up);
+  assert_eq!(ui(&state).form.cursor, prompt - 1, "left the prompt at its top");
+
+  // back down into it: first line again, then a line per press
+  press(&state, KeyCode::Down);
+  assert_eq!(ui(&state).form.cursor, prompt);
+  assert_eq!(ui(&state).form.caret, 0);
+  press(&state, KeyCode::Down);
+  press(&state, KeyCode::Down);
+  assert_eq!(ui(&state).form.cursor, prompt, "still walking the lines");
+  // past the last line, on to the button after the fields
+  press(&state, KeyCode::Down);
+  assert!(on_done(&ui(&state)), "left the prompt at its bottom");
+
+  // coming back up into it lands on the last line, not the first, so the
+  // arrow that follows keeps walking upwards through the prompt
+  press(&state, KeyCode::Up);
+  assert_eq!(ui(&state).form.cursor, prompt);
+  assert_eq!(
+    ui(&state).form.caret,
+    ui(&state).form.draft.system_prompt.chars().count(),
+    "the prompt is entered at its end when coming up into it"
+  );
+  press(&state, KeyCode::Up);
+  assert_eq!(ui(&state).form.cursor, prompt, "still in the prompt");
+}

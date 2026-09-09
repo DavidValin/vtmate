@@ -531,7 +531,7 @@ fn form_key(ui: &mut SettingsUi, k: &KeyEvent) {
       } else {
         FIELDS.len() // any field -> Done
       };
-      place_caret_at_end(ui);
+      place_caret(ui, true);
       return;
     }
     KeyCode::BackTab => {
@@ -626,17 +626,21 @@ fn move_cursor(ui: &mut SettingsUi, forward: bool, last: usize) {
   } else {
     ui.form.cursor - 1
   };
-  place_caret_at_end(ui);
+  place_caret(ui, forward);
 }
 
-/// The caret lands at the end of whatever text the field under the cursor
-/// holds, and at 0 when the cursor is on a button.
-fn place_caret_at_end(ui: &mut SettingsUi) {
-  ui.form.caret = ui
-    .form
-    .field()
-    .map(|f| field_text(&ui.form.draft, f).chars().count())
-    .unwrap_or(0);
+/// Where the caret lands when the cursor arrives on a field: at the end of a
+/// one line value, so typing carries on from what is there, and on the near
+/// edge of the system prompt - its first line when coming down into it, its
+/// last when coming up. Landing on the far edge would send the very next
+/// arrow press straight back out of the prompt, with no way to walk its lines
+/// from the side the cursor came from.
+fn place_caret(ui: &mut SettingsUi, forward: bool) {
+  ui.form.caret = match ui.form.field() {
+    Some(Field::SystemPrompt) if forward => 0,
+    Some(field) => field_text(&ui.form.draft, field).chars().count(),
+    None => 0,
+  };
 }
 
 /// Move the caret one line up or down inside the prompt. `false` when there
