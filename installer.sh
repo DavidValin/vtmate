@@ -68,6 +68,13 @@ say()  { printf '%s\n' "$*"; }
 warn() { printf '⚠️  %s\n' "$*"; }
 die()  { printf '❌ %s\n' "$*" >&2; exit 1; }
 
+# colour only when stdout is a terminal, so redirected output stays plain
+if [ -t 1 ]; then
+  GREEN="$(printf '\033[32m')"; RESET="$(printf '\033[0m')"
+else
+  GREEN=""; RESET=""
+fi
+
 have_tty() { [ -r /dev/tty ] && [ -w /dev/tty ]; }
 
 # ask "question" "default"  -> prints the answer (default when non-interactive)
@@ -607,4 +614,8 @@ case "$INSTALLED" in
     say "Installed the vulkan build. It needs the Vulkan loader (libvulkan.so.1 / vulkan-1.dll) from your GPU driver." ;;
 esac
 say "✅ Installed $INSTALLED to $BIN_DIR"
-path_has "$BIN_DIR" || say "Open a new terminal, then run: $APP"
+if path_has "$BIN_DIR"; then
+  printf "\n You can run '%s%s%s' now !\n\n" "$GREEN" "$APP" "$RESET"
+else
+  say "Open a new terminal, then run: $APP"
+fi
