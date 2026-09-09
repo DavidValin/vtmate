@@ -87,7 +87,7 @@ jobs:
             # Linux: build_linux.sh already packaged the .tgz, so add the PDF
             # by peeling off the gzip layer, appending to the tar and
             # recompressing - the built archive is otherwise untouched.
-            if find "$dir" -name '*.tgz' | grep -q .; then
+            if [ -n "$(find "$dir" -name '*.tgz' -print -quit)" ]; then
               while IFS= read -r tgz; do
                 out="assets/$(basename "$tgz")"
                 gzip -dc "$tgz" > "${out%.tgz}.tar"
@@ -101,7 +101,7 @@ jobs:
 
             # Windows: a directory holding the exe, plus the ONNX Runtime,
             # cuDNN and cuBLAS DLLs for the CUDA variant.
-            if find "$dir" -name '*.exe' | grep -q .; then
+            if [ -n "$(find "$dir" -name '*.exe' -print -quit)" ]; then
               ( cd "$dir" && zip -qr "${GITHUB_WORKSPACE}/assets/vtmate-${VERSION}-${name}.zip" . )
               echo "packaged (zip): $name"
               continue
@@ -121,7 +121,11 @@ jobs:
           set -euo pipefail
           for a in assets/*.tgz; do
             [ -e "$a" ] || continue
-            tar -tzf "$a" | grep -qx 'README.pdf' || {
+            # Read the whole listing first: piping tar straight into grep -q
+            # lets grep exit on the match while tar is still writing, and the
+            # resulting EPIPE trips pipefail even though the PDF is there.
+            listing="$(tar -tzf "$a")"
+            grep -qxF 'README.pdf' <<<"$listing" || {
               echo "README.pdf missing from $a" >&2; exit 1; }
             echo "ok: $a"
           done
