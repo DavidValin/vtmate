@@ -57,7 +57,7 @@ https://github.com/user-attachments/assets/8b9e982c-ba97-4aeb-8e55-1db6a92bc164
 - 📌 Save audio speech of a text file or STDIN content
 - 📌 Load separate settings file with different agents
 - 📌 Integrated `whisper` speech recognition system (no external intallation required)
-- 📌 Integrated `kokoro TTS`, `supersonic 2 TTS` and `supertonic TTS` (Supertonic 3, 31 languages) systems (no external intallation required)
+- 📌 Integrated `kokoro TTS`, `supersonic 2 TTS` and `supertonic TTS` systems (no external intallation required)
 - 📌 Interface with `OpenTTS` system (requires external docker service)
 - 📌 Source code in the replies (text inside ``` blocks) is shown on screen but never spoken
 - 📌 Use any gguf model from huggingface.com (using llama-server), any ollama model, or a hosted provider (OpenAI, Anthropic, Google, Groq, Mistral, OpenRouter, DeepSeek, xAI)
@@ -585,7 +585,7 @@ vtmate --help
 
 ## Language support
 
-Engines: **SS2** Supersonic 2 (5 languages, 10 voices: M1-M5, F1-F5), **ST3** Supertonic 3 (31 languages, its own 10 voices: M1-M5, F1-F5, usable in every one of its languages), **KK** Kokoro, **OpenTTS** (external docker service).
+Engines: **SS2** Supersonic 2 (5 languages, 10 voices: M1-M5, F1-F5), **ST3** Supertonic 3 (31 languages, its own 10 voices: M1-M5, F1-F5, usable in every one of its languages), **KK** Kokoro (8 languages), **OpenTTS** (external docker service). Total languages: 41.
 
 | ID |           Language       |      Support       |        TTS supported                          |   Number of voices  |
 |----|--------------------------|--------------------|-----------------------------------------------------------|-------------|
