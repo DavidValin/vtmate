@@ -88,7 +88,8 @@ PYIMG
 <style>
   @page { size: A4; margin: 18mm 16mm; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  body { font: 11pt/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  /* Everything else is sized in em, so this one value scales the document. */
+  body { font: 9.5pt/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
          color: #1f2328; margin: 0; }
   h1, h2, h3, h4 { line-height: 1.25; margin: 1.4em 0 .5em; break-after: avoid; }
   h1 { font-size: 1.9em; border-bottom: 1px solid #d1d9e0; padding-bottom: .3em; }
