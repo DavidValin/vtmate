@@ -99,6 +99,9 @@ pub fn spawn_detached(args: &Args) -> ! {
   if args.save {
     cmd.arg("-s");
   }
+  if args.save_html {
+    cmd.arg("--save-html");
+  }
   cmd
     .stdin(Stdio::null())
     .stdout(Stdio::null())

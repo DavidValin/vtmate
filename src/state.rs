@@ -96,6 +96,8 @@ pub struct AppState {
   pub debate_subject: Arc<Mutex<String>>,
   pub debate_agents: Arc<Mutex<Vec<crate::config::AgentSettings>>>,
   pub debate_turn: Arc<AtomicU64>,
+  /// `--max-turns`: debate replies to run before exiting; 0 means no limit.
+  pub max_turns: Arc<AtomicU64>,
   pub debate_paused: Arc<AtomicBool>,
   pub debate_modal_visible: Arc<AtomicBool>,
   pub debate_modal_selected_agent1: Arc<Mutex<usize>>,
@@ -165,6 +167,7 @@ impl AppState {
       debate_subject: Arc::new(Mutex::new(String::new())),
       debate_agents: Arc::new(Mutex::new(Vec::new())),
       debate_turn: Arc::new(AtomicU64::new(0)),
+      max_turns: Arc::new(AtomicU64::new(0)),
       debate_paused: Arc::new(AtomicBool::new(false)),
       debate_modal_visible: Arc::new(AtomicBool::new(false)),
       debate_modal_selected_agent1: Arc::new(Mutex::new(0)),

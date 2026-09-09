@@ -452,7 +452,7 @@ const PAGE: &str = r##"<!doctype html>
 html{scroll-behavior:smooth}
 body{
   margin:0; background:var(--bg); color:var(--fg);
-  font:14px/1.6 var(--mono);
+  font:16px/1.65 var(--mono);
   padding-bottom:40vh;
 }
 header{
@@ -463,10 +463,10 @@ header{
 }
 .brand{font-weight:700; letter-spacing:.02em; white-space:nowrap}
 .brand small{font-weight:400; color:var(--dim)}
-.who{color:var(--dim); font-size:12px; flex:1; min-width:120px}
+.who{color:var(--dim); font-size:13px; flex:1; min-width:120px}
 .controls{display:flex; align-items:center; gap:6px}
 button,select{
-  font:13px/1.4 var(--mono); color:var(--fg); background:var(--panel);
+  font:15px/1.4 var(--mono); color:var(--fg); background:var(--panel);
   border:1px solid var(--line); border-radius:var(--radius); padding:7px 10px;
   cursor:pointer; transition:border-color .15s, transform .1s;
 }
@@ -474,7 +474,7 @@ button:hover,select:hover{border-color:var(--dim)}
 button:active{transform:translateY(1px)}
 button:disabled{opacity:.4; cursor:default}
 #play{min-width:96px; font-weight:700}
-#counter{color:var(--dim); font-size:12px; min-width:62px; text-align:center}
+#counter{color:var(--dim); font-size:14px; min-width:62px; text-align:center}
 #theme{min-width:78px; text-align:left}
 main{max-width:840px; margin:0 auto; padding:26px 16px 0}
 .turn{
@@ -496,9 +496,9 @@ main{max-width:840px; margin:0 auto; padding:26px 16px 0}
   box-shadow:0 0 0 1px var(--accent), 0 10px 26px -18px var(--shadow);
 }
 .head{display:flex; align-items:center; gap:9px; margin-bottom:6px}
-.name{color:var(--accent); font-weight:700; font-size:12px; letter-spacing:.08em; text-transform:uppercase}
-.badge{color:var(--dim); font-size:11px; border:1px solid var(--line); border-radius:20px; padding:0 7px}
-.play-turn{padding:1px 8px; border-radius:20px; font-size:11px; color:var(--dim)}
+.name{color:var(--accent); font-weight:700; font-size:13px; letter-spacing:.08em; text-transform:uppercase}
+.badge{color:var(--dim); font-size:12px; border:1px solid var(--line); border-radius:20px; padding:0 7px}
+.play-turn{padding:2px 9px; border-radius:20px; font-size:12px; color:var(--dim)}
 .turn.active .play-turn{color:var(--accent); border-color:var(--accent)}
 .body p{margin:.35em 0; white-space:pre-wrap; overflow-wrap:anywhere}
 .body p.empty{color:var(--dim)}
@@ -511,17 +511,17 @@ main{max-width:840px; margin:0 auto; padding:26px 16px 0}
 .bar{height:2px; margin-top:11px; background:var(--line); border-radius:2px; overflow:hidden; opacity:0}
 .turn.active .bar{opacity:1}
 .bar i{display:block; height:100%; width:0; background:var(--accent)}
-footer{max-width:840px; margin:34px auto 0; padding:20px 16px 60px; border-top:1px solid var(--line); color:var(--dim); font-size:12px}
+footer{max-width:840px; margin:34px auto 0; padding:20px 16px 60px; border-top:1px solid var(--line); color:var(--dim); font-size:13px}
 .cards{display:flex; flex-wrap:wrap; gap:10px; margin:14px 0}
 .card{flex:1 1 250px; background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:11px 13px}
-.card h3{margin:0 0 8px; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--fg)}
-dl{display:grid; grid-template-columns:auto 1fr; gap:3px 12px; margin:0; font-size:12px}
+.card h3{margin:0 0 8px; font-size:13px; letter-spacing:.08em; text-transform:uppercase; color:var(--fg)}
+dl{display:grid; grid-template-columns:auto 1fr; gap:3px 12px; margin:0; font-size:13px}
 dt{color:var(--dim)}
 dd{margin:0; overflow-wrap:anywhere}
 dd.prompt{white-space:pre-wrap; max-height:7em; overflow:auto}
 a{color:inherit}
 .hint{margin-top:9px}
-kbd{border:1px solid var(--line); border-bottom-width:2px; border-radius:4px; padding:0 5px; font-size:11px}
+kbd{border:1px solid var(--line); border-bottom-width:2px; border-radius:4px; padding:0 5px; font-size:12px}
 </style>
 </head>
 <body>

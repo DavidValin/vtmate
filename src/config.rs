@@ -249,6 +249,14 @@ pub struct Args {
   pub debate: Option<Vec<String>>,
 
   #[arg(
+    long = "max-turns",
+    value_name = "N",
+    value_parser = clap::value_parser!(u64).range(1..),
+    help = "end the program after N debate turns (one agent reply is one turn)"
+  )]
+  pub max_turns: Option<u64>,
+
+  #[arg(
     short = 'r',
     long = "read-file",
     value_name = "FILENAME",

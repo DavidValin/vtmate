@@ -649,6 +649,10 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   ));
 
   *state.ptt_override.lock().unwrap() = args.ptt;
+  // caps a debate however it was started: --debate, or Control+D later on
+  state
+    .max_turns
+    .store(args.max_turns.unwrap_or(0), Ordering::SeqCst);
   state::GLOBAL_STATE.set(state.clone()).unwrap();
 
   // If initial prompt provided, process it before starting conversation thread

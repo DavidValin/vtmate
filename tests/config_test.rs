@@ -100,6 +100,7 @@ fn default_args() -> Args {
     quiet: false,
     save: false,
     save_html: false,
+    max_turns: None,
     daemon: false,
     daemon_foreground: false,
     daemon_stop: false,
@@ -297,6 +298,7 @@ voice_speed = 5.0
     quiet: false,
     save: false,
     save_html: false,
+    max_turns: None,
     daemon: false,
     daemon_foreground: false,
     daemon_stop: false,
@@ -372,6 +374,7 @@ voice_speed = 5.0
     quiet: false,
     save: false,
     save_html: false,
+    max_turns: None,
     daemon: false,
     daemon_foreground: false,
     daemon_stop: false,
@@ -817,4 +820,38 @@ fn save_html_is_accepted_in_both_spellings_and_is_independent_from_save() {
   // -s alone must not turn the html export on
   let txt_only = parse(&["vtmate", "--save"]);
   assert!(txt_only.save && !txt_only.save_html);
+}
+
+/// `--max-turns` caps a debate; it takes a count of one or more and is optional.
+#[test]
+fn max_turns_is_optional_and_refuses_a_zero_count() {
+  use clap::Parser;
+  let parse = |argv: &[&str]| config::Args::try_parse_from(config::normalize_argv(argv.to_vec()));
+
+  assert_eq!(parse(&["vtmate"]).unwrap().max_turns, None);
+  assert_eq!(
+    parse(&["vtmate", "--debate", "a", "b", "why", "--max-turns", "6"])
+      .unwrap()
+      .max_turns,
+    Some(6)
+  );
+  // a debate of zero turns is not a debate
+  assert!(parse(&["vtmate", "--max-turns", "0"]).is_err());
+  assert!(parse(&["vtmate", "--max-turns", "-1"]).is_err());
+}
+
+/// The daemon is voice-only and hotkey driven: a debate cannot run inside it.
+#[test]
+fn debate_cannot_be_combined_with_daemon_mode() {
+  use clap::Parser;
+  let parse = |argv: &[&str]| config::Args::try_parse_from(config::normalize_argv(argv.to_vec()));
+
+  // each on its own is fine
+  assert!(parse(&["vtmate", "--debate", "god", "devil", "why"]).is_ok());
+  assert!(parse(&["vtmate", "--daemon"]).is_ok());
+
+  // together they are refused, whichever order they are written in
+  assert!(parse(&["vtmate", "--daemon", "--debate", "god", "devil", "why"]).is_err());
+  assert!(parse(&["vtmate", "--debate", "god", "devil", "why", "--daemon"]).is_err());
+  assert!(parse(&["vtmate", "--daemon-foreground", "--debate", "god", "devil", "why"]).is_err());
 }

@@ -260,6 +260,7 @@ All cli options:
   --debate <AGENT1> <AGENT2> [SUBJECT]  initialize a debate between 2 agents with an initial prompt
   --debate <AGENT1> <AGENT2> -i <FILE>  initialize a debate between 2 agents with an initial prompt from file
   --debate <AGENT1> <AGENT2> -i –       initialize a debate between 2 agents with an initial prompt from STDIN
+  --max-turns <N>                       end the program after N debate turns (one agent reply is one turn)
   -r <file.txt>                         read a file with voice, phrase by phrase (no llm involved)
   -r -                                  read text from STDIN with voice, phrase by phrase (no llm involved). Use - for STDIN (runs in quiet mode)
   -c <settings_file>                    use a specific settings file
@@ -367,6 +368,11 @@ cat "Lets discuss the permissions of this files: \n\n $(ls -la)" > prompt.txt
 vtmate --debate "Unix administrator" "Security Expert" -i prompt.txt --ptt true
 ```
 
+Start a debate that ends by itself after 10 turns
+```
+vtmate --debate "God" "Devil" "How to succeed in life?" --ptt true --max-turns 10
+```
+
 * When running in LIVE mode just talk. You can also pause/resume recording by pressing `SPACE` once
 * When running in PTT mode: keep `SPACE` pushed while talking, and then release
 * Press `SCAPE` **once** during a mid response to cancel it and stop the debate
@@ -374,6 +380,7 @@ vtmate --debate "Unix administrator" "Security Expert" -i prompt.txt --ptt true
 * Press double `u` to undo last response
 * You can also start/stop a debate from conversation mode by pressing `Control+D` and picking the debate agents.
 * Be able to save the conversation in a wav and text file by adding `-s` option. It will save it in `~/.vtmate/conversations` folder
+* Add `--max-turns <N>` to end the program by itself after N turns, where one agent reply is one turn. The debate stops after that reply is spoken and saved, so nothing is cut mid sentence. A debate restarted with `Control+D` gets the same limit again
 * [Here is an example](https://gist.github.com/DavidValin/58cf130c4f7b2ea9a6a033bf37bc1cda) on how to create automated audio debates from youtube videos using vtmate in combination with other tools
 * For quick reference get the printable [Quicksheet (PDF)](https://raw.githubusercontent.com/DavidValin/vtmate/refs/heads/main/docs/en/quicksheet.pdf)
 

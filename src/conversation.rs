@@ -384,7 +384,19 @@ pub fn conversation_thread(
           // Increment turn only if not interrupted
           if interrupt_counter.load(Ordering::SeqCst) == my_interrupt {
             if !state.debate_paused.load(Ordering::SeqCst) {
-              state.debate_turn.fetch_add(1, Ordering::SeqCst);
+              let turns_done = state.debate_turn.fetch_add(1, Ordering::SeqCst) + 1;
+              let max_turns = state.max_turns.load(Ordering::SeqCst);
+              // the reply is saved and its audio has drained by now, so this is
+              // where --max-turns can end the debate without cutting anything
+              if max_turns > 0 && turns_done >= max_turns {
+                crate::log::notice(
+                  "info",
+                  &format!("--max-turns {} reached, ending the debate", max_turns),
+                );
+                crate::util::EXIT_LINE_PRINTED.store(true, Ordering::Relaxed);
+                thread::sleep(Duration::from_millis(50));
+                terminate(0);
+              }
             }
           }
 
