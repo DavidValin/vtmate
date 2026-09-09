@@ -408,6 +408,11 @@ pub fn split_leading_sections(text: &str) -> LeadingSections {
           true,
         );
         cur = Cur::Rest;
+      } else if let Some(without_crlf) = line.strip_suffix("\r\n") {
+        // a body is text for the llm: keep it CRLF-free even in a file
+        // written on windows
+        prompt_body.push_str(without_crlf);
+        prompt_body.push('\n');
       } else {
         prompt_body.push_str(line);
       }
@@ -506,9 +511,6 @@ fn take_body(body: &mut String) -> String {
   let mut out = std::mem::take(body);
   if out.ends_with('\n') {
     out.pop();
-    if out.ends_with('\r') {
-      out.pop();
-    }
   }
   out
 }

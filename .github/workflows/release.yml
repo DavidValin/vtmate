@@ -73,13 +73,29 @@ jobs:
           fi
           mkdir -p assets
 
+          # Rendered by build.yml's docs job. Every .tgz carries a copy at its
+          # top level, beside the binary, so the manual ships with the release.
+          PDF="$(find artifacts/readme-pdf -name README.pdf | head -1)"
+          [ -n "$PDF" ] || { echo "README.pdf missing from build artifacts" >&2; exit 1; }
+          PDF_DIR="$(dirname "$PDF")"
+
           for dir in artifacts/*/; do
             name="$(basename "$dir")"
+            # The PDF is an input to the loop, not a variant of its own.
+            if [ "$name" = readme-pdf ]; then continue; fi
 
-            # Linux: build_linux.sh already packaged the .tgz - take it as is.
+            # Linux: build_linux.sh already packaged the .tgz, so add the PDF
+            # by peeling off the gzip layer, appending to the tar and
+            # recompressing - the built archive is otherwise untouched.
             if find "$dir" -name '*.tgz' | grep -q .; then
-              find "$dir" -name '*.tgz' -exec cp {} assets/ \;
-              echo "packaged (pre-built archive): $name"
+              while IFS= read -r tgz; do
+                out="assets/$(basename "$tgz")"
+                gzip -dc "$tgz" > "${out%.tgz}.tar"
+                tar -rf "${out%.tgz}.tar" -C "$PDF_DIR" README.pdf
+                gzip -n -c "${out%.tgz}.tar" > "$out"
+                rm -f "${out%.tgz}.tar"
+              done < <(find "$dir" -name '*.tgz')
+              echo "packaged (pre-built archive + README.pdf): $name"
               continue
             fi
 
@@ -92,12 +108,23 @@ jobs:
             fi
 
             # macOS: a bare binary.
+            cp "$PDF" "$dir"
             ( cd "$dir" && tar -czf "${GITHUB_WORKSPACE}/assets/vtmate-${VERSION}-${name}.tgz" -- * )
-            echo "packaged (tgz): $name"
+            echo "packaged (tgz + README.pdf): $name"
           done
 
           echo "--- assets ---"
           ls -lh assets
+
+      - name: Verify README.pdf reached every tgz
+        run: |
+          set -euo pipefail
+          for a in assets/*.tgz; do
+            [ -e "$a" ] || continue
+            tar -tzf "$a" | grep -qx 'README.pdf' || {
+              echo "README.pdf missing from $a" >&2; exit 1; }
+            echo "ok: $a"
+          done
 
       - name: Fail if no assets were produced
         run: |

@@ -563,6 +563,16 @@ fn malformed_blocks_and_unknown_refs_are_reported() {
 }
 
 #[test]
+fn a_crlf_body_arrives_without_carriage_returns() {
+  let sections =
+    split_leading_sections("[system_prompt]\r\nname = a\r\n---\r\nline one\r\nline two\r\n---\r\n");
+  assert_eq!(
+    sections.prompts.get("a").map(|s| s.as_str()),
+    Some("line one\nline two")
+  );
+}
+
+#[test]
 fn system_prompt_header_is_case_insensitive() {
   let sections = split_leading_sections("[SYSTEM_PROMPT]\nname = a\n---\nbody\n---\n");
   assert!(sections.unknown.is_empty(), "{:?}", sections.unknown);

@@ -176,6 +176,10 @@ ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 ```
 
+* By default all agents are set in `PTT` mode, you have to keep `SPACE` pressed to talk. If you want to use `LIVE` mode, make sure you adjust your microphone levels correctly and adjust `sound_threshold_peak` and `end_silence_ms` settings to your need
+* Source code in an agent's reply is not spoken: anything wrapped in ``` fences is shown but skipped. Reading a file with `-r` does speak it, since the code is part of what you asked to have read.
+* Voice mixing is supported for kokoro TTS system only, you can create a voice by mixing 2 kokoro voices by percentage. Example mixing 50% of bm_daniel and 50% of am_puck: set voice name to `bm_daniel.5+am_puck.5`
+
 ### Reusable system prompts
 
 A long system prompt is easier to write and to share between agents in its own `[system_prompt]` section. The block has a `name` and then the prompt body fenced between two lines of three or more dashes, and agents pull it in with `@<name>`:
@@ -204,10 +208,6 @@ system_prompt = @planner
 * Close a body that itself contains a `---` line with a longer fence (`----`), the same way as markdown code fences.
 * Define as many blocks as you want, in any order, and reference one from as many agents as you want.
 * Inline prompts keep working exactly as before: `system_prompt = "You are a nice ai agent\nreply nicely"` turns `\n` into a new line. Start an inline prompt with `@@` if you need it to begin with a literal `@`.
-
-* By default all agents are set in `PTT` mode, you have to keep `SPACE` pressed to talk. If you want to use `LIVE` mode, make sure you adjust your microphone levels correctly and adjust `sound_threshold_peak` and `end_silence_ms` settings to your need
-* Source code in an agent's reply is not spoken: anything wrapped in ``` fences is shown but skipped. Reading a file with `-r` does speak it, since the code is part of what you asked to have read.
-* Voice mixing is supported for kokoro TTS system only, you can create a voice by mixing 2 kokoro voices by percentage. Example mixing 50% of bm_daniel and 50% of am_puck: set voice name to `bm_daniel.5+am_puck.5`
 
 To see explanation of each field:
 ```

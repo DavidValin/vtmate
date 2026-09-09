@@ -21,6 +21,29 @@ on:
 
 jobs:
 
+  # The README rendered to PDF, shipped inside every release archive so the
+  # docs travel with the binary (diagrams included). One job, not one per
+  # variant: the output is identical everywhere, and release.yml injects it
+  # into each archive. Chrome and node come preinstalled on the runner image;
+  # scripts/readme-pdf.sh fails loudly if either is missing.
+  docs:
+    name: README PDF
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Render README.pdf
+        run: |
+          chmod +x scripts/readme-pdf.sh
+          ./scripts/readme-pdf.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: readme-pdf
+          path: README.pdf
+          if-no-files-found: error
+
   linux:
     name: Linux Build (${{ matrix.arch }}, ${{ matrix.variant }})
     runs-on: ${{ matrix.runner }}
