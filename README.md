@@ -4,6 +4,11 @@
 
 The final AI voice conversational system all running in your terminal! vtmate is a Powerful terminal-based voice ai toolkit with many realistic voices, extremely low latency, 41 languages supported. Allows you to voice conversate with local ai models (or cloud based), pipe data and save into files. 
 
+### Quick installation
+```
+curl -fsSL https://raw.githubusercontent.com/DavidValin/vtmate/main/installer.sh | sh
+```
+
 The program self contains (1.5GB) all TTS models and voices and necessary files to recognize speech and speak with voice with no external installations ensuring maximum portability.
 
 * [⬇️ Download](https://github.com/DavidValin/vtmate/releases) (⭐ MacOS ⭐ Linux and ⭐ Windows supported)
@@ -603,28 +608,28 @@ Engines: **SS2** Supersonic 2 (5 languages, 10 voices: M1-M5, F1-F5), **ST3** Su
 | ru |   🇷🇺  Russian            |  🥈 Good support   |    ❌ SS2    ✅ ST3    ❌ KK    ✅ OpenTTS     | 11 voices
 | sv |   🇸🇪  Swedish            |  🥈 Good support   |    ❌ SS2    ✅ ST3    ❌ KK    ✅ OpenTTS     | 11 voices
 | tr |   🇹🇷  Turkish            |  🥈 Good support   |    ❌ SS2    ✅ ST3    ❌ KK    ✅ OpenTTS     | 11 voices
-| bn |   🇧🇩  Bengali            |  Supported        |    ❌ SS2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
-| ca |   🇪🇸  Catalan            |  Supported        |    ❌ SS2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
-| gu |   🇮🇳  Gujarati           |  Supported        |    ❌ SS2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
-| kn |   🇮🇳  Kannada            |  Supported        |    ❌ SS2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
-| mr |   🇮🇳  Marathi            |  Supported        |    ❌ SS2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
-| pa |   🇮🇳  Punjabi            |  Supported        |    ❌ SS2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
-| sw |   🇰🇪  Swahili            |  Supported        |    ❌ SS2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
-| ta |   🇮🇳  Tamil              |  Supported        |    ❌ SS2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
-| te |   🇮🇳  Telugu             |  Supported        |    ❌ SS2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
-| bg |   🇧🇬  Bulgarian          |  Supported        |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
-| hr |   🇭🇷  Croatian           |  Supported        |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
-| da |   🇩🇰  Danish             |  Supported        |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
-| et |   🇪🇪  Estonian           |  Supported        |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
-| id |   🇮🇩  Indonesian         |  Supported        |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
-| lv |   🇱🇻  Latvian            |  Supported        |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
-| lt |   🇱🇹  Lithuanian         |  Supported        |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
-| pl |   🇵🇱  Polish             |  Supported        |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
-| ro |   🇷🇴  Romanian           |  Supported        |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
-| sk |   🇸🇰  Slovak             |  Supported        |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
-| sl |   🇸🇮  Slovenian          |  Supported        |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
-| uk |   🇺🇦  Ukrainian          |  Supported        |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
-| vi |   🇻🇳  Vietnamese         |  Supported        |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
+| bg |   🇧🇬  Bulgarian          |  Supported         |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
+| hr |   🇭🇷  Croatian           |  Supported         |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
+| da |   🇩🇰  Danish             |  Supported         |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
+| et |   🇪🇪  Estonian           |  Supported         |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
+| id |   🇮🇩  Indonesian         |  Supported         |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
+| lv |   🇱🇻  Latvian            |  Supported         |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
+| lt |   🇱🇹  Lithuanian         |  Supported         |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
+| pl |   🇵🇱  Polish             |  Supported         |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
+| ro |   🇷🇴  Romanian           |  Supported         |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
+| sk |   🇸🇰  Slovak             |  Supported         |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
+| sl |   🇸🇮  Slovenian          |  Supported         |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
+| uk |   🇺🇦  Ukrainian          |  Supported         |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
+| vi |   🇻🇳  Vietnamese         |  Supported         |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
+| bn |   🇧🇩  Bengali            |  Supported         |    ❌ SS2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
+| ca |   🇪🇸  Catalan            |  Supported         |    ❌ SS2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
+| gu |   🇮🇳  Gujarati           |  Supported         |    ❌ SS2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
+| kn |   🇮🇳  Kannada            |  Supported         |    ❌ SS2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
+| mr |   🇮🇳  Marathi            |  Supported         |    ❌ SS2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
+| pa |   🇮🇳  Punjabi            |  Supported         |    ❌ SS2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
+| sw |   🇰🇪  Swahili            |  Supported         |    ❌ SS2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
+| ta |   🇮🇳  Tamil              |  Supported         |    ❌ SS2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
+| te |   🇮🇳  Telugu             |  Supported         |    ❌ SS2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
 
 Run `vtmate --list-voices` to print every voice for every language and TTS system.
 
