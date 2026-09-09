@@ -37,7 +37,9 @@ pub enum SpeakOutcome {
 
 static KOKORO_ENGINE: OnceLock<Arc<Mutex<TtsEngine>>> = OnceLock::new();
 static SUPSONIC_ENGINE: OnceLock<Arc<Mutex<SupersonicTtsEngine>>> = OnceLock::new();
-static SUPERTONIC_ENGINE: OnceLock<Arc<supertonic3_tts::TtsEngine>> = OnceLock::new();
+/// Replaceable, unlike the two above: when the GPU refuses mid-synthesis the
+/// engine is rebuilt on the CPU in place (supertonic_tts::rebuild_on_cpu).
+static SUPERTONIC_ENGINE: Mutex<Option<Arc<supertonic3_tts::TtsEngine>>> = Mutex::new(None);
 
 // Supported languages for Supersonic2 TTS
 static SUPSONIC_LANGS: &[&str] = &["en", "es", "fr", "ko", "pt"];
@@ -176,8 +178,19 @@ pub fn tts_thread(
             }
             let _ = tx_tts_done.try_send(expected_interrupt);
           }
-          Err(_e) => {
-            crate::log::log("error", &format!("TTS error. Can't play audio speech. Make sure OpenTTS is running: docker run --rm -p 5500:5500 synesthesiam/opentts:all"));
+          Err(e) => {
+            // The OpenTTS hint only makes sense for the OpenTTS engine; on a
+            // local engine it sent people chasing a container that was never
+            // involved, while the real cause went unnamed.
+            let hint = if tts_val == "opentts" {
+              " - make sure OpenTTS is running: docker run --rm -p 5500:5500 synesthesiam/opentts:all"
+            } else {
+              ""
+            };
+            crate::log::log(
+              "error",
+              &format!("TTS error [{}]. Can't play audio speech: {}{}", tts_val, e, hint),
+            );
             // Signal completion so callers waiting on this phrase don't hang, but keep
             // the thread alive — a transient failure (e.g. OpenTTS briefly unreachable)
             // shouldn't permanently kill voice output or drop rx_tts, which would make

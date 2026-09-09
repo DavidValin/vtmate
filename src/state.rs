@@ -255,6 +255,7 @@ impl AppState {
     self.conversation_history.lock().unwrap().clear();
     *self.save_path.lock().unwrap() = None;
     *self.start_date.lock().unwrap() = String::new();
+    crate::html_export::reset();
   }
 }
 

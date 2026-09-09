@@ -103,9 +103,11 @@ One line, on Linux, macOS and Windows (Git Bash):
 ```
 curl -fsSL https://raw.githubusercontent.com/DavidValin/vtmate/main/installer.sh | sh
 ```
-The installer detects your OS, CPU and GPU (CUDA, Vulkan or CPU), asks whether to install for your user or system-wide, downloads the matching release, puts `vtmate` on your `$PATH` and its libraries in a fixed location (`<prefix>/lib/vtmate` on Linux, `...\vtmate\lib` on Windows). If the chosen GPU build cannot start on your machine it falls back to the next one. Reinstalling backs up `~/.vtmate/settings` to `~/.vtmate/settings.backup.<time>`.
+The installer detects your OS, C library, CPU and GPU (CUDA, Vulkan or CPU), asks whether to install for your user or system-wide, downloads the matching release, puts `vtmate` on your `$PATH` and its libraries in a fixed location (`<prefix>/lib/vtmate` on Linux, `...\vtmate\lib` on Windows). If the chosen GPU build cannot start on your machine it falls back to the next one. Reinstalling backs up `~/.vtmate/settings` to `~/.vtmate/settings.backup.<time>`.
 
-Options: `--scope user|system`, `--prefix DIR`, `--variant cpu|vulkan|cuda`, `--version TAG`, `--yes`, `--dry-run`, `--uninstall` (also removes `~/.vtmate`).
+Options: `--scope user|system`, `--prefix DIR`, `--variant cpu|cpu-static|vulkan|cuda`, `--version TAG`, `--yes`, `--dry-run`, `--uninstall` (also removes `~/.vtmate`).
+
+On Linux there are two CPU builds and the installer picks between them by your C library, not your distro: `cpu` is built against glibc and plays through whatever sound server you run (PulseAudio, PipeWire), while `cpu-static` is a fully static musl binary that runs anywhere but can only reach ALSA hardware devices directly. Machines with glibc 2.39 or newer get `cpu`; older ones, and musl systems like Alpine, get `cpu-static`. The `vulkan` and `cuda` builds are glibc-only, since the GPU loaders they dlopen are.
 
 Or download a release by hand from `https://github.com/DavidValin/vtmate/releases` and put the binary in a folder in your $PATH (keep the `.so`/`.dll` files of the cuda build next to it).
 

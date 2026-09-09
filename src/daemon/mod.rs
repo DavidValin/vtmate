@@ -395,6 +395,7 @@ pub fn run_foreground(args: &Args) -> ! {
     engine::EngineOptions {
       quiet: false,
       save: args.save,
+      save_html: args.save_html,
       initial_prompt: None,
       tx_action: Some(tx_action),
     },

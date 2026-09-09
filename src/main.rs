@@ -19,6 +19,7 @@ mod config;
 mod conversation;
 mod daemon;
 mod engine;
+mod html_export;
 mod keyboard;
 mod llm;
 mod log;
@@ -38,7 +39,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   crate::audio::install_alsa_error_handler();
   crate::audio::ensure_alsa_plugin_dir();
 
-  let mut args = crate::config::Args::parse();
+  let mut args =
+    crate::config::Args::parse_from(crate::config::normalize_argv(std::env::args_os()));
 
   // Force quiet mode if stdin is not a terminal and input is read from pipe
   let stdin_is_tty = std::io::stdin().is_terminal();
@@ -689,6 +691,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     engine::EngineOptions {
       quiet: args.quiet,
       save: args.save,
+      save_html: args.save_html,
       initial_prompt: initial_prompt.clone(),
       tx_action: None,
     },

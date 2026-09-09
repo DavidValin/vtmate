@@ -99,6 +99,7 @@ fn default_args() -> Args {
     read_file: None,
     quiet: false,
     save: false,
+    save_html: false,
     daemon: false,
     daemon_foreground: false,
     daemon_stop: false,
@@ -295,6 +296,7 @@ voice_speed = 5.0
     read_file: None,
     quiet: false,
     save: false,
+    save_html: false,
     daemon: false,
     daemon_foreground: false,
     daemon_stop: false,
@@ -369,6 +371,7 @@ voice_speed = 5.0
     read_file: None,
     quiet: false,
     save: false,
+    save_html: false,
     daemon: false,
     daemon_foreground: false,
     daemon_stop: false,
@@ -789,4 +792,29 @@ fn validate_agent_reports_what_load_settings_would_refuse() {
   // and the file it would produce is refused the same way when read back
   save_settings(&path, &[agent], "main agent").unwrap();
   assert!(try_load_settings(&path, &default_args()).is_err());
+}
+
+/// `--save-html` is a normal long flag; `-s-html` is the single dash spelling
+/// rewritten by `normalize_argv`, since clap only knows long options after `--`.
+#[test]
+fn save_html_is_accepted_in_both_spellings_and_is_independent_from_save() {
+  use clap::Parser;
+  let parse = |argv: &[&str]| config::Args::parse_from(config::normalize_argv(argv.to_vec()));
+
+  let bare = parse(&["vtmate"]);
+  assert!(!bare.save && !bare.save_html);
+
+  let long = parse(&["vtmate", "--save-html"]);
+  assert!(long.save_html && !long.save);
+
+  let dashed = parse(&["vtmate", "-s-html"]);
+  assert!(dashed.save_html && !dashed.save);
+
+  // both exports at once: a .txt with the whole session audio, and the folder
+  let both = parse(&["vtmate", "-s", "-s-html"]);
+  assert!(both.save && both.save_html);
+
+  // -s alone must not turn the html export on
+  let txt_only = parse(&["vtmate", "--save"]);
+  assert!(txt_only.save && !txt_only.save_html);
 }

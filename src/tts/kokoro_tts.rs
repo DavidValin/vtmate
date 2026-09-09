@@ -25,12 +25,25 @@ pub struct StreamingTts {
 
 // Engine initialization
 pub fn start_kokoro_engine() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  KOKORO_ENGINE.set(Arc::new(Mutex::new(load_engine()?))).ok();
+  Ok(())
+}
+
+/// Load the Kokoro model. `TtsEngine::new` is Device::Auto: the GPU when this
+/// build carries a GPU execution provider (`ort-cuda`) and it comes up, the CPU
+/// otherwise. Unlike the other two engines this needs no fallback of ours -
+/// kokoro-micro retries on the CPU itself when inference fails on the GPU, and
+/// a second layer here would only synthesize every failed chunk twice.
+fn load_engine() -> Result<TtsEngine, Box<dyn std::error::Error + Send + Sync>> {
   let rt = tokio::runtime::Builder::new_current_thread()
     .enable_all()
     .build()?;
   let engine = rt.block_on(TtsEngine::new())?;
-  KOKORO_ENGINE.set(Arc::new(Mutex::new(engine))).ok();
-  Ok(())
+  crate::log::log(
+    "info",
+    &format!("[kokoro_tts] running on {}", engine.backend()),
+  );
+  Ok(engine)
 }
 
 // Speak via Kokoro
@@ -42,14 +55,7 @@ pub fn speak_via_kokoro(
   interrupt_counter: Arc<AtomicU64>,
   expected_interrupt: u64,
 ) -> Result<SpeakOutcome, Box<dyn std::error::Error + Send + Sync>> {
-  let engine = KOKORO_ENGINE.get_or_init(|| {
-    let rt = tokio::runtime::Builder::new_current_thread()
-      .enable_all()
-      .build()
-      .unwrap();
-    let e = rt.block_on(TtsEngine::new()).unwrap();
-    Arc::new(Mutex::new(e))
-  });
+  let engine = KOKORO_ENGINE.get_or_init(|| Arc::new(Mutex::new(load_engine().unwrap())));
 
   let mut streaming = StreamingTts::new(engine.clone());
   streaming.set_voice(voice);
@@ -272,7 +278,7 @@ impl StreamingTts {
       if interrupt_flag_thread.load(Ordering::Relaxed) {
         return;
       }
-      let Ok(mut e) = engine.lock() else {
+      let Ok(e) = engine.lock() else {
         return;
       };
       if let Ok(mut samples) = e.synthesize_with_options(

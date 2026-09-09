@@ -16,6 +16,7 @@ use std::sync::{
   atomic::{AtomicU64, Ordering},
 };
 use supertonic3_tts::TtsEngine;
+use supertonic3_tts::device::Device;
 use supertonic3_tts::helper::{Style, chunk_text, load_voice_style, max_chunk_length};
 use tokio::runtime::Runtime;
 
@@ -49,11 +50,11 @@ pub fn speak_via_supertonic(
   if text.is_empty() {
     return Ok(SpeakOutcome::Completed);
   }
-  let engine = get_or_init_engine()?;
+  let mut engine = get_or_init_engine()?;
   let style = get_or_load_style(voice)?;
   let rt = runtime()?;
 
-  let sample_rate = rt.block_on(engine.sample_rate()) as u32;
+  let mut sample_rate = rt.block_on(engine.sample_rate()) as u32;
 
   // Split text into sentence-aware chunks so playback can start before the
   // whole phrase is synthesized and interruptions are honoured between
@@ -77,6 +78,41 @@ pub fn speak_via_supertonic(
       Some(VOICE_QUALITY),
     )) {
       Ok(s) => s,
+      // The GPU can still fail here after Device::Auto was happy: Auto only
+      // covers whether the execution provider initialises, and a card that is
+      // merely full fails later, on the first inference. Speech is worth more
+      // than the acceleration, so drop to the CPU and say the chunk anyway.
+      Err(e) if crate::util::looks_like_gpu_failure(&e.to_string()) && !FORCE_CPU.load(Ordering::SeqCst) => {
+        crate::log::log(
+          "warning",
+          &format!(
+            "[supertonic_tts] GPU synthesis failed ({}); falling back to the CPU for the rest of this run",
+            e
+          ),
+        );
+        engine = rebuild_on_cpu()?;
+        sample_rate = rt.block_on(engine.sample_rate()) as u32;
+        match rt.block_on(engine.synthesize_with_style(
+          &chunk,
+          &style,
+          speed,
+          1.0,
+          Some(language),
+          Some(VOICE_QUALITY),
+        )) {
+          Ok(s) => s,
+          Err(e) => {
+            crate::log::log(
+              "error",
+              &format!(
+                "[supertonic_tts] synthesis failed on the CPU too for chunk '{}': {}",
+                chunk, e
+              ),
+            );
+            return Err(format!("supertonic synthesis failed: {}", e).into());
+          }
+        }
+      }
       Err(e) => {
         crate::log::log(
           "error",
@@ -144,14 +180,40 @@ fn runtime() -> Result<&'static Runtime, Box<dyn std::error::Error + Send + Sync
   Ok(RUNTIME.get().expect("runtime just set"))
 }
 
+/// Set once the GPU has failed at synthesis: every engine built afterwards
+/// asks for the CPU, so a card that is out of memory is not retried per chunk.
+static FORCE_CPU: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Drop the shared engine and build it again pinned to the CPU.
+fn rebuild_on_cpu() -> Result<Arc<TtsEngine>, Box<dyn std::error::Error + Send + Sync>> {
+  FORCE_CPU.store(true, Ordering::SeqCst);
+  if let Ok(mut slot) = SUPERTONIC_ENGINE.lock() {
+    *slot = None;
+  }
+  get_or_init_engine()
+}
+
 fn get_or_init_engine() -> Result<Arc<TtsEngine>, Box<dyn std::error::Error + Send + Sync>> {
-  if let Some(e) = SUPERTONIC_ENGINE.get() {
-    return Ok(e.clone());
+  if let Ok(slot) = SUPERTONIC_ENGINE.lock() {
+    if let Some(e) = slot.as_ref() {
+      return Ok(e.clone());
+    }
   }
   let base = model_root();
   let onnx_dir = base.join("onnx");
+  // Device::Auto takes the GPU when its provider initialises and the CPU
+  // otherwise; FORCE_CPU is the stronger statement made after a GPU failure
+  // that Auto cannot see, because it happened past initialisation.
+  let device = if FORCE_CPU.load(Ordering::SeqCst) {
+    Device::Cpu
+  } else {
+    Device::Auto
+  };
+  // Built without the lock held: model loading takes seconds, and blocking
+  // every other speaker on it is worse than the rare double build, where both
+  // engines are valid and the last one stored wins.
   let engine = runtime()?
-    .block_on(TtsEngine::new(onnx_dir.clone(), base, false))
+    .block_on(TtsEngine::on_device(onnx_dir.clone(), base, false, device))
     .map_err(|e| {
       let msg = format!(
         "[supertonic_tts] failed to load model from {}: {}",
@@ -165,8 +227,11 @@ fn get_or_init_engine() -> Result<Arc<TtsEngine>, Box<dyn std::error::Error + Se
     "info",
     &format!("[supertonic_tts] running on {}", engine.backend()),
   );
-  let _ = SUPERTONIC_ENGINE.set(Arc::new(engine));
-  Ok(SUPERTONIC_ENGINE.get().expect("engine just set").clone())
+  let engine = Arc::new(engine);
+  if let Ok(mut slot) = SUPERTONIC_ENGINE.lock() {
+    *slot = Some(engine.clone());
+  }
+  Ok(engine)
 }
 
 static STYLE_CACHE: OnceLock<Mutex<HashMap<String, Arc<Style>>>> = OnceLock::new();

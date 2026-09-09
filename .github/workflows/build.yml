@@ -56,22 +56,26 @@ jobs:
         # build_linux.sh), named by the major the user has installed, which is
         # what installer.sh matches against.
         #
-        # cpu is musl and fully static; arm64-cpu cross-compiles from amd64.
-        # vulkan/cuda are glibc - the Vulkan/CUDA loaders the user installs are
-        # glibc binaries and a musl process cannot load them. arm64-vulkan
-        # therefore needs a native arm64 runner: there is no glibc cross
-        # toolchain in that image, and emulating the Rust build would be far
-        # too slow.
+        # cpu-static is musl and fully static; its arm64 leg cross-compiles
+        # from amd64. Everything else is glibc - the Vulkan/CUDA loaders the
+        # user installs are glibc binaries and a musl process cannot load
+        # them, and the plain cpu build is glibc so ALSA can open the plugin
+        # PCM behind "default" (pulse/pipewire), which a +crt-static binary
+        # cannot do at all. The glibc arm64 legs therefore need a native arm64
+        # runner: there is no glibc cross toolchain in that image, and
+        # emulating the Rust build would be far too slow.
         #
         # arch uses the artifact spelling (x86_64/aarch64); build_linux.sh
         # accepts it as an alias of its internal amd64/arm64.
         include:
-          - { arch: x86_64,  variant: cpu,    runner: ubuntu-latest }
-          - { arch: x86_64,  variant: vulkan, runner: ubuntu-latest }
-          - { arch: x86_64,  variant: cuda12, runner: ubuntu-latest }
-          - { arch: x86_64,  variant: cuda13, runner: ubuntu-latest }
-          - { arch: aarch64, variant: cpu,    runner: ubuntu-latest }
-          - { arch: aarch64, variant: vulkan, runner: ubuntu-24.04-arm }
+          - { arch: x86_64,  variant: cpu,        runner: ubuntu-latest }
+          - { arch: x86_64,  variant: cpu-static, runner: ubuntu-latest }
+          - { arch: x86_64,  variant: vulkan,     runner: ubuntu-latest }
+          - { arch: x86_64,  variant: cuda12,     runner: ubuntu-latest }
+          - { arch: x86_64,  variant: cuda13,     runner: ubuntu-latest }
+          - { arch: aarch64, variant: cpu,        runner: ubuntu-24.04-arm }
+          - { arch: aarch64, variant: cpu-static, runner: ubuntu-latest }
+          - { arch: aarch64, variant: vulkan,     runner: ubuntu-24.04-arm }
     steps:
       - uses: actions/checkout@v4
 

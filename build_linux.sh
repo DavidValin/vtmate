@@ -42,11 +42,19 @@ ESPEAK_ARCHIVE="${ASSETS_DIR}/espeak-ng-data.tar.gz"
 DO_PACKAGE=1
 DOCKER_NO_CACHE=1
 SEL_ARCH="all"      # amd64,arm64,all
-SEL_VARIANT="all"   # cpu,vulkan,cuda12,cuda13,all (cuda = cuda12,cuda13)
+SEL_VARIANT="all"   # cpu,cpu-static,vulkan,cuda12,cuda13,all (cuda = cuda12,cuda13)
 
 # Linux variant toggles - on by default, so a bare invocation still produces
 # cpu+vulkan+(cuda on amd64) in one pass. --variant overrides these.
-WITH_CPU="${WITH_CPU:-1}"       # amd64 + arm64
+# cpu is glibc, cpu-static is musl. Both are CPU-only builds of the same
+# program; they differ in how they reach the sound server. A +crt-static musl
+# binary has no dynamic loader, so ALSA cannot open the plugin PCM behind
+# "default" (the pulse/pipewire bridge on every desktop) and it is left talking
+# to hw: devices, which fails wherever a sound server owns the card. The glibc
+# build loads that plugin and cooperates, at the cost of a glibc floor from the
+# build image - which is exactly why the static one still ships.
+WITH_CPU="${WITH_CPU:-1}"              # glibc; amd64 + arm64
+WITH_CPU_STATIC="${WITH_CPU_STATIC:-1}" # musl; amd64 + arm64
 WITH_CUDA="${WITH_CUDA:-1}"     # amd64 only; the default for both majors below
 WITH_VULKAN="${WITH_VULKAN:-1}" # amd64 + arm64
 # cuda12 / cuda13: the same build against a CUDA 12.x / 13.x toolkit, named
@@ -74,12 +82,15 @@ Usage:
   ./build_linux.sh [--arch <list>] [--variant <list>] [--skip-package] [--cache|--no-cache]
 
 --arch    comma-separated: amd64,arm64,all  (x86_64/aarch64 accepted as aliases)
---variant comma-separated: cpu,vulkan,cuda12,cuda13,all  (cuda = both majors; cuda* is amd64 only)
+--variant comma-separated: cpu,cpu-static,vulkan,cuda12,cuda13,all
+          (cuda = both majors; cuda* is amd64 only. cpu is the glibc build,
+          cpu-static the fully static musl one.)
           When given, it overrides the WITH_* env toggles below. CI uses
           this to build one arch+variant per runner.
 
 Env:
-  WITH_CPU=0|1      (amd64 + arm64) default 1
+  WITH_CPU=0|1        glibc CPU build (amd64 + arm64) default 1
+  WITH_CPU_STATIC=0|1 musl static CPU build (amd64 + arm64) default 1
   WITH_CUDA=0|1     (amd64 only) default 1 - default for the two below
   WITH_CUDA12=0|1   (amd64 only) CUDA 12.x build, default WITH_CUDA
   WITH_CUDA13=0|1   (amd64 only) CUDA 13.x build, default WITH_CUDA
@@ -129,15 +140,16 @@ done
 # --variant, when given, is authoritative: it replaces the WITH_* toggles so
 # one runner can build exactly one arch+variant.
 if [[ "${SEL_VARIANT}" != "all" ]]; then
-  WITH_CPU=0; WITH_VULKAN=0; WITH_CUDA12=0; WITH_CUDA13=0
-  list_has "${SEL_VARIANT}" cpu    && WITH_CPU=1
+  WITH_CPU=0; WITH_CPU_STATIC=0; WITH_VULKAN=0; WITH_CUDA12=0; WITH_CUDA13=0
+  list_has "${SEL_VARIANT}" cpu        && WITH_CPU=1
+  list_has "${SEL_VARIANT}" cpu-static && WITH_CPU_STATIC=1
   list_has "${SEL_VARIANT}" vulkan && WITH_VULKAN=1
   list_has "${SEL_VARIANT}" cuda12 && WITH_CUDA12=1
   list_has "${SEL_VARIANT}" cuda13 && WITH_CUDA13=1
   # plain "cuda" means both majors
   list_has "${SEL_VARIANT}" cuda   && { WITH_CUDA12=1; WITH_CUDA13=1; }
-  if [[ "${WITH_CPU}${WITH_VULKAN}${WITH_CUDA12}${WITH_CUDA13}" == "0000" ]]; then
-    echo "ERROR: --variant '${SEL_VARIANT}' selected no known variant (cpu,vulkan,cuda12,cuda13)"
+  if [[ "${WITH_CPU}${WITH_CPU_STATIC}${WITH_VULKAN}${WITH_CUDA12}${WITH_CUDA13}" == "00000" ]]; then
+    echo "ERROR: --variant '${SEL_VARIANT}' selected no known variant (cpu,cpu-static,vulkan,cuda12,cuda13)"
     exit 1
   fi
 fi
@@ -158,7 +170,7 @@ echo "Version: ${VERSION}"
 WITH_CUDA=0
 [[ "${WITH_CUDA12}" == "1" || "${WITH_CUDA13}" == "1" ]] && WITH_CUDA=1
 echo "Linux: arch=${SEL_ARCH} variant=${SEL_VARIANT}"
-echo "WITH_CPU=${WITH_CPU}  WITH_CUDA12=${WITH_CUDA12} WITH_CUDA13=${WITH_CUDA13} (amd64 only)  WITH_VULKAN=${WITH_VULKAN}"
+echo "WITH_CPU=${WITH_CPU} WITH_CPU_STATIC=${WITH_CPU_STATIC}  WITH_CUDA12=${WITH_CUDA12} WITH_CUDA13=${WITH_CUDA13} (amd64 only)  WITH_VULKAN=${WITH_VULKAN}"
 echo "OpenBLAS: always ON"
 
 # Features - OpenBLAS is part of every variant's feature set, unconditionally.
@@ -662,12 +674,12 @@ DOCKERFILE
         -f "$df" -t "$img" "$tmp"
   fi
 
-  echo "== Linux amd64 cargo builds (cpu=${WITH_CPU} vulkan=${WITH_VULKAN} cuda=${WITH_CUDA}) =="
+  echo "== Linux amd64 cargo builds (cpu-static=${WITH_CPU_STATIC} vulkan=${WITH_VULKAN} cuda=${WITH_CUDA}) =="
   docker run --rm --platform=linux/amd64 \
     -v "${PROJECT_ROOT}:/work" -w /work \
     -v "${HOST_K_CACHE}:${CONT_K_CACHE}" \
     -v "${HOST_WHISPER_MODELS}:${CONT_WHISPER_MODELS}" \
-    -e WITH_CPU="${WITH_CPU}" \
+    -e WITH_CPU_STATIC="${WITH_CPU_STATIC}" \
     -e WITH_VULKAN="${WITH_VULKAN}" \
     -e WITH_CUDA="${WITH_CUDA}" \
     -e CMAKE_SKIP_RPATH=ON \
@@ -785,8 +797,8 @@ DOCKERFILE
         cargo build --release --target "$target" --features "$feats"
       }
 
-      if [ "${WITH_CPU}" = "1" ]; then
-        build_variant cpu "'"${FEATURES_CPU}"'"
+      if [ "${WITH_CPU_STATIC}" = "1" ]; then
+        build_variant cpu-static "'"${FEATURES_CPU}"'"
       fi
 
       if [ "${WITH_VULKAN}" = "1" ]; then
@@ -798,7 +810,7 @@ DOCKERFILE
       fi
     '
 
-  [[ "${WITH_CPU}" == "1" ]] && linux_copy_out "amd64" "x86_64-unknown-linux-musl" "cpu"
+  [[ "${WITH_CPU_STATIC}" == "1" ]] && linux_copy_out "amd64" "x86_64-unknown-linux-musl" "cpu-static"
   [[ "${WITH_VULKAN}" == "1" ]] && linux_copy_out "amd64" "x86_64-unknown-linux-musl" "vulkan"
   [[ "${WITH_CUDA}" == "1" ]] && linux_copy_out "amd64" "x86_64-unknown-linux-musl" "cuda"
   true
@@ -1219,12 +1231,12 @@ DOCKERFILE
       -f "$df" -t "$img" "$tmp"
   fi
 
-  echo "== Linux arm64 cargo builds (cpu=${WITH_CPU} vulkan=${WITH_VULKAN}) =="
+  echo "== Linux arm64 cargo builds (cpu-static=${WITH_CPU_STATIC} vulkan=${WITH_VULKAN}) =="
   docker run --rm --platform=linux/amd64 \
     -v "${PROJECT_ROOT}:/work" -w /work \
     -v "${HOST_K_CACHE}:${CONT_K_CACHE}" \
     -v "${HOST_WHISPER_MODELS}:${CONT_WHISPER_MODELS}" \
-    -e WITH_CPU="${WITH_CPU}" \
+    -e WITH_CPU_STATIC="${WITH_CPU_STATIC}" \
     -e WITH_VULKAN="${WITH_VULKAN}" \
     -e CMAKE_SKIP_RPATH=ON \
     -e CMAKE_INSTALL_RPATH_USE_LINK_PATH=OFF \
@@ -1363,8 +1375,8 @@ DOCKERFILE
       unset CFLAGS CXXFLAGS LDFLAGS CC CXX LD
       unset OPENSSL_DIR OPENSSL_LIB_DIR OPENSSL_STATIC PKG_CONFIG_PATH
 
-      if [ "${WITH_CPU}" = "1" ]; then
-        build_variant cpu "'"${FEATURES_CPU}"'"
+      if [ "${WITH_CPU_STATIC}" = "1" ]; then
+        build_variant cpu-static "'"${FEATURES_CPU}"'"
       fi
 
       if [ "${WITH_VULKAN}" = "1" ]; then
@@ -1372,7 +1384,7 @@ DOCKERFILE
       fi
     '
 
-  [[ "${WITH_CPU}" == "1" ]] && linux_copy_out "arm64" "aarch64-unknown-linux-musl" "cpu"
+  [[ "${WITH_CPU_STATIC}" == "1" ]] && linux_copy_out "arm64" "aarch64-unknown-linux-musl" "cpu-static"
   [[ "${WITH_VULKAN}" == "1" ]] && linux_copy_out "arm64" "aarch64-unknown-linux-musl" "vulkan"
   true
 
@@ -1411,7 +1423,7 @@ build_linux_glibc_variant() {
   esac
 
   case "${arch}-${variant}" in
-    amd64-vulkan|arm64-vulkan|amd64-cuda12|amd64-cuda13) ;;
+    amd64-cpu|arm64-cpu|amd64-vulkan|arm64-vulkan|amd64-cuda12|amd64-cuda13) ;;
     *) echo "ERROR: unsupported glibc combination ${arch}-${variant}"; return 1 ;;
   esac
 
@@ -1781,6 +1793,7 @@ DOCKERFILE
   # acceleration via whisper-cuda either way.
   local feats
   case "${variant}" in
+    cpu)           feats="${FEATURES_CPU}" ;;
     vulkan)        feats="${FEATURES_VULKAN}" ;;
     cuda12|cuda13) feats="${FEATURES_CUDA}" ;;
   esac
@@ -1895,7 +1908,17 @@ DOCKERFILE
         # have something to JIT from. CUDAARCHS is the CMake environment seed
         # for CMAKE_CUDA_ARCHITECTURES; setting it also disables the ggml
         # fallback, which only applies when that variable is not defined.
-        export CUDAARCHS="75-real;86-real;89-real;120-real;120-virtual"
+        # Per major, because the two toolkits do not accept the same list and
+        # do not serve the same machines: CUDA 13 dropped everything below
+        # Turing, while the cuda12 variant is what an older card ends up on -
+        # a Pascal GTX 10-series is exactly the kind of GPU still running a
+        # CUDA 12 driver, and leaving 61 out would hand it a binary with no
+        # kernel it can run.
+        if [ "${VARIANT}" = "cuda12" ]; then
+          export CUDAARCHS="61-real;70-real;75-real;86-real;89-real;120-real;120-virtual"
+        else
+          export CUDAARCHS="75-real;86-real;89-real;120-real;120-virtual"
+        fi
       fi
       if [ "${DEBUG_SYMBOLS}" = "1" ]; then
         # Diagnostic build: keep symbol names and line tables so a gdb/coredumpctl
@@ -1951,16 +1974,21 @@ DOCKERFILE
 # -----------------------------
 ensure_espeak_data_archive
 
-# musl covers cpu only. vulkan/cuda cannot be musl - the GPU loaders the user
-# installs are glibc - so they go through build_linux_glibc_variant.
+# musl covers cpu-static only. vulkan/cuda cannot be musl - the GPU loaders the
+# user installs are glibc - so they go through build_linux_glibc_variant, and so
+# does the plain cpu build, which wants a dynamic loader for ALSA's plugins.
 _wv="${WITH_VULKAN}"; _wc="${WITH_CUDA}"
 WITH_VULKAN=0; WITH_CUDA=0
-if [[ "${WITH_CPU}" == "1" ]]; then
+if [[ "${WITH_CPU_STATIC}" == "1" ]]; then
   if want_arch amd64; then build_linux_amd64_variants; fi
   if want_arch arm64; then build_linux_arm64_variants; fi
 fi
 WITH_VULKAN="${_wv}"; WITH_CUDA="${_wc}"
 
+if [[ "${WITH_CPU}" == "1" ]]; then
+  want_arch amd64 && build_linux_glibc_variant amd64 cpu
+  want_arch arm64 && build_linux_glibc_variant arm64 cpu
+fi
 if [[ "${WITH_VULKAN}" == "1" ]]; then
   want_arch amd64 && build_linux_glibc_variant amd64 vulkan
   want_arch arm64 && build_linux_glibc_variant arm64 vulkan

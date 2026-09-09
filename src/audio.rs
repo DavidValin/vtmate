@@ -53,6 +53,14 @@ pub fn ensure_alsa_plugin_dir() {
   if std::env::var_os("ALSA_PLUGIN_DIR").is_some() {
     return;
   }
+  // The musl builds are +crt-static and have no dynamic loader at all, so ALSA
+  // cannot open a plugin module however this is pointed: sending it to the
+  // distro's directory only makes it try "default" (the pulse/pipewire bridge)
+  // and fail. Those builds use hw: devices, which is what the ranking below
+  // puts first for them - and why the glibc cpu build exists beside them.
+  if cfg!(target_env = "musl") {
+    return;
+  }
   const CANDIDATES: &[&str] = &[
     "/usr/lib/x86_64-linux-gnu/alsa-lib",
     "/usr/lib/aarch64-linux-gnu/alsa-lib",
@@ -435,9 +443,22 @@ fn candidate_devices(
 ) -> Vec<cpal::Device> {
   fn rank(name: &str) -> u8 {
     let n = name.to_ascii_lowercase();
-    if n.starts_with("pipewire") || n.starts_with("pulse") {
+    let bridge = n.starts_with("pipewire") || n.starts_with("pulse");
+    let dflt = n.starts_with("default") || n.starts_with("sysdefault");
+    // A sound server is the best target on a build that can reach it, and
+    // unreachable on one that cannot: the static musl binary loads no ALSA
+    // plugin, so those entries are tried last there and the hardware first.
+    if cfg!(target_env = "musl") {
+      if bridge {
+        2
+      } else if dflt {
+        1
+      } else {
+        0
+      }
+    } else if bridge {
       0
-    } else if n.starts_with("default") || n.starts_with("sysdefault") {
+    } else if dflt {
       1
     } else {
       2

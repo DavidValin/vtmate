@@ -3,6 +3,7 @@
 // ------------------------------------------------------------------
 
 use crate::audio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use whisper_rs::{
   FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState,
@@ -33,6 +34,9 @@ fn whisper_threads() -> i32 {
 
 pub struct Whisper {
   state: Mutex<WhisperState>,
+  /// Kept so the state can be rebuilt on the CPU if the GPU gives out later.
+  model_path: String,
+  on_gpu: AtomicBool,
 }
 
 static WHISPER: OnceLock<Whisper> = OnceLock::new();
@@ -68,6 +72,18 @@ impl Whisper {
     model_path: &str,
     use_gpu: bool,
   ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    let state = Self::build_state(model_path, use_gpu)?;
+    Ok(Self {
+      state: Mutex::new(state),
+      model_path: model_path.to_string(),
+      on_gpu: AtomicBool::new(use_gpu),
+    })
+  }
+
+  fn build_state(
+    model_path: &str,
+    use_gpu: bool,
+  ) -> Result<WhisperState, Box<dyn std::error::Error + Send + Sync>> {
     let mut params = WhisperContextParameters::default();
     params.use_gpu(use_gpu);
     let ctx = WhisperContext::new_with_params(model_path, params)?;
@@ -77,9 +93,22 @@ impl Whisper {
     let mut warm = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
     warm.set_n_threads(whisper_threads());
     state.full(warm, &vec![0.0f32; 16000])?;
-    Ok(Self {
-      state: Mutex::new(state),
-    })
+    Ok(state)
+  }
+
+  fn full_params(language: &str) -> FullParams<'_, '_> {
+    let mut params = FullParams::new(SamplingStrategy::BeamSearch {
+      beam_size: 5,
+      patience: -1.0,
+    });
+    params.set_print_progress(false);
+    params.set_print_special(false);
+    params.set_print_timestamps(false);
+    params.set_print_realtime(false);
+    params.set_translate(false);
+    params.set_language(Some(language));
+    params.set_n_threads(whisper_threads());
+    params
   }
 
   pub fn transcribe(
@@ -103,22 +132,26 @@ impl Whisper {
       return Ok(String::new());
     }
 
-    let mut params = FullParams::new(SamplingStrategy::BeamSearch {
-      beam_size: 5,
-      patience: -1.0,
-    });
-    params.set_print_progress(false);
-    params.set_print_special(false);
-    params.set_print_timestamps(false);
-    params.set_print_realtime(false);
-    params.set_translate(false);
-    params.set_language(Some(language));
-    params.set_n_threads(whisper_threads());
-
     let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-    state
-      .full(params, &mono_16k)
-      .map_err(|e| format!("Inference failed: {:?}", e))?;
+    if let Err(e) = state.full(Self::full_params(language), &mono_16k) {
+      // The GPU passed initialisation and the warm-up, so this is the card
+      // giving out mid-session - typically its memory going to something else,
+      // an LLM in the same VRAM being the usual culprit. Transcription matters
+      // more than the acceleration: move to the CPU and keep the session alive.
+      let err = format!("{:?}", e);
+      if !crate::util::looks_like_gpu_failure(&err) || !self.on_gpu.load(Ordering::SeqCst) {
+        return Err(format!("Inference failed: {}", err).into());
+      }
+      crate::log::log(
+        "warning",
+        &format!("Whisper GPU inference failed ({}); rebuilding on the CPU", err),
+      );
+      *state = Self::build_state(&self.model_path, false)?;
+      self.on_gpu.store(false, Ordering::SeqCst);
+      state
+        .full(Self::full_params(language), &mono_16k)
+        .map_err(|e| format!("Inference failed on the CPU too: {:?}", e))?;
+    }
 
     let mut result = String::new();
     let seg_count = state.full_n_segments();

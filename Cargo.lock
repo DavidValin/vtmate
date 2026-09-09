@@ -2017,9 +2017,9 @@ dependencies = [
 
 [[package]]
 name = "kokoro-micro"
-version = "1.1.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48ae664997296cb779aa56be89f5fc8eff5e130f8f64cdf4c7dbffae0871d366"
+checksum = "a04fc80f275d1de76792952401c1fe789eea30df676ed462dc2fbdada78f234e"
 dependencies = [
  "espeak-rs-sys",
  "hound",

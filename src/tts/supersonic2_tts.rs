@@ -51,6 +51,37 @@ pub fn start_supersonic_engine() -> Result<(), Box<dyn std::error::Error + Send 
   Ok(())
 }
 
+/// Set once the GPU has failed during synthesis: engines built afterwards go
+/// straight to the CPU instead of re-probing a card that is already refusing.
+static FORCE_CPU: AtomicBool = AtomicBool::new(false);
+
+/// Rebuild the shared engine on the CPU, in place, using the caller's runtime
+/// (building another one inside a synthesis thread is not worth the risk).
+/// Returns false when even the CPU engine cannot be built, which leaves the
+/// existing engine untouched and the phrase lost - the caller logs that.
+fn reload_engine_on_cpu(engine: &Arc<Mutex<TtsEngine>>, rt: &Runtime) -> bool {
+  FORCE_CPU.store(true, Ordering::SeqCst);
+  let base = model_root();
+  let onnx = base.join("onnx");
+  match rt.block_on(TtsEngine::new(onnx, base, false)) {
+    Ok(cpu) => match engine.lock() {
+      Ok(mut slot) => {
+        *slot = cpu;
+        crate::log::log("info", "[supersonic2_tts] now running on CPU");
+        true
+      }
+      Err(_) => false,
+    },
+    Err(e) => {
+      crate::log::log(
+        "error",
+        &format!("[supersonic2_tts] could not rebuild the engine on the CPU: {}", e),
+      );
+      false
+    }
+  }
+}
+
 /// Load the Supersonic 2 model. Uses the GPU when this build carries a GPU
 /// execution provider (`ort-cuda` feature) and it can be initialised,
 /// otherwise the CPU. `TtsEngine::new` alone is CPU only.
@@ -61,7 +92,7 @@ fn load_engine() -> Result<TtsEngine, Box<dyn std::error::Error + Send + Sync>> 
   let base = model_root();
   let onnx = base.join("onnx");
 
-  if gpu_support_compiled() {
+  if gpu_support_compiled() && !FORCE_CPU.load(Ordering::SeqCst) {
     match rt.block_on(TtsEngine::new_with_device(
       onnx.clone(),
       base.clone(),
@@ -222,16 +253,53 @@ impl StreamingTts {
         if interrupt_flag_thread.load(Ordering::Relaxed) {
           break;
         }
-        if let Ok(e) = engine.lock() {
-          // Run async synthesize_with_options
-          match rt.block_on(e.synthesize_with_options(
-            &chunk,
-            Some(&voice),
-            speed,
-            gain,
-            Some(&language),
-            None,
-          )) {
+        {
+          // Run async synthesize_with_options. The lock is released before the
+          // result is inspected so a fallback can replace the engine under it.
+          let synthesized = match engine.lock() {
+            Ok(e) => rt.block_on(e.synthesize_with_options(
+              &chunk,
+              Some(&voice),
+              speed,
+              gain,
+              Some(&language),
+              None,
+            )),
+            Err(_) => break,
+          };
+          // A GPU that accepted the session can still fail here - a card that
+          // is merely full refuses the first allocation an inference asks for -
+          // so drop to the CPU and say the chunk rather than going silent.
+          let synthesized = match synthesized {
+            Err(ref e)
+              if crate::util::looks_like_gpu_failure(&e.to_string())
+                && !FORCE_CPU.load(Ordering::SeqCst) =>
+            {
+              crate::log::log(
+                "warning",
+                &format!(
+                  "[supersonic2_tts] GPU synthesis failed ({}); falling back to the CPU for the rest of this run",
+                  e
+                ),
+              );
+              if !reload_engine_on_cpu(&engine, &rt) {
+                break;
+              }
+              match engine.lock() {
+                Ok(e) => rt.block_on(e.synthesize_with_options(
+                  &chunk,
+                  Some(&voice),
+                  speed,
+                  gain,
+                  Some(&language),
+                  None,
+                )),
+                Err(_) => break,
+              }
+            }
+            other => other,
+          };
+          match synthesized {
             Ok(mut samples) => {
               // sanitize output samples (prevents nasty noise if NaN/Inf/out-of-range)
               for s in samples.iter_mut() {
@@ -253,12 +321,16 @@ impl StreamingTts {
                 break;
               }
             }
-            Err(_) => {
+            Err(e) => {
+              // Used to break silently, which left the phrase unspoken with
+              // nothing said about why.
+              crate::log::log(
+                "error",
+                &format!("[supersonic2_tts] synthesis failed for chunk '{}': {}", chunk, e),
+              );
               break;
             }
           }
-        } else {
-          break;
         }
       }
     });

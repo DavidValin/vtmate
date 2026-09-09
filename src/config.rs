@@ -263,6 +263,9 @@ pub struct Args {
   #[arg(short = 's', long = "save", action = clap::ArgAction::SetTrue, help = "save the conversation to text and audio file in ~/.vtmate/conversations")]
   pub save: bool,
 
+  #[arg(long = "save-html", action = clap::ArgAction::SetTrue, help = "save the conversation to a folder in ~/.vtmate/conversations with an html player and one audio file per turn (also accepted as `-s-html`)")]
+  pub save_html: bool,
+
   #[arg(
     long,
     action = clap::ArgAction::SetTrue,
@@ -286,6 +289,26 @@ pub struct Args {
 
   #[arg(long, action = clap::ArgAction::SetTrue, group = "daemon_cmd", help = "show whether a daemon is running and its hotkeys")]
   pub daemon_status: bool,
+}
+
+/// Accept `-s-html` as written on the command line: clap only knows long
+/// options behind `--`, so the single dash spelling is rewritten before parsing.
+pub fn normalize_argv<I, T>(args: I) -> Vec<std::ffi::OsString>
+where
+  I: IntoIterator<Item = T>,
+  T: Into<std::ffi::OsString>,
+{
+  args
+    .into_iter()
+    .map(|a| {
+      let a: std::ffi::OsString = a.into();
+      if a == std::ffi::OsStr::new("-s-html") {
+        std::ffi::OsString::from("--save-html")
+      } else {
+        a
+      }
+    })
+    .collect()
 }
 
 // internal static values

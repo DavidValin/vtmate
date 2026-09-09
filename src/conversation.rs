@@ -60,6 +60,7 @@ pub fn conversation_thread(
   init_prompt: Option<String>,
   quiet: bool,
   save: bool,
+  save_html: bool,
   tx_action: Option<Sender<DaemonAction>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let whisper = crate::stt::init(&model_path)?;
@@ -82,12 +83,13 @@ pub fn conversation_thread(
     crate::log::log("info", "Running in quiet mode");
 
     // Setup save path and WAV writer if saving is requested
-    if save {
+    if save || save_html {
       maybe_setup_and_save(
         &mut wav_tx_opt,
         &conversation_history,
         &settings_clone,
         save,
+        save_html,
       )?;
     }
 
@@ -118,11 +120,16 @@ pub fn conversation_thread(
           String::new()
         });
       if !reply.is_empty() {
-        conversation_history.lock().unwrap().push(ChatMessage {
-          role: "assistant".to_string(),
-          content: reply.clone(),
-          agent_name: Some(settings.name.clone()),
-        });
+        let turn_idx = {
+          let mut hist = conversation_history.lock().unwrap();
+          hist.push(ChatMessage {
+            role: "assistant".to_string(),
+            content: reply.clone(),
+            agent_name: Some(settings.name.clone()),
+          });
+          hist.len() - 1
+        };
+        crate::html_export::open_turn(turn_idx, &settings.name);
         perform_save(&conversation_history, &settings_clone);
         // Display in UI
         let label = format!("\x1b[48;5;22;37m{}:\x1b[0m", settings.name);
@@ -139,6 +146,7 @@ pub fn conversation_thread(
         );
         let state = GLOBAL_STATE.get().expect("AppState not initialized");
         wait_for_playback(state, &interrupt_counter, my_interrupt);
+        crate::html_export::close_turn();
       }
     }
 
@@ -194,12 +202,15 @@ pub fn conversation_thread(
     }
     prev_debate_enabled = current_debate_enabled;
 
-    if save && state.save_path.lock().unwrap().is_none() {
+    let needs_setup = (save && state.save_path.lock().unwrap().is_none())
+      || (save_html && !crate::html_export::is_active());
+    if needs_setup {
       maybe_setup_and_save(
         &mut wav_tx_opt,
         &conversation_history,
         &settings_clone,
         save,
+        save_html,
       )?;
     }
 
@@ -277,6 +288,7 @@ pub fn conversation_thread(
                 crate::ui::STOP_STREAM.store(false, Ordering::Relaxed);
                 send_user_message_ui(&tx_ui, &user_text, true);
                 push_user_message(&conversation_history, &user_text);
+                record_user_audio(&conversation_history, &utt.audio);
                 perform_save(&conversation_history, &settings_clone);
 
                 // Store user message for next agent to respond to
@@ -484,6 +496,7 @@ pub fn conversation_thread(
         crate::ui::STOP_STREAM.store(false, Ordering::Relaxed);
         send_user_message_ui(&tx_ui, &user_text, false);
         push_user_message(&conversation_history, &user_text);
+        record_user_audio(&conversation_history, &utt.audio);
         perform_save(&conversation_history, &settings_clone);
 
         // Check if debate mode is enabled
@@ -504,6 +517,14 @@ pub fn conversation_thread(
         }
 
         ui.thinking.store(true, Ordering::Relaxed);
+
+        // --save-html: the reply streamed below lands at this history index;
+        // its audio is recorded until the next turn opens, because this path
+        // does not wait for playback to drain before looping.
+        crate::html_export::open_turn(
+          conversation_history.lock().unwrap().len(),
+          &settings_clone.name,
+        );
 
         // Snapshot interruption counter for this assistant turn.
         let speaker_arc = std::sync::Arc::new(std::sync::Mutex::new(PhraseSpeaker::new()));
@@ -668,22 +689,43 @@ fn perform_save(
 ) {
   let state = GLOBAL_STATE.get().expect("AppState not initialized");
   let save_path = state.save_path.lock().unwrap().clone();
+  if save_path.is_none() && !crate::html_export::is_active() {
+    return;
+  }
+  let metadata = build_metadata(state, settings);
   if let Some(path) = save_path {
-    let is_debate = state.debate_enabled.load(Ordering::SeqCst);
-    let agents = if is_debate {
-      state.debate_agents.lock().unwrap().clone()
-    } else {
-      vec![settings.clone()]
-    };
-    let metadata = SaveMetadata {
-      start_date: state.start_date.lock().unwrap().clone(),
-      agents,
-      is_debate,
-      system_prompt: settings.system_prompt.clone(),
-      voice: settings.voice.clone(),
-    };
     let _ = save_conversation(conversation_history, Some(&path), Some(&metadata));
   }
+  // the html export is rewritten from scratch on every turn, so the folder is
+  // playable while the conversation is still going
+  let snapshot = conversation_history.lock().unwrap().clone();
+  crate::html_export::render(&snapshot, &metadata);
+}
+
+/// Describe the running conversation the way both exports need it.
+fn build_metadata(state: &AppState, settings: &crate::config::AgentSettings) -> SaveMetadata {
+  let is_debate = state.debate_enabled.load(Ordering::SeqCst);
+  let agents = if is_debate {
+    state.debate_agents.lock().unwrap().clone()
+  } else {
+    vec![settings.clone()]
+  };
+  SaveMetadata {
+    start_date: state.start_date.lock().unwrap().clone(),
+    agents,
+    is_debate,
+    system_prompt: settings.system_prompt.clone(),
+    voice: settings.voice.clone(),
+  }
+}
+
+/// Give the last pushed user message its own wav file (`--save-html`).
+fn record_user_audio(conversation_history: &ConversationHistory, audio: &crate::audio::AudioChunk) {
+  if !crate::html_export::is_active() {
+    return;
+  }
+  let idx = conversation_history.lock().unwrap().len().saturating_sub(1);
+  crate::html_export::record_audio_turn(idx, "user", audio);
 }
 
 fn maybe_setup_and_save(
@@ -691,51 +733,55 @@ fn maybe_setup_and_save(
   conversation_history: &ConversationHistory,
   settings_clone: &crate::config::AgentSettings,
   save: bool,
+  save_html: bool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-  if !save {
+  if !save && !save_html {
     return Ok(());
   }
   let state = GLOBAL_STATE.get().expect("AppState not initialized");
-  if state.save_path.lock().unwrap().is_none() {
-    let now = Local::now();
-    let date_str = now.format("%Y-%m-%d_%H-%M-%S").to_string();
-    let uuid_str = &Uuid::new_v4().to_string()[..8];
+  let need_txt = save && state.save_path.lock().unwrap().is_none();
+  let need_html = save_html && !crate::html_export::is_active();
+
+  if need_txt || need_html {
     let home = crate::util::get_user_home_path().ok_or("Unable to determine home directory")?;
-    let path = home
-      .join(".vtmate")
-      .join("conversations")
-      .join(format!("{}_{}.txt", date_str, uuid_str));
+    let conv_dir = home.join(".vtmate").join("conversations");
+    fs::create_dir_all(&conv_dir)?;
 
-    *state.save_path.lock().unwrap() = Some(path.clone());
-    *state.start_date.lock().unwrap() = date_str;
+    let now = Local::now();
+    let date_str = {
+      let started = state.start_date.lock().unwrap().clone();
+      if started.is_empty() {
+        now.format("%Y-%m-%d_%H-%M-%S").to_string()
+      } else {
+        started
+      }
+    };
+    // -s and --save-html name their output after the same session, so
+    // `<stem>.txt`, `<stem>.wav` and `<stem>/` sit together in the folder
+    let stem = state
+      .save_path
+      .lock()
+      .unwrap()
+      .as_ref()
+      .and_then(|p| p.file_stem())
+      .map(|s| s.to_string_lossy().to_string())
+      .or_else(crate::html_export::dir_name)
+      .unwrap_or_else(|| format!("{}_{}", date_str, &Uuid::new_v4().to_string()[..8]));
 
-    if let Some(txt_path) = state.save_path.lock().unwrap().clone() {
-      let wav_path = txt_path.with_extension("wav");
-      let wav_tx = crate::audio::init_wav_writer(&wav_path, 500);
+    if need_txt {
+      let path = conv_dir.join(format!("{}.txt", stem));
+      *state.save_path.lock().unwrap() = Some(path.clone());
+      let wav_tx = crate::audio::init_wav_writer(&path.with_extension("wav"), 500);
       set_wav_tx(wav_tx.clone());
       *wav_tx_opt = Some(wav_tx);
     }
+    if need_html {
+      crate::html_export::init(&conv_dir.join(&stem))?;
+    }
+    *state.start_date.lock().unwrap() = date_str;
   }
 
-  // perform save
-  let state = GLOBAL_STATE.get().expect("AppState not initialized");
-  let save_path = state.save_path.lock().unwrap().clone();
-  if let Some(path) = save_path {
-    let is_debate = state.debate_enabled.load(Ordering::SeqCst);
-    let agents = if is_debate {
-      state.debate_agents.lock().unwrap().clone()
-    } else {
-      vec![settings_clone.clone()]
-    };
-    let metadata = SaveMetadata {
-      start_date: state.start_date.lock().unwrap().clone(),
-      agents,
-      is_debate,
-      system_prompt: settings_clone.system_prompt.clone(),
-      voice: settings_clone.voice.clone(),
-    };
-    let _ = save_conversation(conversation_history, Some(&path), Some(&metadata));
-  }
+  perform_save(conversation_history, settings_clone);
   Ok(())
 }
 
@@ -872,11 +918,16 @@ fn handle_reply(
   let speaker_arc = Arc::new(Mutex::new(PhraseSpeaker::new()));
   let reply_accum = Arc::new(Mutex::new(String::new()));
   // Pre-add assistant placeholder to history for label display
-  conversation_history.lock().unwrap().push(ChatMessage {
-    role: "assistant".to_string(),
-    content: "".to_string(),
-    agent_name: Some(settings.name.clone()),
-  });
+  let turn_idx = {
+    let mut hist = conversation_history.lock().unwrap();
+    hist.push(ChatMessage {
+      role: "assistant".to_string(),
+      content: "".to_string(),
+      agent_name: Some(settings.name.clone()),
+    });
+    hist.len() - 1
+  };
+  crate::html_export::open_turn(turn_idx, &settings.name);
   let originals = apply_agent_settings(state, settings);
   let assistant_name = settings.name.clone();
   let assistant_name_for_closure = assistant_name.clone();
@@ -952,6 +1003,7 @@ fn handle_reply(
       }
     }
     restore_agent_settings(state, originals);
+    crate::html_export::close_turn();
     // Persist conversation on interruption
     perform_save(&conversation_history, settings);
     return None;
@@ -998,6 +1050,9 @@ fn handle_reply(
   // Restore settings and wait playback
   restore_agent_settings(state, originals);
   wait_for_playback(state, &interrupt_counter, my_interrupt);
+  // the turn is spoken: close its wav and rewrite the player with it
+  crate::html_export::close_turn();
+  perform_save(&conversation_history, settings);
   Some(reply)
 }
 
@@ -1236,6 +1291,7 @@ fn restore_agent_settings(
     .store(speed, std::sync::atomic::Ordering::Relaxed);
 }
 
+#[derive(Clone)]
 pub struct SaveMetadata {
   pub start_date: String,
   pub agents: Vec<crate::config::AgentSettings>,

@@ -413,7 +413,16 @@ if ($WITH_CUDA) {
     # environment seed for CMAKE_CUDA_ARCHITECTURES; defining it also takes
     # ggml's own "if (NOT DEFINED ...)" default out of play.
     # ------------------------------------------------------
-    $env:CUDAARCHS = "75-real;86-real;89-real;120-real;120-virtual"
+    # Per major: CUDA 13 dropped everything below Turing, while cuda12 is the
+    # variant an older card ends up on - a Pascal GTX 10-series is exactly the
+    # kind of GPU still on a CUDA 12 driver, and leaving 61 out would hand it a
+    # binary with no kernel it can run.
+    if ($CUDA_MAJOR -eq 12) {
+      $env:CUDAARCHS = "61-real;70-real;75-real;86-real;89-real;120-real;120-virtual"
+    }
+    else {
+      $env:CUDAARCHS = "75-real;86-real;89-real;120-real;120-virtual"
+    }
     Write-Host "CUDAARCHS = $env:CUDAARCHS"
 
     # ------------------------------------------------------

@@ -29,8 +29,10 @@ usage() {
 Options:
   --scope user|system   install for this user (default) or system-wide (sudo / Administrator)
   --prefix DIR          custom prefix: DIR/bin and DIR/lib/vtmate (implies --scope user)
-  --variant NAME        force cpu, vulkan, cuda12 or cuda13 instead of auto-detection
-                        (cuda = whichever CUDA major this machine has a runtime for)
+  --variant NAME        force cpu, cpu-static, vulkan, cuda12 or cuda13 instead of
+                        auto-detection (cuda = whichever CUDA major this machine
+                        has a runtime for; cpu-static is the musl build, which
+                        runs anywhere but cannot use a sound server)
   --version TAG         install a specific release tag instead of the latest
   --yes                 answer yes to every question (reinstall, uninstall)
   --dry-run             detect, select and report; download and install nothing
@@ -56,7 +58,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 case "$SCOPE" in ""|user|system) ;; *) echo "❌ --scope must be user or system"; exit 1 ;; esac
-case "$VARIANT" in ""|cpu|vulkan|cuda|cuda12|cuda13) ;; *) echo "❌ --variant must be cpu, vulkan, cuda12, cuda13 or cuda"; exit 1 ;; esac
+case "$VARIANT" in ""|cpu|cpu-static|vulkan|cuda|cuda12|cuda13) ;; *) echo "❌ --variant must be cpu, cpu-static, vulkan, cuda12, cuda13 or cuda"; exit 1 ;; esac
 [ -n "$PREFIX" ] && SCOPE="user"
 
 # -------------------------
@@ -294,6 +296,53 @@ say "vtmate $VERSION - $OS_NAME/$ARCH_NAME$([ "$WSL" -eq 1 ] && echo ' (WSL)')"
 [ "$WSL" -eq 1 ] && warn "Running under WSL: this installs the Linux build inside WSL. For GPU use you need NVIDIA's WSL2 driver on the Windows side; the native Windows build is a separate download."
 
 # -------------------------
+# -------------------------
+# libc: which Linux CPU build fits.
+# "cpu" is built against glibc so ALSA can load the plugin PCM behind "default"
+# (the pulse/pipewire bridge every desktop uses); "cpu-static" is the musl build,
+# which has no dynamic loader, cannot load that plugin, and so only talks to hw:
+# devices - right for a minimal or old system, wrong wherever a sound server owns
+# the card. The vulkan and cuda builds are glibc for the same reason (their GPU
+# loaders are glibc), so a musl system gets neither.
+# Keep GLIBC_FLOOR in sync with the base image of the glibc Dockerfile in
+# build_linux.sh (ubuntu:24.04 -> 2.39).
+# -------------------------
+GLIBC_FLOOR="2.39"
+
+# libc_kind -> "musl", "glibc <major.minor>", or "unknown"
+libc_kind() {
+  out="$(ldd --version 2>&1 | head -2)"
+  case "$out" in
+    *musl*) echo "musl"; return 0 ;;
+  esac
+  v="$(printf '%s' "$out" | sed -n 's/.*[^0-9.]\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -1)"
+  if [ -n "$v" ]; then echo "glibc $v"; else echo "unknown"; fi
+}
+
+# version_ge 2.39 2.36 -> true
+version_ge() {
+  am="${1%%.*}"; an="${1#*.}"; an="${an%%.*}"
+  bm="${2%%.*}"; bn="${2#*.}"; bn="${bn%%.*}"
+  [ "$am" -gt "$bm" ] && return 0
+  [ "$am" -lt "$bm" ] && return 1
+  [ "$an" -ge "$bn" ]
+}
+
+# cpu_variant -> the CPU build this machine can actually run.
+# Distro family says nothing useful here (Fedora, Arch and Debian are all glibc,
+# Alpine is musl); what matters is the libc and, for glibc, whether it is new
+# enough for a binary built on the CI image.
+cpu_variant() {
+  [ "$OS_NAME" = "linux" ] || { echo "cpu"; return 0; }
+  case "$LIBC" in
+    "glibc "*)
+      v="${LIBC#glibc }"
+      version_ge "$v" "$GLIBC_FLOOR" && { echo "cpu"; return 0; }
+      ;;
+  esac
+  echo "cpu-static"
+}
+
 # GPU detection: driver, then the runtime the cuda12 / cuda13 variant needs.
 # The two cuda builds are the same program against CUDA 12.x / 13.x; the one
 # to install is the one whose runtime libraries are already on this machine.
@@ -373,6 +422,10 @@ cuda_major_available() {
   return 0
 }
 
+LIBC="unknown"
+[ "$OS_NAME" = "linux" ] && LIBC="$(libc_kind)"
+[ "$OS_NAME" = "linux" ] && say "C library: $LIBC (CPU build: $(cpu_variant))"
+
 CUDA=0; VULKAN=0
 detect_cuda_driver && CUDA=1
 detect_vulkan && VULKAN=1
@@ -425,6 +478,12 @@ elif [ "$VARIANT" = "cuda" ]; then
 elif [ -n "$VARIANT" ]; then
   CANDIDATES="${PREFIX_NAME}-${VARIANT}.${EXT}"
 else
+  # The GPU builds are glibc (their Vulkan/CUDA loaders are), so on a musl
+  # system the static CPU build is the only one that can run at all.
+  if [ "$LIBC" = "musl" ] && { [ "$CUDA" -eq 1 ] || [ "$VULKAN" -eq 1 ]; }; then
+    warn "GPU builds need glibc; this system is musl, so the static CPU build is the only option"
+    CUDA=0; VULKAN=0
+  fi
   if [ "$CUDA" -eq 1 ]; then
     major="$(cuda_major_available)"
     if [ -n "$major" ]; then
@@ -442,7 +501,7 @@ else
     fi
   fi
   [ "$VULKAN" -eq 1 ] && CANDIDATES="$CANDIDATES ${PREFIX_NAME}-vulkan.${EXT}"
-  CANDIDATES="$CANDIDATES ${PREFIX_NAME}-cpu.${EXT}"
+  CANDIDATES="$CANDIDATES ${PREFIX_NAME}-$(cpu_variant).${EXT}"
 fi
 say "Candidates: $CANDIDATES"
 

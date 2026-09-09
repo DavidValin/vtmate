@@ -2,6 +2,22 @@
 //  Util
 // ------------------------------------------------------------------
 
+/// Does this error text mean "not on this GPU" rather than "not at all"?
+///
+/// The accelerated backends report GPU trouble as free-form text from C++, so
+/// substring matching is what there is: ONNX Runtime surfaces a full card as
+/// "CUBLAS failure 3: CUBLAS_STATUS_ALLOC_FAILED" out of cublasCreate, ggml as
+/// a CUDA error. Callers use it to decide whether retrying on the CPU is worth
+/// it - speech and transcription matter more than the acceleration, and on a
+/// shared GPU (an LLM in the same VRAM, say) the failure is transient in cause
+/// but permanent for this run.
+pub fn looks_like_gpu_failure(msg: &str) -> bool {
+  let msg = msg.to_ascii_lowercase();
+  ["cuda", "cublas", "cudnn", "gpu", "vulkan", "out of memory"]
+    .iter()
+    .any(|needle| msg.contains(needle))
+}
+
 use crossterm::cursor::Show;
 use crossterm::{
   cursor::MoveTo,
@@ -339,6 +355,8 @@ pub fn run_exit_hook() {
 pub fn terminate(code: i32) -> ! {
   // no more bottom bars: whatever is on screen now is the last thing shown
   crate::ui::UI_SHUTDOWN.store(true, std::sync::atomic::Ordering::Relaxed);
+  // close the wav of the turn --save-html was still recording
+  crate::html_export::finish();
   run_exit_hook();
    // Disable raw mode if enabled, to restore terminal state
    let _ = crossterm::terminal::disable_raw_mode();

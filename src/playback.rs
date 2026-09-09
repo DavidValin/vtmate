@@ -51,7 +51,26 @@ pub fn playback_thread(
   // When this reaches a few callbacks in a row of "no real audio", we mark not-playing.
   let empty_callbacks = Arc::new(AtomicU64::new(0));
 
-  let err_fn = |e| crate::log::log("error", &format!("output stream error: {}", e));
+  // A dying output device makes cpal call this on every period, forever: the
+  // musl/static-ALSA cpu build cannot load plugin PCMs (pulse, pipewire), so
+  // "default" opens and then fails with POLLERR on every poll. Report it once,
+  // with something the user can act on, then stay quiet - the unthrottled
+  // version filled the terminal until the program was killed by hand.
+  let stream_errors = Arc::new(AtomicU64::new(0));
+  let err_fn = {
+    let stream_errors = stream_errors.clone();
+    move |e| {
+      if stream_errors.fetch_add(1, Ordering::Relaxed) == 0 {
+        crate::log::log("error", &format!("output stream error: {}", e));
+        crate::log::log(
+          "error",
+          "audio output is failing; further errors from this stream are not repeated. \
+           On the cpu build this is usually its static ALSA losing a plugin device \
+           (pulse/pipewire); the glibc builds (vulkan/cuda) do not have that limit.",
+        );
+      }
+    }
+  };
 
   set_speaking_hold(config.sample_rate.0);
 
@@ -294,6 +313,9 @@ pub fn playback_thread(
           if let Some(tx) = WAV_TX.get() {
             tx.send(chunk.clone()).unwrap_or(());
           }
+          // --save-html keeps one wav per turn: this chunk belongs to whichever
+          // turn is being recorded right now (a no-op when nothing is open)
+          crate::html_export::push_audio(&chunk);
           let channels = out_channels as usize;
           let max_samples = crate::tts::QUEUE_CAP_FRAMES * channels;
           let mut stopped_while_waiting = false;

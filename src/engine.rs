@@ -81,6 +81,8 @@ impl Channels {
 pub struct EngineOptions {
   pub quiet: bool,
   pub save: bool,
+  /// Export an html player with one audio file per turn (`--save-html`).
+  pub save_html: bool,
   pub initial_prompt: Option<String>,
   /// Where the conversation thread sends daemon work (paste requests).
   pub tx_action: Option<Sender<DaemonAction>>,
@@ -335,6 +337,7 @@ pub fn start(
     let tx_action = opts.tx_action.clone();
     let quiet = opts.quiet;
     let save = opts.save;
+    let save_html = opts.save_html;
     move || {
       if let Err(e) = conversation::conversation_thread(
         rx_utt,
@@ -351,6 +354,7 @@ pub fn start(
         initial_prompt,
         quiet,
         save,
+        save_html,
         tx_action,
       ) {
         log::log("error", &format!("conversation thread ended: {}", e));
