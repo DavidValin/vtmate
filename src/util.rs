@@ -252,6 +252,33 @@ mod tts_text_tests {
   }
 
   #[test]
+  fn lines_split_the_display_and_punctuation_splits_the_speech() {
+    // a list is spoken item by item, even with no punctuation to split on
+    assert_eq!(
+      split_text_for_tts("* First phrase\n* Second phrase", false),
+      [
+        ("* First phrase".to_string(), "First phrase".to_string()),
+        ("* Second phrase".to_string(), "Second phrase".to_string()),
+      ]
+    );
+
+    // . ! ? ; each end a spoken phrase inside a line and stay attached to it,
+    // while the line they came from is what gets displayed
+    let out = split_text_for_tts("Ready? Set! Go; now.", false);
+    assert_eq!(
+      out.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>(),
+      ["Ready?", "Set!", "Go;", "now."]
+    );
+    assert!(out.iter().all(|(line, _)| line == "Ready? Set! Go; now."));
+
+    // a line with nothing to say is kept, so it can be shown and stepped over
+    assert_eq!(
+      split_text_for_tts("---", false),
+      [("---".to_string(), String::new())]
+    );
+  }
+
+  #[test]
   fn special_chars_stripped_but_punctuation_kept() {
     let mut in_code = false;
     assert_eq!(tts_text("Hola, ¿qué tal? *bien* (ok)!", &mut in_code), "Hola, ¿qué tal? bien ok!");
@@ -277,59 +304,68 @@ pub fn _strip_ansi(s: &str) -> String {
   result
 }
 
-/// Split free text into phrases the way read-file mode does: a blank line ends
-/// a phrase, and every '.' inside a line ends one too. Returns
-/// `(display_text, tts_text)` pairs; `tts_text` has fenced ``` code removed
-/// and special characters stripped (it can be empty for code-only phrases).
+/// Delimiters that end a spoken phrase inside a line. They stay attached to
+/// the phrase they close: the TTS engines read them for intonation and pacing,
+/// so a question keeps its rise and a sentence its fall.
+const TTS_DELIMITERS: [char; 4] = ['.', '!', '?', ';'];
+
+/// Split free text for reading aloud. Returns `(display_line, tts_text)` pairs.
+///
+/// The two are split differently on purpose. Speaking breaks at every line and
+/// at every `. ! ? ;` inside one, because each phrase is synthesized on its own
+/// and that is what gives the reading its pauses. Displaying breaks at lines
+/// only: a line split into several spoken phrases is shown once, as it was
+/// written, so the text on screen still looks like the text that was selected.
+///
+/// `tts_text` has special characters stripped and can be empty, for a line with
+/// nothing to say (a rule, a row of dashes, code that is being skipped); such a
+/// line is still returned so it can be shown and stepped over.
+///
 /// `skip_code` decides whether fenced ``` code is spoken. An agent's reply
 /// skips it, since hearing brackets and punctuation read out is useless. Text
 /// you asked to have read, with `-r` or the read-aloud shortcut, keeps it: the
 /// code is part of what you asked for.
 pub fn split_text_for_tts(content: &str, skip_code: bool) -> Vec<(String, String)> {
-  let mut phrases: Vec<String> = Vec::new();
-  let mut current = String::new();
+  let mut phrases: Vec<(String, String)> = Vec::new();
+  // Fence state carries across lines, in order.
+  let mut in_code = false;
   for line in content.lines() {
-    let trimmed = line.trim();
-    if trimmed.is_empty() {
-      if !current.is_empty() {
-        phrases.push(current.trim().to_string());
-        current.clear();
-      }
+    let line = line.trim();
+    if line.is_empty() {
       continue;
     }
-    // Split line on periods to handle sentence ends
-    let mut parts = trimmed.split('.');
-    let first = parts.next().unwrap_or("");
-    if !current.is_empty() {
-      current.push(' ');
-    }
-    current.push_str(first);
-    // Any subsequent parts mean we hit a period
-    for part in parts {
-      phrases.push(current.trim().to_string());
-      current.clear();
-      if !part.is_empty() {
-        current.push_str(part);
+    // Cleaned a whole line at a time, so the fence state stays in step however
+    // the line is broken up afterwards.
+    let spoken = if skip_code {
+      tts_text(line, &mut in_code)
+    } else {
+      // keep the code, only drop the fence markers themselves
+      strip_special_chars(&line.replace("```", " "))
+    };
+    let before = phrases.len();
+    let mut current = String::new();
+    for ch in spoken.chars() {
+      current.push(ch);
+      if TTS_DELIMITERS.contains(&ch) {
+        push_spoken(&mut phrases, line, &mut current);
       }
     }
+    push_spoken(&mut phrases, line, &mut current);
+    if phrases.len() == before {
+      phrases.push((line.to_string(), String::new()));
+    }
   }
-  if !current.is_empty() {
-    phrases.push(current.trim().to_string());
-  }
-  // Fence state carries across phrases, in order.
-  let mut in_code = false;
   phrases
-    .into_iter()
-    .map(|p| {
-      let tts = if skip_code {
-        tts_text(&p, &mut in_code)
-      } else {
-        // keep the code, only drop the fence markers themselves
-        strip_special_chars(&p.replace("```", " "))
-      };
-      (p, tts)
-    })
-    .collect()
+}
+
+/// Move what has been collected into `phrases` as one spoken phrase of `line`,
+/// unless there is nothing in it to say.
+fn push_spoken(phrases: &mut Vec<(String, String)>, line: &str, current: &mut String) {
+  let spoken = current.trim();
+  if spoken.chars().any(char::is_alphanumeric) {
+    phrases.push((line.to_string(), spoken.to_string()));
+  }
+  current.clear();
 }
 
 static EXIT_HOOK: OnceLock<Box<dyn Fn() + Send + Sync>> = OnceLock::new();

@@ -393,7 +393,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         displayed.clear();
         // Add all phrases before the current index
         for i in 0..idx {
-          displayed.push(phrases[i].clone());
+          push_display_line(&mut displayed, &phrases[i]);
         }
         // show the new phrase as current straight away: waiting until it
         // starts speaking leaves the highlight a step behind the key presses
@@ -433,8 +433,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
           // block: pressing UP landed on it and it immediately jumped forward
           // again. It is still shown, it is just never spoken.
           let mut displayed = displayed_phrases.lock().unwrap();
-          if !moving_back && !displayed.contains(phrase) {
-            displayed.push(phrase.clone());
+          if !moving_back {
+            push_display_line(&mut displayed, phrase);
           }
           drop(displayed);
           let step_to = if moving_back && idx > 0 {
@@ -558,9 +558,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
           // NOW that playback is done, move phrase from current to completed (unhighlighted)
           let mut displayed = displayed_phrases.lock().unwrap();
-          if !displayed.contains(phrase) {
-            displayed.push(phrase.clone());
-          }
+          push_display_line(&mut displayed, phrase);
           // Update display immediately to show it as completed (no highlight)
           update_display(&mut out, &displayed, None);
           drop(displayed);
@@ -778,4 +776,13 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let _ = ui_handle.join();
 
   Ok(())
+}
+
+/// Add a line to what read-file mode has already read out. A line broken into
+/// several spoken phrases arrives here once per phrase and must still be shown
+/// once, as it was written.
+fn push_display_line(displayed: &mut Vec<String>, line: &str) {
+  if displayed.last().map(String::as_str) != Some(line) {
+    displayed.push(line.to_string());
+  }
 }
