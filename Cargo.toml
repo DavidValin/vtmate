@@ -1,6 +1,6 @@
 [package]
 name = "vtmate"
-version = "0.8.0"
+version = "0.8.1"
 edition = "2024"
 build = "build.rs"
 
@@ -25,13 +25,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 urlencoding = "2"
 url = "2"
-whisper-rs = { version = "0.15.1", default-features = false }
+whisper-rs = { version = "0.16.0", default-features = false }
 # For ggml_log_level only (crate::log's ggml callback): bindgen derives that
 # enum's width from the target - c_uint with gcc/clang, c_int with MSVC - so
 # the callback signature has to use the generated alias rather than spell out
 # u32, which builds on Linux and fails on Windows. Same version whisper-rs
 # depends on, no features of our own, so it stays one build of whisper.cpp.
-whisper-rs-sys = { version = "0.14.1", default-features = false }
+whisper-rs-sys = { version = "0.15.0", default-features = false }
 ort = { version = "2.0.0-rc.11", features = [ "std", "ndarray", "tls-rustls" ] }
 hound = "3"
 crossterm = { version = "0.27", features = ["serde"] }
