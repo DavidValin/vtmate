@@ -468,3 +468,97 @@ fn the_popup_fits_a_small_terminal() {
     view
   );
 }
+
+/// Build a settings file with `n` agents, so the list has to scroll.
+fn many_agents(n: usize) -> String {
+  let mut out = String::new();
+  for i in 0..n {
+    out.push_str(&format!(
+      "[agent]\nname = agent {:02}\nlanguage = en\ntts = supertonic\nvoice = M1\n\
+       voice_speed = 1.2\nptt = true\nprovider = ollama\nbaseurl = http://127.0.0.1:11434\n\
+       model = llama3.2:3b\nsystem_prompt = you are agent {:02}\nsound_threshold_peak = 0.05\n\
+       end_silence_ms = 700\nwhisper_model_path = ~/.whisper-models/ggml-tiny.bin\n\n",
+      i, i
+    ));
+  }
+  out
+}
+
+#[test]
+fn tab_from_the_list_goes_straight_to_save() {
+  let state = session(&many_agents(12));
+  settings_ui::open(&state);
+
+  // from the first agent, with eleven more below it
+  assert_eq!(ui(&state).cursor, 0);
+  press(&state, KeyCode::Tab);
+  assert_eq!(ui(&state).cursor, 12, "Tab from a row lands on Save");
+  assert!(screen(&ui(&state)).contains("Save"));
+
+  // and from further down the list, not one row at a time
+  press(&state, KeyCode::Tab); // Save -> Cancel
+  assert_eq!(ui(&state).cursor, 13);
+  press(&state, KeyCode::Tab); // Cancel -> back to the list
+  assert_eq!(ui(&state).cursor, 0);
+  press(&state, KeyCode::Down);
+  press(&state, KeyCode::Down);
+  assert_eq!(ui(&state).cursor, 2);
+  press(&state, KeyCode::Tab);
+  assert_eq!(ui(&state).cursor, 12, "Tab from any row lands on Save");
+}
+
+#[test]
+fn a_long_list_scrolls_and_stays_inside_the_popup() {
+  let state = session(&many_agents(40));
+  settings_ui::open(&state);
+
+  let shown = |state: &AppState| -> Vec<String> {
+    screen(&ui(state))
+      .lines()
+      .filter(|l| l.contains("agent "))
+      .map(|l| l.to_string())
+      .collect()
+  };
+
+  // the popup never grows past the terminal it is drawn in
+  let drawn = screen(&ui(&state));
+  assert!(
+    drawn.lines().count() <= 24,
+    "popup is {} lines tall",
+    drawn.lines().count()
+  );
+  // only a window of the agents is drawn, and it says so
+  let first_view = shown(&state);
+  assert!(
+    first_view.len() < 40,
+    "all 40 agents were drawn at once: {}",
+    first_view.len()
+  );
+  assert!(
+    drawn.contains(&format!("of {} - ", 40)),
+    "no scroll position shown:\n{}",
+    drawn
+  );
+  assert!(first_view.iter().any(|l| l.contains("agent 00")));
+
+  // walking down past the window scrolls it, keeping the cursor in view
+  for _ in 0..39 {
+    press(&state, KeyCode::Down);
+  }
+  assert_eq!(ui(&state).cursor, 39);
+  let last_view = shown(&state);
+  assert!(
+    last_view.iter().any(|l| l.contains("agent 39")),
+    "the last agent is not on screen:\n{}",
+    screen(&ui(&state))
+  );
+  assert!(
+    !last_view.iter().any(|l| l.contains("agent 00")),
+    "the list did not scroll"
+  );
+  assert_eq!(
+    last_view.len(),
+    first_view.len(),
+    "the window changed size while scrolling"
+  );
+}

@@ -354,9 +354,22 @@ fn list_key(ui: &mut SettingsUi, k: &KeyEvent, commit: &mut bool) {
       ui.notice = None;
       ui.cursor = if ui.cursor == 0 { last } else { ui.cursor - 1 };
     }
-    KeyCode::Down | KeyCode::Tab => {
+    KeyCode::Down => {
       ui.notice = None;
       ui.cursor = if ui.cursor >= last { 0 } else { ui.cursor + 1 };
+    }
+    KeyCode::Tab => {
+      // Tab is for leaving the list: it goes straight to Save, wherever the
+      // cursor is among the agents. Stepping down through a long list to
+      // reach the buttons is what ↑/↓ are for.
+      ui.notice = None;
+      ui.cursor = if ui.on_save() {
+        last // Save -> Cancel
+      } else if ui.on_cancel() {
+        0 // Cancel -> back to the top of the list
+      } else {
+        ui.agents.len() // any agent row -> Save
+      };
     }
     KeyCode::Left | KeyCode::Right => {
       // the two buttons sit side by side
@@ -1060,12 +1073,14 @@ fn list_lines(ui: &SettingsUi, inner: usize, rows: u16) -> (String, Vec<String>,
     header.push_str(&cut("PROMPT", width));
   }
 
-  // room for the rows: the popup keeps the header, the two shortcut lines,
-  // the buttons and its own borders
-  let reserved = 8;
-  let room = (rows.saturating_sub(1) as usize)
-    .saturating_sub(reserved)
-    .max(1);
+  // Room for the agent rows. `draw` gives the body `rows - 3` lines (the
+  // bottom bar and the two borders are its own), and out of those the footer
+  // takes its separator, shortcuts, buttons and any notice, while the list
+  // itself spends one line on the header, one under it, one on the scroll
+  // hint and one above the footer. Reserving the hint line whether or not it
+  // is used keeps the count from depending on its own outcome.
+  let footer_len = 3 + usize::from(ui.notice.is_some());
+  let room = (rows as usize).saturating_sub(7 + footer_len).max(1);
   let scroll = scroll_for(ui.cursor.min(ui.agents.len()), ui.agents.len(), room);
 
   let mut lines = vec![format!("{}{}{}", DIM, header, OFF), String::new()];
@@ -1079,10 +1094,14 @@ fn list_lines(ui: &SettingsUi, inner: usize, rows: u16) -> (String, Vec<String>,
     ));
   }
   if ui.agents.len() > room {
+    // which slice of the list is on screen, so a long list can be walked
+    // without losing track of where in it the cursor is
     lines.push(format!(
-      "{}  {} more agents - ↑/↓ to reach them{}",
+      "{}  showing {}-{} of {} - ↑/↓ to scroll{}",
       DIM,
-      ui.agents.len() - room,
+      scroll + 1,
+      (scroll + room).min(ui.agents.len()),
+      ui.agents.len(),
       OFF
     ));
   }
