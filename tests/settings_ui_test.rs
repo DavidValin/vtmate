@@ -618,7 +618,11 @@ fn the_arrows_walk_the_prompt_lines_before_leaving_the_field() {
   }
   assert_eq!(ui(&state).form.cursor, prompt);
   // coming down into it, editing starts on the first line
-  assert_eq!(ui(&state).form.caret, 0, "the prompt is entered at its start");
+  assert_eq!(
+    ui(&state).form.caret,
+    0,
+    "the prompt is entered at its start"
+  );
 
   // give it three lines to walk
   press(&state, KeyCode::End);
@@ -635,7 +639,11 @@ fn the_arrows_walk_the_prompt_lines_before_leaving_the_field() {
   assert_eq!(ui(&state).form.cursor, prompt, "still in the prompt");
   // and only once there is no line above does it move to the field before it
   press(&state, KeyCode::Up);
-  assert_eq!(ui(&state).form.cursor, prompt - 1, "left the prompt at its top");
+  assert_eq!(
+    ui(&state).form.cursor,
+    prompt - 1,
+    "left the prompt at its top"
+  );
 
   // back down into it: first line again, then a line per press
   press(&state, KeyCode::Down);
