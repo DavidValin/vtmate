@@ -144,16 +144,16 @@ api_key = sk-ant-...
 The quickest way is to press `Control+S` while vtmate is running: a popup opens with the list of your agents, and everything you change there is written to the settings file when you save it.
 
 ```
-┌ Settings - 2 agents ─────────────────────────────────────────────────────────────────────────┐
-│ NAME         LANG MODE TTS         VOICE    SPD  PROVIDER          MODEL          PROMPT     │
-│                                                                                              │
-│ main agent   en   PTT  supertonic  M1       1.1x ollama            llama3.2:3b    You are... │
-│ explainer    en   LIVE supertonic  F1       1.1x ollama            llama3.2:3b    You exp... │
-│                                                                                              │
-│ ──────────────────────────────────────────────────────────────────────────────────────────── │
-│ n new agent   e edit agent   d delete agent   ↑/↓ move                                       │
-│   [ Save ]   [ Cancel ]                                                                      │
-└──────────────────────────────────────────────────────────────────────────────────────────────┘
+┌ Settings - 2 agents ────────────────────────────────────────────────────────────────────┐
+│ NAME        LANG  MODE  TTS         VOICE   SPD   PROVIDER    MODEL          PROMPT     │
+│                                                                                         │
+│ main agent  en    PTT   supertonic  M1      1.1x  ollama      llama3.2:3b    You are... │
+│ explainer   en    LIVE  supertonic  F1      1.1x  ollama      llama3.2:3b    You exp... │
+│                                                                                         │
+│ ─────────────────────────────────────────────────────────────────────────────────────── │
+│ n new agent   e edit agent   d delete agent   ↑/↓ move                                  │
+│   [ Save ]   [ Cancel ]                                                                 │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 * `n` adds an agent (starting from the one you are on), `e` edits the selected one, `d` removes it after asking.
@@ -256,17 +256,18 @@ All cli options:
   -i <file.txt>                         initialize with a file prompt
   -i -                                  initialize with prompt from STDIN (runs in quiet mode)
   -s                                    save the conversation to text and audio file in ~/.vtmate/conversations or ~/.vtmate/read-files
+  -s-html, --save-html                  save the conversation to a folder in ~/.vtmate/conversations with an html player and one audio file per turn
   --debate <AGENT1> <AGENT2> [SUBJECT]  initialize a debate between 2 agents with an initial prompt
   --debate <AGENT1> <AGENT2> -i <FILE>  initialize a debate between 2 agents with an initial prompt from file
   --debate <AGENT1> <AGENT2> -i –       initialize a debate between 2 agents with an initial prompt from STDIN
   -r <file.txt>                         read a file with voice, phrase by phrase (no llm involved)
   -r -                                  read text from STDIN with voice, phrase by phrase (no llm involved). Use - for STDIN (runs in quiet mode)
   -c <settings_file>                    use a specific settings file
+  --list-voices                         list all voices for all languages and tts systems
+  --ptt <true/false>                    override for this session the ptt setting for all agents independently of its settings
   --daemon                              start vtmate in the background, driven by global shortcuts (see daemon mode)
   --daemon-stop                         stop the background daemon
   --daemon-status                       show whether the daemon is running and its shortcuts
-  --list-voices                         list all voices for all languages and tts systems
-  --ptt <true/false>                    override for this session the ptt setting for all agents independently of its settings
   --verbose                             run the program in verbose mode
   --version                             print the vtmate installed version
   --help                                show help
@@ -284,6 +285,30 @@ Start conversation with default agent and save it as audio and text
 ```
 vtmate -s
 ```
+
+or save it as html with playable turns
+```
+vtmate -s-html
+```
+
+This writes a folder per conversation in `~/.vtmate/conversations`:
+
+```
+2026-09-09_18-42-10_ab12cd34/
+  index.html            the player: the whole conversation, turn by turn
+  turn-001-user.wav     what you said on that turn
+  turn-002-nova.wav     what the agent answered on that turn
+  ...
+```
+
+Open `index.html` in a browser and press play: it plays every turn in order,
+highlights the one being spoken and scrolls to it. Playback can be paused and
+resumed, each turn has its own play button to jump to it, and the page has a
+light / dark theme switch. It is rewritten after every turn, so the folder can
+be opened while the conversation is still going.
+
+`-s` and `-s-html` are independent and can be combined: `-s` writes one `.txt`
+plus a single `.wav` for the whole session, `-s-html` writes the folder above.
 
 Start conversation with a specific agent
 (waits for user voice input and respond)
@@ -315,6 +340,8 @@ echo "How to fly without wings?" | vtmate -i -
 * You can change the voice speed by pressing `ARROW_UP` / `ARROW_DOWN`
 * Press `Control+S` to add, edit or remove agents without leaving the conversation (see [Configure agents](#configure-agents))
 * Be able to save the conversation in a wav and text file by adding `-s` option. It will save it in `~/.vtmate/conversations` folder
+* Be able to save the debate as an html player with one audio file per turn by adding `-s-html` option. Each agent gets its own colour, and the whole debate can be played back from the browser
+* Save the conversation / debate as .html with playable blocks using `--save-html`. It will save it in `~/.vtmate/conversations` folder
 * For quick reference get the printable [Quicksheet (PDF)](https://raw.githubusercontent.com/DavidValin/vtmate/refs/heads/main/docs/en/quicksheet.pdf)
 
 ### Debate mode

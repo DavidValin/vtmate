@@ -297,10 +297,9 @@ fn inline_code(line: &str) -> String {
     .collect()
 }
 
-/// The colour each speaker gets, by order of appearance.
-const ACCENTS: [&str; 6] = [
-  "#7ee787", "#79c0ff", "#ffa657", "#d2a8ff", "#f778ba", "#56d4bc",
-];
+/// How many speaker colours the stylesheet defines (`.turn.a0` … `.turn.a5`).
+/// Each one is a css variable, so both themes get their own readable shade.
+const ACCENT_COUNT: usize = 6;
 
 fn speaker_label(msg: &ChatMessage) -> String {
   match msg.role.as_str() {
@@ -321,20 +320,22 @@ fn build_page(history: &[ChatMessage], meta: &SaveMetadata, audio: &[Option<Stri
 
   for (i, msg) in history.iter().enumerate() {
     let name = speaker_label(msg);
+    // agents are coloured by order of appearance; the user keeps the neutral
+    // accent the `.turn` rule already carries
     let accent = if msg.role == "user" {
-      "#8b949e"
+      String::new()
     } else {
       let pos = names.iter().position(|n| n == &name).unwrap_or_else(|| {
         names.push(name.clone());
         names.len() - 1
       });
-      ACCENTS[pos % ACCENTS.len()]
+      format!(" a{}", pos % ACCENT_COUNT)
     };
     let file = audio.get(i).and_then(|f| f.clone());
     let has_audio = file.is_some();
     turns_html.push_str(&format!(
       concat!(
-        "<article class=\"turn {role}\" id=\"t{i}\" data-i=\"{i}\" style=\"--accent:{accent}\">",
+        "<article class=\"turn {role}{accent}\" id=\"t{i}\" data-i=\"{i}\">",
         "<div class=\"head\">",
         "<button class=\"play-turn\" data-i=\"{i}\" title=\"play from here\" aria-label=\"play from here\">▶</button>",
         "<span class=\"name\">{name}</span>",
@@ -425,91 +426,102 @@ fn build_page(history: &[ChatMessage], meta: &SaveMetadata, audio: &[Option<Stri
 }
 
 const PAGE: &str = r##"<!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>__TITLE__</title>
 <style>
 :root{
-  --bg:#0d1117; --panel:#11161d; --line:#222c37; --fg:#d7e0ea; --dim:#7d8996;
-  --user:#8b949e; --radius:14px;
+  color-scheme:light;
+  --bg:#f7f7f5; --panel:#ffffff; --line:#e2e0da; --fg:#1f2328; --dim:#6b7178;
+  --code-bg:#f1f1ed; --shadow:rgba(31,35,40,.10);
+  --user:#6e7781;
+  --a0:#1a7f37; --a1:#0969da; --a2:#bc4c00; --a3:#8250df; --a4:#bf3989; --a5:#137775;
+  --radius:10px;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"DejaVu Sans Mono","Liberation Mono",monospace;
 }
-@media (prefers-color-scheme: light){
-  :root{ --bg:#f6f8fa; --panel:#ffffff; --line:#dbe1e8; --fg:#1c2430; --dim:#5c6672; }
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0d1117; --panel:#131922; --line:#252d38; --fg:#d7e0ea; --dim:#8b949e;
+  --code-bg:#0a0e14; --shadow:rgba(0,0,0,.55);
+  --user:#8b949e;
+  --a0:#7ee787; --a1:#79c0ff; --a2:#ffa657; --a3:#d2a8ff; --a4:#f778ba; --a5:#56d4bc;
 }
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
 body{
   margin:0; background:var(--bg); color:var(--fg);
-  font:15px/1.65 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  font:14px/1.6 var(--mono);
   padding-bottom:40vh;
 }
 header{
-  position:sticky; top:0; z-index:10; backdrop-filter:blur(12px);
-  background:color-mix(in srgb, var(--bg) 88%, transparent);
-  border-bottom:1px solid var(--line);
+  position:sticky; top:0; z-index:10;
+  background:var(--bg); border-bottom:1px solid var(--line);
   display:flex; align-items:center; gap:14px; flex-wrap:wrap;
   padding:12px max(16px,calc(50vw - 420px));
 }
-.brand{font-weight:700; letter-spacing:.02em}
+.brand{font-weight:700; letter-spacing:.02em; white-space:nowrap}
 .brand small{font-weight:400; color:var(--dim)}
-.who{color:var(--dim); font-size:13px; flex:1; min-width:120px}
-.controls{display:flex; align-items:center; gap:8px}
-button{
-  font:inherit; color:var(--fg); background:var(--panel);
-  border:1px solid var(--line); border-radius:10px; padding:7px 12px;
+.who{color:var(--dim); font-size:12px; flex:1; min-width:120px}
+.controls{display:flex; align-items:center; gap:6px}
+button,select{
+  font:13px/1.4 var(--mono); color:var(--fg); background:var(--panel);
+  border:1px solid var(--line); border-radius:var(--radius); padding:7px 10px;
   cursor:pointer; transition:border-color .15s, transform .1s;
 }
-button:hover{border-color:var(--dim)}
+button:hover,select:hover{border-color:var(--dim)}
 button:active{transform:translateY(1px)}
 button:disabled{opacity:.4; cursor:default}
-#play{min-width:104px; font-weight:600}
-#counter{color:var(--dim); font-variant-numeric:tabular-nums; font-size:13px; min-width:64px; text-align:center}
-select{font:inherit; color:var(--fg); background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:7px 8px}
+#play{min-width:96px; font-weight:700}
+#counter{color:var(--dim); font-size:12px; min-width:62px; text-align:center}
+#theme{min-width:78px; text-align:left}
 main{max-width:840px; margin:0 auto; padding:26px 16px 0}
 .turn{
   --accent:var(--user);
-  position:relative; margin:0 0 14px; padding:14px 16px 16px;
+  position:relative; margin:0 0 12px; padding:12px 14px 14px;
   background:var(--panel); border:1px solid var(--line);
   border-left:3px solid var(--accent); border-radius:var(--radius);
-  transition:box-shadow .2s, border-color .2s, transform .2s;
+  transition:box-shadow .2s, border-color .2s;
 }
+.turn.a0{--accent:var(--a0)}
+.turn.a1{--accent:var(--a1)}
+.turn.a2{--accent:var(--a2)}
+.turn.a3{--accent:var(--a3)}
+.turn.a4{--accent:var(--a4)}
+.turn.a5{--accent:var(--a5)}
 .turn.user{background:transparent}
 .turn.active{
   border-color:var(--accent);
-  box-shadow:0 0 0 1px var(--accent), 0 10px 30px -18px var(--accent);
+  box-shadow:0 0 0 1px var(--accent), 0 10px 26px -18px var(--shadow);
 }
-.head{display:flex; align-items:center; gap:10px; margin-bottom:6px}
-.name{color:var(--accent); font-weight:700; font-size:13px; letter-spacing:.06em; text-transform:uppercase}
-.badge{color:var(--dim); font-size:11px; border:1px solid var(--line); border-radius:20px; padding:1px 8px}
-.play-turn{padding:2px 9px; border-radius:20px; font-size:11px; line-height:1.5; color:var(--dim)}
+.head{display:flex; align-items:center; gap:9px; margin-bottom:6px}
+.name{color:var(--accent); font-weight:700; font-size:12px; letter-spacing:.08em; text-transform:uppercase}
+.badge{color:var(--dim); font-size:11px; border:1px solid var(--line); border-radius:20px; padding:0 7px}
+.play-turn{padding:1px 8px; border-radius:20px; font-size:11px; color:var(--dim)}
 .turn.active .play-turn{color:var(--accent); border-color:var(--accent)}
-.body p{margin:.4em 0; white-space:pre-wrap; overflow-wrap:anywhere}
+.body p{margin:.35em 0; white-space:pre-wrap; overflow-wrap:anywhere}
 .body p.empty{color:var(--dim)}
-.body code{
-  font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
-  background:color-mix(in srgb, var(--fg) 10%, transparent); padding:1px 5px; border-radius:5px;
-}
+.body code{background:var(--code-bg); padding:1px 5px; border-radius:4px}
 .body pre{
-  background:color-mix(in srgb, var(--fg) 7%, transparent); border:1px solid var(--line);
-  border-radius:10px; padding:12px 14px; overflow-x:auto;
+  background:var(--code-bg); border:1px solid var(--line);
+  border-radius:var(--radius); padding:11px 13px; overflow-x:auto; margin:.5em 0;
 }
 .body pre code{background:none; padding:0}
-.bar{height:2px; margin-top:12px; background:var(--line); border-radius:2px; overflow:hidden; opacity:0}
+.bar{height:2px; margin-top:11px; background:var(--line); border-radius:2px; overflow:hidden; opacity:0}
 .turn.active .bar{opacity:1}
 .bar i{display:block; height:100%; width:0; background:var(--accent)}
-footer{max-width:840px; margin:34px auto 0; padding:22px 16px 60px; border-top:1px solid var(--line); color:var(--dim); font-size:13px}
-.cards{display:flex; flex-wrap:wrap; gap:12px; margin:14px 0}
-.card{flex:1 1 250px; background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:12px 14px}
-.card h3{margin:0 0 8px; font-size:13px; letter-spacing:.06em; text-transform:uppercase; color:var(--fg)}
-dl{display:grid; grid-template-columns:auto 1fr; gap:4px 12px; margin:0; font-size:12px}
+footer{max-width:840px; margin:34px auto 0; padding:20px 16px 60px; border-top:1px solid var(--line); color:var(--dim); font-size:12px}
+.cards{display:flex; flex-wrap:wrap; gap:10px; margin:14px 0}
+.card{flex:1 1 250px; background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:11px 13px}
+.card h3{margin:0 0 8px; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--fg)}
+dl{display:grid; grid-template-columns:auto 1fr; gap:3px 12px; margin:0; font-size:12px}
 dt{color:var(--dim)}
 dd{margin:0; overflow-wrap:anywhere}
 dd.prompt{white-space:pre-wrap; max-height:7em; overflow:auto}
 a{color:inherit}
-.hint{margin-top:10px; font-size:12px}
-kbd{border:1px solid var(--line); border-bottom-width:2px; border-radius:5px; padding:0 5px; font-size:11px}
+.hint{margin-top:9px}
+kbd{border:1px solid var(--line); border-bottom-width:2px; border-radius:4px; padding:0 5px; font-size:11px}
 </style>
 </head>
 <body>
@@ -518,16 +530,17 @@ kbd{border:1px solid var(--line); border-bottom-width:2px; border-radius:5px; pa
   <div class="who">__WHO__ · __DATE__</div>
   <div class="controls">
     <button id="prev" title="previous turn" aria-label="previous turn">⏮</button>
-    <button id="play">▶ Play</button>
+    <button id="play">▶ play</button>
     <button id="next" title="next turn" aria-label="next turn">⏭</button>
     <span id="counter">— / —</span>
     <select id="rate" title="playback speed">
-      <option value="0.75">0.75×</option>
-      <option value="1" selected>1×</option>
-      <option value="1.25">1.25×</option>
-      <option value="1.5">1.5×</option>
-      <option value="2">2×</option>
+      <option value="0.75">0.75x</option>
+      <option value="1" selected>1x</option>
+      <option value="1.25">1.25x</option>
+      <option value="1.5">1.5x</option>
+      <option value="2">2x</option>
     </select>
+    <button id="theme" title="light / dark theme">☀ light</button>
   </div>
 </header>
 
@@ -537,7 +550,7 @@ __TURNS__
 
 <footer>
   <div class="cards">__CARDS__</div>
-  <div>Recorded __DATE__ · exported by <a href="https://github.com/DavidValin/vtmate">vtmate</a></div>
+  <div>recorded __DATE__ · exported by <a href="https://github.com/DavidValin/vtmate">vtmate</a></div>
   <div class="hint"><kbd>space</kbd> play / pause · <kbd>←</kbd> <kbd>→</kbd> previous / next turn</div>
 </footer>
 
@@ -547,6 +560,8 @@ const els = Array.from(document.querySelectorAll('.turn'));
 const playBtn = document.getElementById('play');
 const counter = document.getElementById('counter');
 const rateSel = document.getElementById('rate');
+const themeBtn = document.getElementById('theme');
+const root = document.documentElement;
 const audio = new Audio();
 
 let cur = -1;        // turn being played (or paused on)
@@ -554,6 +569,20 @@ let playing = false;
 let timer = null;    // silent turns are held for a readable moment
 let timerEnds = 0, timerLeft = 0;
 let ticker = null;
+
+// light unless this browser remembers otherwise; storage is unavailable on
+// file:// in some browsers, so every access is guarded
+function setTheme(theme){
+  root.dataset.theme = theme;
+  themeBtn.textContent = theme === 'dark' ? '☾ dark' : '☀ light';
+  try { localStorage.setItem('vtmate-theme', theme); } catch (e) {}
+}
+let stored = null;
+try { stored = localStorage.getItem('vtmate-theme'); } catch (e) {}
+setTheme(stored === 'dark' ? 'dark' : 'light');
+themeBtn.addEventListener('click', function(){
+  setTheme(root.dataset.theme === 'dark' ? 'light' : 'dark');
+});
 
 // A turn with no audio still gets its moment on screen, roughly the time it
 // takes to read it, so playing back a conversation never jumps over what was
@@ -654,7 +683,7 @@ function toggle(){
 }
 
 function render(){
-  playBtn.textContent = playing ? '⏸ Pause' : (cur >= 0 ? '▶ Resume' : '▶ Play');
+  playBtn.textContent = playing ? '⏸ pause' : (cur >= 0 ? '▶ resume' : '▶ play');
   setCounter();
 }
 
