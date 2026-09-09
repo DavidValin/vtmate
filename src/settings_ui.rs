@@ -521,9 +521,21 @@ fn form_key(ui: &mut SettingsUi, k: &KeyEvent) {
       leave_form(ui);
       return;
     }
-    KeyCode::Tab | KeyCode::BackTab => {
-      let forward = k.code == KeyCode::Tab;
-      move_cursor(ui, forward, last);
+    KeyCode::Tab => {
+      // Tab leaves the fields for the buttons, the same way it does in the
+      // list. Going through the fields one at a time is what ↑/↓ are for.
+      ui.form.cursor = if ui.form.on_done() {
+        last // Done -> Cancel
+      } else if ui.form.on_cancel() {
+        0 // Cancel -> back to the first field
+      } else {
+        FIELDS.len() // any field -> Done
+      };
+      place_caret_at_end(ui);
+      return;
+    }
+    KeyCode::BackTab => {
+      move_cursor(ui, false, last);
       return;
     }
     KeyCode::Up | KeyCode::Down => {
@@ -614,7 +626,12 @@ fn move_cursor(ui: &mut SettingsUi, forward: bool, last: usize) {
   } else {
     ui.form.cursor - 1
   };
-  // the caret lands at the end of whatever text the new field holds
+  place_caret_at_end(ui);
+}
+
+/// The caret lands at the end of whatever text the field under the cursor
+/// holds, and at 0 when the cursor is on a button.
+fn place_caret_at_end(ui: &mut SettingsUi) {
   ui.form.caret = ui
     .form
     .field()

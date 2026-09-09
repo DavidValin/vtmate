@@ -562,3 +562,47 @@ fn a_long_list_scrolls_and_stays_inside_the_popup() {
     "the window changed size while scrolling"
   );
 }
+
+#[test]
+fn tab_in_the_form_goes_straight_to_its_done_button() {
+  let state = session(SETTINGS);
+  settings_ui::open(&state);
+  press(&state, KeyCode::Char('e')); // edit the first agent
+  assert_eq!(ui(&state).screen, settings_ui::Screen::Form);
+  assert_eq!(
+    ui(&state).form.cursor,
+    0,
+    "the form opens on its first field"
+  );
+
+  // one press, whatever field the cursor is on
+  press(&state, KeyCode::Tab);
+  assert!(
+    on_done(&ui(&state)),
+    "Tab from the first field lands on Done"
+  );
+  press(&state, KeyCode::Tab); // Done -> Cancel
+  assert_eq!(ui(&state).form.cursor, settings_ui::FIELDS.len() + 1);
+  press(&state, KeyCode::Tab); // Cancel -> back to the fields
+  assert_eq!(ui(&state).form.cursor, 0);
+
+  // the arrows still walk the fields one at a time
+  press(&state, KeyCode::Down);
+  press(&state, KeyCode::Down);
+  assert_eq!(ui(&state).form.cursor, 2);
+  press(&state, KeyCode::Tab);
+  assert!(on_done(&ui(&state)), "Tab from any field lands on Done");
+
+  // and Shift+Tab still steps back through them
+  press(&state, KeyCode::BackTab);
+  assert_eq!(
+    ui(&state).form.cursor,
+    settings_ui::FIELDS.len() - 1,
+    "Shift+Tab steps back to the last field"
+  );
+
+  // Enter on Done still commits the agent back to the list
+  press(&state, KeyCode::Tab);
+  press(&state, KeyCode::Enter);
+  assert_eq!(ui(&state).screen, settings_ui::Screen::List);
+}
