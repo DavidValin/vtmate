@@ -260,7 +260,7 @@ impl Controller {
     // agent's own replies skip over fenced code
     let phrases: Vec<String> = crate::util::split_text_for_tts(&text, false)
       .into_iter()
-      .map(|(_, tts)| tts)
+      .map(|p| p.tts)
       .filter(|t| !t.trim().is_empty())
       .collect();
     if phrases.is_empty() {

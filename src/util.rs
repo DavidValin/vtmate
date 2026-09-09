@@ -253,29 +253,36 @@ mod tts_text_tests {
 
   #[test]
   fn lines_split_the_display_and_punctuation_splits_the_speech() {
-    // a list is spoken item by item, even with no punctuation to split on
-    assert_eq!(
-      split_text_for_tts("* First phrase\n* Second phrase", false),
-      [
-        ("* First phrase".to_string(), "First phrase".to_string()),
-        ("* Second phrase".to_string(), "Second phrase".to_string()),
-      ]
-    );
+    let shape = |text: &str| -> Vec<(usize, String, String)> {
+      split_text_for_tts(text, false)
+        .into_iter()
+        .map(|p| (p.line, p.text, p.tts))
+        .collect()
+    };
+
+    // a list is spoken item by item, and each item is a line of its own
+    assert_eq!(shape("* First phrase\n* Second phrase"), [
+      (0, "* First phrase".to_string(), "First phrase".to_string()),
+      (1, "* Second phrase".to_string(), "Second phrase".to_string()),
+    ]);
 
     // . ! ? ; each end a spoken phrase inside a line and stay attached to it,
-    // while the line they came from is what gets displayed
+    // while all of them keep pointing at the one line they came from
     let out = split_text_for_tts("Ready? Set! Go; now.", false);
     assert_eq!(
-      out.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>(),
+      out.iter().map(|p| p.tts.as_str()).collect::<Vec<_>>(),
       ["Ready?", "Set!", "Go;", "now."]
     );
-    assert!(out.iter().all(|(line, _)| line == "Ready? Set! Go; now."));
+    assert!(out.iter().all(|p| p.line == 0 && p.text == "Ready? Set! Go; now."));
+
+    // two identical lines stay two lines
+    assert_eq!(shape("- milk\n- milk"), [
+      (0, "- milk".to_string(), "milk".to_string()),
+      (1, "- milk".to_string(), "milk".to_string()),
+    ]);
 
     // a line with nothing to say is kept, so it can be shown and stepped over
-    assert_eq!(
-      split_text_for_tts("---", false),
-      [("---".to_string(), String::new())]
-    );
+    assert_eq!(shape("---"), [(0, "---".to_string(), String::new())]);
   }
 
   #[test]
@@ -325,8 +332,19 @@ const TTS_DELIMITERS: [char; 4] = ['.', '!', '?', ';'];
 /// skips it, since hearing brackets and punctuation read out is useless. Text
 /// you asked to have read, with `-r` or the read-aloud shortcut, keeps it: the
 /// code is part of what you asked for.
-pub fn split_text_for_tts(content: &str, skip_code: bool) -> Vec<(String, String)> {
-  let mut phrases: Vec<(String, String)> = Vec::new();
+pub struct SpokenPhrase {
+  /// Which display line this phrase belongs to. Several phrases share a line
+  /// when it holds more than one sentence.
+  pub line: usize,
+  /// The line as written: what gets displayed and navigated through.
+  pub text: String,
+  /// What to speak; empty for a line with nothing to say.
+  pub tts: String,
+}
+
+pub fn split_text_for_tts(content: &str, skip_code: bool) -> Vec<SpokenPhrase> {
+  let mut phrases: Vec<SpokenPhrase> = Vec::new();
+  let mut line_no = 0usize;
   // Fence state carries across lines, in order.
   let mut in_code = false;
   for line in content.lines() {
@@ -347,23 +365,37 @@ pub fn split_text_for_tts(content: &str, skip_code: bool) -> Vec<(String, String
     for ch in spoken.chars() {
       current.push(ch);
       if TTS_DELIMITERS.contains(&ch) {
-        push_spoken(&mut phrases, line, &mut current);
+        push_spoken(&mut phrases, line_no, line, &mut current);
       }
     }
-    push_spoken(&mut phrases, line, &mut current);
+    push_spoken(&mut phrases, line_no, line, &mut current);
     if phrases.len() == before {
-      phrases.push((line.to_string(), String::new()));
+      phrases.push(SpokenPhrase {
+        line: line_no,
+        text: line.to_string(),
+        tts: String::new(),
+      });
     }
+    line_no += 1;
   }
   phrases
 }
 
 /// Move what has been collected into `phrases` as one spoken phrase of `line`,
 /// unless there is nothing in it to say.
-fn push_spoken(phrases: &mut Vec<(String, String)>, line: &str, current: &mut String) {
+fn push_spoken(
+  phrases: &mut Vec<SpokenPhrase>,
+  line_no: usize,
+  line: &str,
+  current: &mut String,
+) {
   let spoken = current.trim();
   if spoken.chars().any(char::is_alphanumeric) {
-    phrases.push((line.to_string(), spoken.to_string()));
+    phrases.push(SpokenPhrase {
+      line: line_no,
+      text: line.to_string(),
+      tts: spoken.to_string(),
+    });
   }
   current.clear();
 }

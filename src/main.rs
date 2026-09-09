@@ -291,8 +291,16 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Split content into phrases (by newlines or periods). Reading a file
     // speaks the fenced ``` code as well: you asked for the file to be read,
     // and the code is part of it. Only an agent's replies skip it.
-    let (phrases, tts_texts): (Vec<String>, Vec<String>) =
-      util::split_text_for_tts(&content, false).into_iter().unzip();
+    // Speaking is split at punctuation, showing and navigating are not: a line
+    // holding several sentences is one line on screen and one stop for the
+    // arrows, and each of its sentences is spoken on its own.
+    let split = util::split_text_for_tts(&content, false);
+    let phrases: Vec<String> = split.iter().map(|p| p.text.clone()).collect();
+    let tts_texts: Vec<String> = split.iter().map(|p| p.tts.clone()).collect();
+    let line_of: Vec<usize> = split.iter().map(|p| p.line).collect();
+    let line_starts: Vec<usize> = (0..split.len())
+      .filter(|&i| i == 0 || split[i - 1].line != split[i].line)
+      .collect();
 
     println!("📖 Reading {} phrases from '{}'", phrases.len(), filename);
 
@@ -311,7 +319,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       let interrupt_counter = interrupt_counter.clone();
       let stop_play_tx = stop_play_tx.clone();
       let display_update_tx = display_update_tx.clone();
-      let phrases_len = phrases.len();
+      let line_of = line_of.clone();
+      let line_starts = line_starts.clone();
       let (tx_ui_dummy, _rx_ui_dummy) = bounded::<String>(1); // Dummy channel for read-file mode
 
       move || {
@@ -320,7 +329,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
           tts_paused,
           should_exit,
           display_update_tx,
-          phrases_len,
+          line_of,
+          line_starts,
         };
 
         keyboard::keyboard_thread(
@@ -346,8 +356,15 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     )
     .unwrap();
 
-    // Track which phrases have been completed
-    let displayed_phrases = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    // The lines already read: everything above line `line`. Derived rather than
+    // accumulated, so a line spoken as several phrases is shown once, and stays
+    // highlighted until the last of them has been read.
+    let lines_before = |line: usize| -> Vec<String> {
+      line_starts[..line.min(line_starts.len())]
+        .iter()
+        .map(|&i| phrases[i].clone())
+        .collect()
+    };
 
     // Helper function to update display
     let update_display =
@@ -386,19 +403,11 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         break;
       }
 
-      // Handle keyboard navigation - user jumped to a different phrase
+      // Handle keyboard navigation - user jumped to a different line
       if idx != last_idx {
-        // Clear the display and rebuild from scratch
-        let mut displayed = displayed_phrases.lock().unwrap();
-        displayed.clear();
-        // Add all phrases before the current index
-        for i in 0..idx {
-          push_display_line(&mut displayed, &phrases[i]);
-        }
-        // show the new phrase as current straight away: waiting until it
+        // show the new line as current straight away: waiting until it
         // starts speaking leaves the highlight a step behind the key presses
-        update_display(&mut out, &displayed, Some(&phrases[idx]));
-        drop(displayed);
+        update_display(&mut out, &lines_before(line_of[idx]), Some(&phrases[idx]));
       }
 
       // Which way the reader is travelling, so that phrases with nothing to
@@ -432,11 +441,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
           // stepping forwards made it impossible to move back past a code
           // block: pressing UP landed on it and it immediately jumped forward
           // again. It is still shown, it is just never spoken.
-          let mut displayed = displayed_phrases.lock().unwrap();
-          if !moving_back {
-            push_display_line(&mut displayed, phrase);
-          }
-          drop(displayed);
           let step_to = if moving_back && idx > 0 {
             idx - 1
           } else {
@@ -451,10 +455,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             Ordering::SeqCst,
           );
         } else {
-          // Show this phrase as current (highlighted) - THIS IS WHEN IT STARTS PLAYING
-          let displayed = displayed_phrases.lock().unwrap();
-          update_display(&mut out, &displayed, Some(phrase));
-          drop(displayed);
+          // Show this line as current (highlighted) - THIS IS WHEN IT STARTS PLAYING
+          update_display(&mut out, &lines_before(line_of[idx]), Some(phrase));
 
           // Throw away completion signals belonging to a phrase we navigated
           // away from. The TTS thread reports "done" for an interrupted phrase
@@ -556,12 +558,16 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
           // Add extra delay to ensure audio has fully played
           thread::sleep(Duration::from_millis(100));
 
-          // NOW that playback is done, move phrase from current to completed (unhighlighted)
-          let mut displayed = displayed_phrases.lock().unwrap();
-          push_display_line(&mut displayed, phrase);
-          // Update display immediately to show it as completed (no highlight)
-          update_display(&mut out, &displayed, None);
-          drop(displayed);
+          // NOW that playback is done, move the line from current to completed
+          // (unhighlighted) - but only once its last phrase has been spoken,
+          // otherwise the line loses its highlight halfway through being read
+          let line_done =
+            idx + 1 >= phrases.len() || line_of[idx + 1] != line_of[idx];
+          if line_done {
+            update_display(&mut out, &lines_before(line_of[idx] + 1), None);
+          } else {
+            update_display(&mut out, &lines_before(line_of[idx]), Some(phrase));
+          }
 
           // Only auto-advance if we didn't navigate
           // Auto-advance only if we weren't interrupted or navigated away
@@ -776,13 +782,4 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let _ = ui_handle.join();
 
   Ok(())
-}
-
-/// Add a line to what read-file mode has already read out. A line broken into
-/// several spoken phrases arrives here once per phrase and must still be shown
-/// once, as it was written.
-fn push_display_line(displayed: &mut Vec<String>, line: &str) {
-  if displayed.last().map(String::as_str) != Some(line) {
-    displayed.push(line.to_string());
-  }
 }

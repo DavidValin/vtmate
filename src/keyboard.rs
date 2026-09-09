@@ -27,7 +27,27 @@ pub struct ReadFileMode {
   pub tts_paused: Arc<AtomicBool>,
   pub should_exit: Arc<AtomicBool>,
   pub display_update_tx: Sender<()>,
-  pub phrases_len: usize,
+  /// Display line each phrase belongs to. Speaking is split at punctuation but
+  /// the reader moves a line at a time, which is what is highlighted on screen:
+  /// stepping through the phrases inside a line would leave the arrows looking
+  /// like they did nothing.
+  pub line_of: Vec<usize>,
+  /// First phrase of each display line.
+  pub line_starts: Vec<usize>,
+}
+
+impl ReadFileMode {
+  /// First phrase of the line above the one `idx` is on.
+  fn previous_line_start(&self, idx: usize) -> Option<usize> {
+    let line = *self.line_of.get(idx)?;
+    self.line_starts.get(line.checked_sub(1)?).copied()
+  }
+
+  /// First phrase of the line below the one `idx` is on.
+  fn next_line_start(&self, idx: usize) -> Option<usize> {
+    let line = *self.line_of.get(idx)?;
+    self.line_starts.get(line + 1).copied()
+  }
 }
 pub fn keyboard_thread(
   tx_ui: Sender<String>,
@@ -73,13 +93,13 @@ pub fn keyboard_thread(
 
           match k.code {
             KeyCode::Up => {
-              // One phrase back, in a single atomic step. The reader thread
+              // One line back, in a single atomic step. The reader thread
               // advances this same counter when a phrase ends, so reading it
               // and writing it back separately loses one of the two moves.
               let moved = rfm
                 .current_phrase
                 .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |c| {
-                  if c > 0 { Some(c - 1) } else { None }
+                  rfm.previous_line_start(c)
                 })
                 .is_ok();
               if moved {
@@ -90,12 +110,11 @@ pub fn keyboard_thread(
               }
             }
             KeyCode::Down => {
-              // One phrase forward, atomically, for the same reason.
-              let last = rfm.phrases_len.saturating_sub(1);
+              // One line forward, atomically, for the same reason.
               let moved = rfm
                 .current_phrase
                 .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |c| {
-                  if c < last { Some(c + 1) } else { None }
+                  rfm.next_line_start(c)
                 })
                 .is_ok();
               if moved {
