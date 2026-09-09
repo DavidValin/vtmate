@@ -208,6 +208,27 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
     if let KeyCode::Char('c') | KeyCode::Char('C') = k.code {
       return KeyOutcome::Quit;
     }
+  }
+
+  // The settings popup takes the whole keyboard while it is open, so that
+  // typing a prompt cannot trigger the conversation shortcuts.
+  if crate::settings_ui::is_open(state) {
+    for message in crate::settings_ui::handle_key(state, k) {
+      let _ = ctx.tx_ui.send(message);
+    }
+    return KeyOutcome::Continue;
+  }
+
+  if k.modifiers.contains(KeyModifiers::CONTROL) {
+    // Ctrl+S opens the settings
+    if let KeyCode::Char('s') | KeyCode::Char('S') = k.code {
+      if k.kind == KeyEventKind::Press && !state.debate_modal_visible.load(Ordering::SeqCst) {
+        for message in crate::settings_ui::open(state) {
+          let _ = ctx.tx_ui.send(message);
+        }
+      }
+      return KeyOutcome::Continue;
+    }
     // Ctrl+D toggles debate mode or shows modal
     if let KeyCode::Char('d') | KeyCode::Char('D') = k.code {
       let debate_enabled = state.debate_enabled.load(Ordering::SeqCst);
@@ -216,13 +237,13 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
       if !modal_visible {
         if !debate_enabled {
           // Entering debate mode - show agent selection modal
-          let agents = state.agents.as_ref();
-          if agents.len() >= 2 {
+          let agent_count = state.agents.lock().unwrap().len();
+          if agent_count >= 2 {
             // Show modal for agent selection
             state.debate_modal_visible.store(true, Ordering::SeqCst);
             *state.debate_modal_selected_agent1.lock().unwrap() = 0;
             *state.debate_modal_selected_agent2.lock().unwrap() =
-              if agents.len() > 1 { 1 } else { 0 };
+              if agent_count > 1 { 1 } else { 0 };
             *state.debate_modal_focus.lock().unwrap() = 0;
             let _ = ctx.tx_ui.send("modal_show|".to_string());
           } else {
@@ -297,7 +318,7 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
       }
       KeyCode::Enter => {
         // Confirm selection and start debate
-        let agents = state.agents.as_ref();
+        let agents = state.agents();
         let agent1_idx = *state.debate_modal_selected_agent1.lock().unwrap();
         let agent2_idx = *state.debate_modal_selected_agent2.lock().unwrap();
 
@@ -325,13 +346,13 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
       }
       KeyCode::Up => {
         let focus = *state.debate_modal_focus.lock().unwrap();
-        let agents = state.agents.as_ref();
+        let agent_count = state.agents.lock().unwrap().len();
 
         if focus == 0 {
           // Agent 1 selection - move up
           let mut agent1_idx = state.debate_modal_selected_agent1.lock().unwrap();
           *agent1_idx = if *agent1_idx == 0 {
-            agents.len() - 1
+            agent_count - 1
           } else {
             *agent1_idx - 1
           };
@@ -340,7 +361,7 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
           // Agent 2 selection - move up
           let mut agent2_idx = state.debate_modal_selected_agent2.lock().unwrap();
           *agent2_idx = if *agent2_idx == 0 {
-            agents.len() - 1
+            agent_count - 1
           } else {
             *agent2_idx - 1
           };
@@ -349,17 +370,17 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
       }
       KeyCode::Down => {
         let focus = *state.debate_modal_focus.lock().unwrap();
-        let agents = state.agents.as_ref();
+        let agent_count = state.agents.lock().unwrap().len();
 
         if focus == 0 {
           // Agent 1 selection - move down
           let mut agent1_idx = state.debate_modal_selected_agent1.lock().unwrap();
-          *agent1_idx = (*agent1_idx + 1) % agents.len();
+          *agent1_idx = (*agent1_idx + 1) % agent_count;
           let _ = ctx.tx_ui.send("modal_update|".to_string());
         } else if focus == 1 {
           // Agent 2 selection - move down
           let mut agent2_idx = state.debate_modal_selected_agent2.lock().unwrap();
-          *agent2_idx = (*agent2_idx + 1) % agents.len();
+          *agent2_idx = (*agent2_idx + 1) % agent_count;
           let _ = ctx.tx_ui.send("modal_update|".to_string());
         }
       }

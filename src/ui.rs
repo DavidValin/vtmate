@@ -78,6 +78,7 @@ pub fn spawn_ui_thread(
     let mut last_term_size = terminal::size().unwrap_or((80, 24));
     let mut pending_stream: Vec<String> = Vec::new();
     let mut modal_visible = false;
+    let mut settings_visible = false;
 
     crossterm::execute!(
       std::io::stdout(),
@@ -175,6 +176,25 @@ pub fn spawn_ui_thread(
             render_debate_modal(&mut out, &mut buffer);
           }
 
+          "settings_show" | "settings_update" => {
+            settings_visible = true;
+            crate::settings_ui::render(&mut out, &buffer);
+          }
+
+          "settings_hide" => {
+            settings_visible = false;
+            execute!(out, Clear(ClearType::All), MoveTo(0, 0)).unwrap();
+            redraw_buffer(&mut out, &buffer);
+            let (_cols, term_height) = terminal::size().unwrap_or((80, 24));
+            bottom_bar = render_bottom_bar(
+              &mut out,
+              &ui_state,
+              &spinner,
+              &status_line,
+              term_height.saturating_sub(1),
+            );
+          }
+
           "modal_hide" => {
             modal_visible = false;
             // Redraw the screen
@@ -242,6 +262,12 @@ pub fn spawn_ui_thread(
 
           _ => {}
         }
+
+        // Anything printed underneath (an answer still streaming, a log line)
+        // would run over the popup, so it goes back on top.
+        if settings_visible && !msg_type.starts_with("settings") {
+          crate::settings_ui::render(&mut out, &buffer);
+        }
       }
 
       // Detect terminal resize
@@ -251,6 +277,11 @@ pub fn spawn_ui_thread(
         execute!(out, Clear(ClearType::All), Print("\x1b[3J"), MoveTo(0, 0)).unwrap();
         out.flush().unwrap();
         last_term_size = (new_cols, new_term_height);
+        if settings_visible {
+          crate::settings_ui::render(&mut out, &buffer);
+        } else if modal_visible {
+          render_debate_modal(&mut out, &buffer);
+        }
       }
 
       ui_state.spinner_index = (ui_state.spinner_index + 1) % spinner.len();
@@ -661,7 +692,8 @@ fn redraw_buffer<W: Write>(out: &mut W, buffer: &[String]) {
 
 fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
   let state = GLOBAL_STATE.get().expect("AppState not initialized");
-  let agents = state.agents.as_ref();
+  let agents = state.agents();
+  let agents = agents.as_slice();
   let agent1_idx = *state.debate_modal_selected_agent1.lock().unwrap();
   let agent2_idx = *state.debate_modal_selected_agent2.lock().unwrap();
   let focus = *state.debate_modal_focus.lock().unwrap();

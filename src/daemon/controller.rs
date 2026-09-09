@@ -427,6 +427,8 @@ impl Controller {
     if is_space
       && self.state.ptt.load(Ordering::Relaxed)
       && !self.state.debate_modal_visible.load(Ordering::SeqCst)
+      // a space typed into the settings popup is text, not push-to-talk
+      && !crate::settings_ui::is_open(&self.state)
       && matches!(k.kind, KeyEventKind::Press | KeyEventKind::Repeat)
     {
       match self.active_ptt {

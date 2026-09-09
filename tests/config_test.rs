@@ -65,8 +65,8 @@ mod config;
 
 use config::{
   Args, DaemonSettings, GeneralSettings, load_daemon_settings,
-  load_general_settings, load_settings, persist_selected_agent, select_agent,
-  split_leading_sections,
+  load_general_settings, load_settings, persist_selected_agent, save_settings,
+  select_agent, split_leading_sections, try_load_settings, validate_agent,
 };
 
 fn temp_settings(contents: &str) -> std::path::PathBuf {
@@ -596,4 +596,197 @@ fn persist_selected_agent_leaves_prompt_blocks_untouched() {
     load_settings(&path, &default_args()).unwrap()[0].system_prompt,
     "[general]\nselected_agent = NOT THIS"
   );
+}
+
+// --- writing the settings file back (the Ctrl+S popup) ----------
+
+/// The prompt of the agent named `name` once the file has been read back.
+fn prompt_of(path: &std::path::Path, name: &str) -> String {
+  load_settings(path, &default_args())
+    .unwrap()
+    .into_iter()
+    .find(|a| a.name == name)
+    .unwrap()
+    .system_prompt
+}
+
+#[test]
+fn saving_keeps_the_agents_and_the_other_sections() {
+  let contents = format!(
+    "[general]\nselected_agent = main agent\n\n[daemon]\nllm_background_ptt_combo = ctrl+alt+q\n\n{}\n{}",
+    AGENT_A, AGENT_B
+  );
+  let path = temp_settings(&contents);
+  let agents = load_settings(&path, &default_args()).unwrap();
+
+  save_settings(&path, &agents, "explainer").unwrap();
+
+  let written = std::fs::read_to_string(&path).unwrap();
+  assert!(
+    written.contains("llm_background_ptt_combo = ctrl+alt+q"),
+    "{}",
+    written
+  );
+  assert_eq!(
+    load_general_settings(&path).unwrap().selected_agent,
+    "explainer"
+  );
+  // every value survives the round trip, in order
+  assert_eq!(load_settings(&path, &default_args()).unwrap(), agents);
+}
+
+#[test]
+fn an_added_agent_is_written_and_an_removed_one_is_gone() {
+  let path = temp_settings(&format!("{}\n{}", AGENT_A, AGENT_B));
+  let mut agents = load_settings(&path, &default_args()).unwrap();
+  agents.remove(0);
+  let mut extra = agents[0].clone();
+  extra.name = "third".to_string();
+  extra.system_prompt = "You are the third one.".to_string();
+  agents.push(extra);
+
+  save_settings(&path, &agents, "explainer").unwrap();
+
+  let reloaded = load_settings(&path, &default_args()).unwrap();
+  let names: Vec<&str> = reloaded.iter().map(|a| a.name.as_str()).collect();
+  assert_eq!(names, vec!["explainer", "third"]);
+  assert_eq!(prompt_of(&path, "third"), "You are the third one.");
+}
+
+#[test]
+fn a_prompt_over_five_lines_is_written_as_a_block() {
+  let long = (1..=8)
+    .map(|i| format!("line {}", i))
+    .collect::<Vec<_>>()
+    .join("\\n");
+  let path = temp_settings(&agent_with_prompt("a", &long));
+  let agents = load_settings(&path, &default_args()).unwrap();
+  assert_eq!(agents[0].system_prompt.lines().count(), 8);
+
+  save_settings(&path, &agents, "a").unwrap();
+
+  let written = std::fs::read_to_string(&path).unwrap();
+  assert!(written.contains("[system_prompt]"), "{}", written);
+  assert!(written.contains("name = a_prompt"), "{}", written);
+  assert!(written.contains("system_prompt = @a_prompt"), "{}", written);
+  assert_eq!(prompt_of(&path, "a"), agents[0].system_prompt);
+}
+
+#[test]
+fn a_prompt_of_five_lines_or_less_stays_inline() {
+  let short = "one\\ntwo\\nthree";
+  let path = temp_settings(&agent_with_prompt("a", short));
+  let agents = load_settings(&path, &default_args()).unwrap();
+
+  save_settings(&path, &agents, "a").unwrap();
+
+  let written = std::fs::read_to_string(&path).unwrap();
+  assert!(!written.contains("[system_prompt]"), "{}", written);
+  assert!(
+    written.contains("system_prompt = one\\ntwo\\nthree"),
+    "{}",
+    written
+  );
+  assert_eq!(prompt_of(&path, "a"), "one\ntwo\nthree");
+}
+
+#[test]
+fn a_prompt_that_came_from_a_block_keeps_its_name() {
+  let body = "l1\nl2\nl3\nl4\nl5\nl6\nl7";
+  let contents = format!(
+    "[system_prompt]\nname = shared\n---\n{}\n---\n\n{}\n{}",
+    body,
+    agent_with_prompt("a", "@shared"),
+    agent_with_prompt("b", "@shared")
+  );
+  let path = temp_settings(&contents);
+  let agents = load_settings(&path, &default_args()).unwrap();
+
+  save_settings(&path, &agents, "a").unwrap();
+
+  let written = std::fs::read_to_string(&path).unwrap();
+  assert!(written.contains("name = shared"), "{}", written);
+  // both agents share the one block, so no copy of it is made
+  assert_eq!(written.matches("[system_prompt]").count(), 1, "{}", written);
+  assert_eq!(prompt_of(&path, "a"), body);
+  assert_eq!(prompt_of(&path, "b"), body);
+}
+
+#[test]
+fn two_agents_editing_a_shared_prompt_apart_get_a_block_each() {
+  let body = "l1\nl2\nl3\nl4\nl5\nl6\nl7";
+  let contents = format!(
+    "[system_prompt]\nname = shared\n---\n{}\n---\n\n{}\n{}",
+    body,
+    agent_with_prompt("a", "@shared"),
+    agent_with_prompt("b", "@shared")
+  );
+  let path = temp_settings(&contents);
+  let mut agents = load_settings(&path, &default_args()).unwrap();
+  agents[1].system_prompt = format!("{}\nand more", body);
+
+  save_settings(&path, &agents, "a").unwrap();
+
+  let written = std::fs::read_to_string(&path).unwrap();
+  assert_eq!(written.matches("[system_prompt]").count(), 2, "{}", written);
+  assert_eq!(prompt_of(&path, "a"), body);
+  assert_eq!(prompt_of(&path, "b"), format!("{}\nand more", body));
+}
+
+#[test]
+fn a_prompt_the_inline_form_would_eat_is_written_as_a_block() {
+  for prompt in [
+    "  padded with spaces  ",
+    "# looks like a comment",
+    "\"fully quoted\"",
+    "a literal \\n escape",
+    "@starts with an at sign",
+  ] {
+    let path = temp_settings(&agent_with_prompt("a", "placeholder"));
+    let mut agents = load_settings(&path, &default_args()).unwrap();
+    agents[0].system_prompt = prompt.to_string();
+    save_settings(&path, &agents, "a").unwrap();
+    assert_eq!(prompt_of(&path, "a"), prompt, "prompt: {:?}", prompt);
+  }
+}
+
+#[test]
+fn a_body_holding_a_fence_is_wrapped_in_a_longer_one() {
+  let body = "l1\nl2\n---\nl4\nl5\nl6\nl7";
+  let path = temp_settings(&agent_with_prompt("a", "placeholder"));
+  let mut agents = load_settings(&path, &default_args()).unwrap();
+  agents[0].system_prompt = body.to_string();
+  save_settings(&path, &agents, "a").unwrap();
+  assert_eq!(prompt_of(&path, "a"), body);
+}
+
+#[test]
+fn saving_over_a_missing_file_writes_a_whole_one() {
+  let path = temp_settings(&format!("{}\n{}", AGENT_A, AGENT_B));
+  let agents = load_settings(&path, &default_args()).unwrap();
+  std::fs::remove_file(&path).unwrap();
+
+  save_settings(&path, &agents, "main agent").unwrap();
+
+  assert_eq!(load_settings(&path, &default_args()).unwrap(), agents);
+  assert_eq!(
+    load_general_settings(&path).unwrap().selected_agent,
+    "main agent"
+  );
+}
+
+#[test]
+fn validate_agent_reports_what_load_settings_would_refuse() {
+  let path = temp_settings(AGENT_A);
+  let mut agent = load_settings(&path, &default_args()).unwrap().remove(0);
+  assert!(validate_agent(&agent).is_empty());
+
+  agent.provider = "not a provider".to_string();
+  agent.voice_speed = 12.0;
+  let problems = validate_agent(&agent);
+  assert_eq!(problems.len(), 2, "{:?}", problems);
+
+  // and the file it would produce is refused the same way when read back
+  save_settings(&path, &[agent], "main agent").unwrap();
+  assert!(try_load_settings(&path, &default_args()).is_err());
 }

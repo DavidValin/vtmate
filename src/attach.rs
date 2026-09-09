@@ -67,7 +67,7 @@ pub fn run(args: &crate::config::Args) -> ! {
   // Mirror state: the UI thread renders from GLOBAL_STATE exactly as in
   // the terminal mode; the daemon keeps it up to date over the socket.
   let mut state = AppState::new();
-  state.agents = Arc::new(
+  state.agents = Arc::new(std::sync::Mutex::new(
     agents
       .iter()
       .map(|a| crate::config::AgentSettings {
@@ -76,7 +76,7 @@ pub fn run(args: &crate::config::Args) -> ! {
         ..Default::default()
       })
       .collect(),
-  );
+  ));
   let state = Arc::new(state);
   state.daemon_mode.store(true, Ordering::Relaxed);
   view.apply(&state);
@@ -110,7 +110,18 @@ pub fn run(args: &crate::config::Args) -> ! {
           Ok(Some(ServerMsg::Ui { line })) => {
             let _ = tx_ui.send(line);
           }
-          Ok(Some(ServerMsg::State(v))) => v.apply(&state),
+          Ok(Some(ServerMsg::State(v))) => {
+            let was_open = crate::settings_ui::is_open(&state);
+            v.apply(&state);
+            // the popup is drawn from this mirror, and a state update is what
+            // makes the daemon's last key press visible here
+            let is_open = crate::settings_ui::is_open(&state);
+            if is_open {
+              let _ = tx_ui.send("settings_update|".to_string());
+            } else if was_open {
+              let _ = tx_ui.send("settings_hide|".to_string());
+            }
+          }
           Ok(Some(ServerMsg::History { history })) => {
             *state.conversation_history.lock().unwrap() = history;
           }

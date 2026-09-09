@@ -68,7 +68,10 @@ pub struct AppState {
   pub speed: AtomicU32,
   pub conversation_history: crate::conversation::ConversationHistory,
   pub agent_name: Arc<Mutex<String>>,
-  pub agents: Arc<Vec<crate::config::AgentSettings>>,
+  /// Every agent of the settings file, in file order. Replaced (not only
+  /// read) at run time: the settings popup writes the file and puts the
+  /// agents it loaded back here.
+  pub agents: Arc<Mutex<Vec<crate::config::AgentSettings>>>,
   pub tts: Arc<Mutex<String>>,
   pub language: Arc<Mutex<String>>,
   pub provider: Arc<Mutex<String>>,
@@ -82,8 +85,12 @@ pub struct AppState {
   pub recording_paused: Arc<AtomicBool>,
   pub processing_response: Arc<AtomicBool>,
   pub ptt: Arc<AtomicBool>,
-  pub sound_threshold_peak: Arc<Mutex<f32>>,
-  pub end_silence_ms: Arc<Mutex<u64>>,
+  /// Voice detection peak, in thousandths (0.125 is stored as 125). An atomic
+  /// because the audio callback reads it on every buffer, and the settings
+  /// popup writes it while that callback runs.
+  pub sound_threshold_peak: Arc<AtomicU32>,
+  /// Silence that ends an utterance in LIVE mode. Read by the same callback.
+  pub end_silence_ms: Arc<AtomicU64>,
   pub whisper_model_path: Arc<Mutex<String>>,
   pub debate_enabled: Arc<AtomicBool>,
   pub debate_subject: Arc<Mutex<String>>,
@@ -107,6 +114,11 @@ pub struct AppState {
   pub tts_read_active: Arc<AtomicBool>,
   /// Running as (or attached to) the background daemon.
   pub daemon_mode: AtomicBool,
+  /// The Ctrl+S settings popup: closed, or the agent list / form being edited.
+  pub settings_ui: Arc<Mutex<crate::settings_ui::SettingsUi>>,
+  /// `--ptt` as it was given on the command line. It overrides what the file
+  /// says, at startup and every time the settings popup reloads it.
+  pub ptt_override: Mutex<Option<bool>>,
 }
 
 impl AppState {
@@ -132,7 +144,7 @@ impl AppState {
       speed: AtomicU32::new(12),
       conversation_history: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
       agent_name: Arc::new(Mutex::new(String::new())),
-      agents: Arc::new(Vec::new()),
+      agents: Arc::new(Mutex::new(Vec::new())),
       playback: PlaybackState {
         speaking: Arc::new(AtomicBool::new(false)),
         silent_frames: Arc::new(AtomicU64::new(0)),
@@ -146,8 +158,8 @@ impl AppState {
       recording_paused: Arc::new(AtomicBool::new(false)),
       processing_response: Arc::new(AtomicBool::new(false)),
       ptt: Arc::new(AtomicBool::new(false)),
-      sound_threshold_peak: Arc::new(Mutex::new(0.0)),
-      end_silence_ms: Arc::new(Mutex::new(0)),
+      sound_threshold_peak: Arc::new(AtomicU32::new(0)),
+      end_silence_ms: Arc::new(AtomicU64::new(0)),
       whisper_model_path: Arc::new(Mutex::new(String::new())),
       debate_enabled: Arc::new(AtomicBool::new(false)),
       debate_subject: Arc::new(Mutex::new(String::new())),
@@ -166,6 +178,8 @@ impl AppState {
       stt_ready: Arc::new(AtomicBool::new(false)),
       tts_read_active: Arc::new(AtomicBool::new(false)),
       daemon_mode: AtomicBool::new(false),
+      settings_ui: Arc::new(Mutex::new(crate::settings_ui::SettingsUi::default())),
+      ptt_override: Mutex::new(None),
     }
   }
 
@@ -178,7 +192,7 @@ impl AppState {
     let mut state = Self::new();
     state.ui.quiet = quiet;
     state.apply_agent(&settings);
-    state.agents = Arc::new(agents);
+    state.agents = Arc::new(Mutex::new(agents));
     *state.settings_path.lock().unwrap() = settings_path;
     state
   }
@@ -196,8 +210,13 @@ impl AppState {
     *self.api_key.lock().unwrap() = agent.api_key.clone();
     *self.system_prompt.lock().unwrap() = agent.system_prompt.clone();
     self.ptt.store(agent.ptt, Ordering::Relaxed);
-    *self.sound_threshold_peak.lock().unwrap() = agent.sound_threshold_peak;
-    *self.end_silence_ms.lock().unwrap() = agent.end_silence_ms;
+    self.sound_threshold_peak.store(
+      (agent.sound_threshold_peak * 1000.0).round().max(0.0) as u32,
+      Ordering::Relaxed,
+    );
+    self
+      .end_silence_ms
+      .store(agent.end_silence_ms, Ordering::Relaxed);
     *self.whisper_model_path.lock().unwrap() = agent.whisper_model_path.clone();
     self
       .speed
@@ -206,9 +225,19 @@ impl AppState {
     self.recording_paused.store(agent.ptt, Ordering::Relaxed);
   }
 
+  /// Voice detection peak the recorder compares buffers against.
+  pub fn vad_threshold(&self) -> f32 {
+    self.sound_threshold_peak.load(Ordering::Relaxed) as f32 / 1000.0
+  }
+
+  /// A copy of the agent list, for callers that only read it.
+  pub fn agents(&self) -> Vec<crate::config::AgentSettings> {
+    self.agents.lock().unwrap().clone()
+  }
+
   /// Name of the agent at `pos` relative to the active one (wrapping).
   pub fn neighbour_agent(&self, offset: isize) -> Option<crate::config::AgentSettings> {
-    let agents = self.agents.as_ref();
+    let agents = self.agents.lock().unwrap();
     if agents.is_empty() {
       return None;
     }

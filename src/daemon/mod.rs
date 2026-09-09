@@ -367,6 +367,8 @@ pub fn run_foreground(args: &Args) -> ! {
   ));
   state.daemon_mode.store(true, Ordering::Relaxed);
   state.recording_paused.store(true, Ordering::Relaxed);
+  // the daemon only opens the mic while a combo is held, whatever the file says
+  *state.ptt_override.lock().unwrap() = args.ptt;
   GLOBAL_STATE.set(state.clone()).ok();
 
   // ---------------------------------------------------

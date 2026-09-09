@@ -139,6 +139,28 @@ api_key = sk-ant-...
 
 ## Configure agents
 
+The quickest way is to press `Control+S` while vtmate is running: a popup opens with the list of your agents, and everything you change there is written to the settings file when you save it.
+
+```
+┌ Settings - 2 agents ─────────────────────────────────────────────────────────────────────────┐
+│ NAME         LANG MODE TTS         VOICE    SPD  PROVIDER          MODEL          PROMPT     │
+│                                                                                              │
+│ main agent   en   PTT  supertonic  M1       1.1x ollama            llama3.2:3b    You are... │
+│ explainer    en   LIVE supertonic  F1       1.1x ollama            llama3.2:3b    You exp... │
+│                                                                                              │
+│ ──────────────────────────────────────────────────────────────────────────────────────────── │
+│ n new agent   e edit agent   d delete agent   ↑/↓ move                                       │
+│   [ Save ]   [ Cancel ]                                                                      │
+└──────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+* `n` adds an agent (starting from the one you are on), `e` edits the selected one, `d` removes it after asking.
+* Every field is a select, a slider or a text box, and the one you are on explains itself in a line underneath. The language only offers what the TTS engine speaks, the voice only what that engine and language have, and the provider lists every LLM backend vtmate can use, so an agent that cannot work is hard to build by accident.
+* `Save` writes `~/.vtmate/settings` and the agents are live straight away: no restart, and the conversation you are in keeps going. `Cancel` or `ESCAPE` asks first when you changed something.
+* `ARROW_UP` / `ARROW_DOWN` move between fields, `ARROW_LEFT` / `ARROW_RIGHT` change the value of a select or a slider, `TAB` walks through everything including the buttons.
+
+The rest of this section is what the popup writes for you, and you can of course write it yourself.
+
 The first time you run vtmate it will create a configuration file if it doesn't exist in `~/.vtmate/settings` with a `[general]` section, a `[daemon]` section and several `[agent]` sections. You can define as many agents as you want.
 
 The file starts like this:
@@ -208,6 +230,7 @@ system_prompt = @planner
 * Close a body that itself contains a `---` line with a longer fence (`----`), the same way as markdown code fences.
 * Define as many blocks as you want, in any order, and reference one from as many agents as you want.
 * Inline prompts keep working exactly as before: `system_prompt = "You are a nice ai agent\nreply nicely"` turns `\n` into a new line. Start an inline prompt with `@@` if you need it to begin with a literal `@`.
+* The `Control+S` popup picks between the two forms for you: a prompt of more than 5 lines is saved as a `[system_prompt]` block, a shorter one inline. A prompt that came from a block keeps that block's name, so agents sharing one go on sharing it.
 
 To see explanation of each field:
 ```
@@ -288,6 +311,7 @@ echo "How to fly without wings?" | vtmate -i -
 * Press double `u` to undo last response
 * You can switch agents in realtime by pressing `ARROW_LEFT` / `ARROW_RIGHT` keyword arrows (you need at least 2 agents defined in `~/vtmate/settings`).
 * You can change the voice speed by pressing `ARROW_UP` / `ARROW_DOWN`
+* Press `Control+S` to add, edit or remove agents without leaving the conversation (see [Configure agents](#configure-agents))
 * Be able to save the conversation in a wav and text file by adding `-s` option. It will save it in `~/.vtmate/conversations` folder
 * For quick reference get the printable [Quicksheet (PDF)](https://raw.githubusercontent.com/DavidValin/vtmate/refs/heads/main/docs/en/quicksheet.pdf)
 

@@ -60,7 +60,7 @@ impl ClientRegistry {
     let snapshot = ServerMsg::Snapshot {
       status: status_view(state, clients.len() + 1),
       agents: state
-        .agents
+        .agents()
         .iter()
         .map(|a| AgentSummary {
           name: a.name.clone(),

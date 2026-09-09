@@ -301,6 +301,13 @@ fn build_input_f32(
       }
       let local_peak = peak_abs(data);
 
+      // read live, not from the value this stream was built with: the
+      // settings popup can change them while the microphone is open
+      let vad_thresh = crate::state::GLOBAL_STATE
+        .get()
+        .map(|s| s.vad_threshold())
+        .unwrap_or(vad_thresh);
+
       // use previously computed peak for threshold check
       if local_peak >= vad_thresh {
         last_voice_ms.store(crate::util::now_ms(start_instant), Ordering::Relaxed);
@@ -361,7 +368,11 @@ fn build_input_f32(
             .unwrap()
             .ptt
             .load(Ordering::Relaxed)
-          && crate::util::now_ms(start_instant).saturating_sub(last) >= end_silence_ms
+          && crate::util::now_ms(start_instant).saturating_sub(last)
+            >= crate::state::GLOBAL_STATE
+              .get()
+              .map(|s| s.end_silence_ms.load(Ordering::Relaxed))
+              .unwrap_or(end_silence_ms)
         {
           crate::log::log("info", "Silence detected");
           ui.agent_speaking.store(false, Ordering::Relaxed);
@@ -504,6 +515,13 @@ fn build_input_i16(
         *p = local_peak;
       }
 
+      // read live, not from the value this stream was built with: the
+      // settings popup can change them while the microphone is open
+      let vad_thresh = crate::state::GLOBAL_STATE
+        .get()
+        .map(|s| s.vad_threshold())
+        .unwrap_or(vad_thresh);
+
       if local_peak >= vad_thresh {
         last_voice_ms.store(crate::util::now_ms(start_instant), Ordering::Relaxed);
         ui.agent_speaking.store(true, Ordering::Relaxed);
@@ -561,7 +579,11 @@ fn build_input_i16(
             .unwrap()
             .ptt
             .load(Ordering::Relaxed)
-          && crate::util::now_ms(start_instant).saturating_sub(last) >= end_silence_ms
+          && crate::util::now_ms(start_instant).saturating_sub(last)
+            >= crate::state::GLOBAL_STATE
+              .get()
+              .map(|s| s.end_silence_ms.load(Ordering::Relaxed))
+              .unwrap_or(end_silence_ms)
         {
           crate::log::log("info", "Silence detected");
           ui.agent_speaking.store(false, Ordering::Relaxed);
@@ -702,6 +724,13 @@ fn build_input_u16(
         }
         return;
       }
+      // read live, not from the value this stream was built with: the
+      // settings popup can change them while the microphone is open
+      let vad_thresh = crate::state::GLOBAL_STATE
+        .get()
+        .map(|s| s.vad_threshold())
+        .unwrap_or(vad_thresh);
+
       if local_peak >= vad_thresh {
         // FIX: remove duplicate stores
         last_voice_ms.store(crate::util::now_ms(start_instant), Ordering::Relaxed);
@@ -760,7 +789,11 @@ fn build_input_u16(
             .unwrap()
             .ptt
             .load(Ordering::Relaxed)
-          && crate::util::now_ms(start_instant).saturating_sub(last) >= end_silence_ms
+          && crate::util::now_ms(start_instant).saturating_sub(last)
+            >= crate::state::GLOBAL_STATE
+              .get()
+              .map(|s| s.end_silence_ms.load(Ordering::Relaxed))
+              .unwrap_or(end_silence_ms)
         {
           crate::log::log("info", "Silence detected");
           // FIX: ensure UI clears speaking state on silence

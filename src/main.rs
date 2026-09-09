@@ -24,6 +24,7 @@ mod llm;
 mod log;
 mod playback;
 mod record;
+mod settings_ui;
 mod state;
 mod stt;
 mod tts;
@@ -645,6 +646,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     settings_path.clone(),
   ));
 
+  *state.ptt_override.lock().unwrap() = args.ptt;
   state::GLOBAL_STATE.set(state.clone()).unwrap();
 
   // If initial prompt provided, process it before starting conversation thread

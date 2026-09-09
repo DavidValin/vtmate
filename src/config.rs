@@ -9,7 +9,7 @@ use anyhow::Error;
 use clap::Parser;
 use cpal::Device;
 use cpal::traits::DeviceTrait;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_ini::from_str;
 use std::collections::HashMap;
 use std::fs::{File, create_dir_all, read_to_string};
@@ -22,7 +22,7 @@ use url::Url;
 // API
 // ------------------------------------------------------------------
 
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq)]
 pub struct AgentSettings {
   pub name: String,
   pub language: String,
@@ -40,6 +40,12 @@ pub struct AgentSettings {
   pub sound_threshold_peak: f32,
   pub end_silence_ms: u64,
   pub voice_speed: f32,
+  /// Name of the `[system_prompt]` block this prompt was pulled from, when
+  /// the agent wrote `system_prompt = @<name>`. `save_settings` writes the
+  /// prompt back under the same name instead of inventing a new one. Never
+  /// read from, nor written to, the file itself.
+  #[serde(skip)]
+  pub system_prompt_name: Option<String>,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -49,7 +55,10 @@ pub struct AgentSettings {
 Settings file is at ~/.vtmate/settings
 
 The file starts with a [general] section, then a [daemon]
-section, then one [agent] section per agent.
+section, then one [agent] section per agent. Press Ctrl+S
+during a conversation to edit the agents from the terminal
+instead: what you save is written back to this file and
+applies straight away.
 
 [general]
   * selected_agent:       name of the agent vtmate starts with.
@@ -533,11 +542,7 @@ fn finish_prompt(out: &mut LeadingSections, name: Option<String>, body: String, 
       .push("a [system_prompt] block has no 'name'".to_string());
     return;
   };
-  if name.is_empty()
-    || !name
-      .chars()
-      .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-  {
+  if !is_valid_prompt_name(&name) {
     out.prompt_errors.push(format!(
       "invalid [system_prompt] name '{}': use letters, digits, '_' or '-'",
       name
@@ -817,6 +822,13 @@ pub fn persist_selected_agent(settings_path: &std::path::Path, name: &str) -> st
     fresh.push_str(text.trim_start_matches(['\n', '\r']));
     out = fresh;
   }
+  write_atomically(settings_path, &out)
+}
+
+/// Replace `settings_path` with `contents` in one step: write a sibling
+/// `.tmp`, flush it to disk and rename it over the file, so a full disk or a
+/// crash halfway through never leaves a truncated settings file behind.
+pub fn write_atomically(settings_path: &std::path::Path, contents: &str) -> std::io::Result<()> {
   let tmp = settings_path.with_file_name(format!(
     "{}.tmp",
     settings_path
@@ -826,10 +838,16 @@ pub fn persist_selected_agent(settings_path: &std::path::Path, name: &str) -> st
   ));
   {
     let mut f = File::create(&tmp)?;
-    f.write_all(out.as_bytes())?;
+    f.write_all(contents.as_bytes())?;
     f.sync_all()?;
   }
   std::fs::rename(&tmp, settings_path)
+}
+
+/// The command line as vtmate sees it with no option at all: what reading the
+/// settings file needs when no override should apply to what is on disk.
+pub fn plain_args() -> Args {
+  Args::parse_from(["vtmate"])
 }
 
 /// Path of the settings file: `-c` (with `~` expanded) or `~/.vtmate/settings`.
@@ -901,34 +919,52 @@ pub fn resolved_whisper_model_path(whisper_model_path: &str) -> String {
   }
 }
 
-pub fn load_settings(
+/// Why a settings file could not be turned into a list of agents.
+#[derive(Debug)]
+pub enum LoadError {
+  /// The file cannot be read, or a section of it cannot be parsed.
+  Syntax(String),
+  /// The file parses but one or more agents hold invalid values.
+  Invalid(String),
+}
+
+impl std::fmt::Display for LoadError {
+  fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    match self {
+      LoadError::Syntax(m) | LoadError::Invalid(m) => f.write_str(m),
+    }
+  }
+}
+
+impl std::error::Error for LoadError {}
+
+/// Read, expand and validate every `[agent]` section, reporting problems
+/// instead of writing to the terminal. `load_settings` is the startup
+/// entry point; the settings popup uses this one to reload after saving.
+pub fn try_load_settings(
   settings_path: &std::path::Path,
   args: &Args,
-) -> Result<Vec<AgentSettings>, Error> {
+) -> Result<Vec<AgentSettings>, LoadError> {
   // Read the whole INI file; the [general] and [daemon] sections are parsed
   // separately (load_general_settings / load_daemon_settings).
-  let sections = split_leading_sections(&read_to_string(settings_path)?);
+  let text = read_to_string(settings_path)
+    .map_err(|e| LoadError::Syntax(format!("{}: {}", settings_path.display(), e)))?;
+  let sections = split_leading_sections(&text);
   if !sections.unknown.is_empty() {
-    let msg = format!(
+    return Err(LoadError::Syntax(format!(
       "unknown section {} in {}: expected [general], [daemon], [system_prompt] or [agent]",
       sections.unknown.join(", "),
       settings_path.display()
-    );
-    print!("❌ {}", msg);
-    thread::sleep(Duration::from_millis(30));
-    return Err(Error::msg(msg));
+    )));
   }
   // Malformed [system_prompt] blocks are a file syntax problem, like an
   // unknown section: report them all and give up before parsing agents.
   if !sections.prompt_errors.is_empty() {
-    let msg = format!(
+    return Err(LoadError::Syntax(format!(
       "in {}:\n{}",
       settings_path.display(),
       sections.prompt_errors.join("\n")
-    );
-    print!("❌ {}", msg);
-    thread::sleep(Duration::from_millis(30));
-    return Err(Error::msg(msg));
+    )));
   }
   let prompts = sections.prompts;
   let ini_contents = sections.rest;
@@ -946,20 +982,19 @@ pub fn load_settings(
     let clean_section = clean_ini_block(block);
     let section = clean_section.trim();
 
-    // println!("DEBUG section: {}", section);
-    // println!("DEBUG parsing section: {}", section);
     let mut agent: AgentSettings = match panic::catch_unwind(|| from_str::<AgentSettings>(&section))
     {
       Ok(Ok(a)) => a,
       Ok(Err(e)) => {
-        print!("❌ Failed to parse agent's settings section: {}", e);
-        thread::sleep(Duration::from_millis(30));
-        return Err(e.into());
+        return Err(LoadError::Syntax(format!(
+          "Failed to parse agent's settings section: {}",
+          e
+        )));
       }
       Err(_) => {
-        print!("❌ Panic while parsing agent's section");
-        thread::sleep(Duration::from_millis(30));
-        return Err(Error::msg("panic while parsing agent's section"));
+        return Err(LoadError::Syntax(
+          "panic while parsing agent's section".to_string(),
+        ));
       }
     };
     // Sanitize quoted string values in AgentSettings before validation
@@ -967,115 +1002,40 @@ pub fn load_settings(
 
     // Expand `system_prompt = @name` into the body of its [system_prompt]
     // block, or the `\n` escapes of an inline prompt, before validating it.
+    let block_name = system_prompt_block_name(&agent.system_prompt);
     match resolve_system_prompt(&agent.system_prompt, &prompts) {
-      Ok(prompt) => agent.system_prompt = prompt,
+      Ok(prompt) => {
+        agent.system_prompt = prompt;
+        agent.system_prompt_name = block_name;
+      }
       Err(e) => prompt_ref_errors.push(format!("Agent {}: {}", agent.name, e)),
     }
 
-    // Validate individual agent
-    if let Err(e) =
-      validate_agent_name(&agent.name).map_err(|e: std::io::Error| -> Error { Error::new(e) })
-    {
-      errors.push(format!("Agent {}: {}", agent.name, e));
-    }
-
-    if let Err(e) =
-      validate_provider(&agent.provider).map_err(|e: std::io::Error| -> Error { Error::new(e) })
-    {
-      errors.push(format!("Agent {}: {}", agent.name, e));
-    }
-
-    if let Err(e) =
-      validate_model(&agent.model).map_err(|e: std::io::Error| -> Error { Error::new(e) })
-    {
-      errors.push(format!("Agent {}: {}", agent.name, e));
-    }
-
-    if let Err(e) = validate_baseurl(&agent.baseurl, &agent.provider)
-      .map_err(|e: std::io::Error| -> Error { Error::new(e) })
-    {
-      errors.push(format!("Agent {}: {}", agent.name, e));
-    }
-
-    if let Err(e) = validate_api_key(&agent.api_key, &agent.provider)
-      .map_err(|e: std::io::Error| -> Error { Error::new(e) })
-    {
-      errors.push(format!("Agent {}: {}", agent.name, e));
-    }
-
-    if let Err(e) = validate_system_prompt(&agent.system_prompt)
-      .map_err(|e: std::io::Error| -> Error { Error::new(e) })
-    {
-      errors.push(format!("Agent {}: {}", agent.name, e));
-    }
-
-    if let Err(e) = validate_sound_threshold_peak(agent.sound_threshold_peak)
-      .map_err(|e: std::io::Error| -> Error { Error::new(e) })
-    {
-      errors.push(format!("Agent {}: {}", agent.name, e));
-    }
-
-    if let Err(e) = validate_end_silence_ms(agent.end_silence_ms)
-      .map_err(|e: std::io::Error| -> Error { Error::new(e) })
-    {
-      errors.push(format!("Agent {}: {}", agent.name, e));
-    }
-
-    if let Err(e) = validate_end_silence_ms(agent.end_silence_ms)
-      .map_err(|e: std::io::Error| -> Error { Error::new(e) })
-    {
-      errors.push(format!("Agent {}: {}", agent.name, e));
-    }
-
-    if let Err(e) = validate_tts(&agent.tts).map_err(|e: std::io::Error| -> Error { Error::new(e) })
-    {
-      errors.push(format!("Agent {}: {}", agent.name, e));
-    }
-
-    if let Err(e) = validate_language(&agent.language, &agent.tts)
-      .map_err(|e: std::io::Error| -> Error { Error::new(e) })
-    {
-      errors.push(format!("Agent {}: {}", agent.name, e));
-    }
-
-    if let Err(e) = validate_voice(&agent.voice, &agent.language, &agent.tts)
-      .map_err(|e: std::io::Error| -> Error { Error::new(e) })
-    {
-      errors.push(format!("Agent {}: {}", agent.name, e));
-    }
-
-    if let Err(e) = validate_voice_speed(agent.voice_speed)
-      .map_err(|e: std::io::Error| -> Error { Error::new(e) })
-    {
-      errors.push(format!("Agent {}: {}", agent.name, e));
+    for problem in validate_agent(&agent) {
+      errors.push(format!("Agent {}: {}", agent.name, problem));
     }
 
     agents.push(agent);
   }
 
   if !prompt_ref_errors.is_empty() {
-    let msg = prompt_ref_errors.join("\n");
-    print!("❌ {}", msg);
-    thread::sleep(Duration::from_millis(30));
-    return Err(Error::msg(msg));
+    return Err(LoadError::Syntax(prompt_ref_errors.join("\n")));
   }
 
   if !errors.is_empty() {
-    print!("❌ {}", &errors.join("\n").to_string());
-    thread::sleep(Duration::from_millis(30));
-    terminate(1);
+    return Err(LoadError::Invalid(errors.join("\n")));
   }
 
   if agents.is_empty() {
-    return Err(Error::msg("No [agent] sections found in settings file"));
+    return Err(LoadError::Syntax(
+      "No [agent] sections found in settings file".to_string(),
+    ));
   }
 
   // Validate CLI args
   if let Some(ref agent_name) = args.agent {
-    if let Err(e) =
-      validate_agent_name(agent_name).map_err(|e: std::io::Error| -> Error { Error::new(e) })
-    {
-      return Err(e);
+    if let Err(e) = validate_agent_name(agent_name) {
+      return Err(LoadError::Invalid(e.to_string()));
     }
   }
 
@@ -1087,6 +1047,28 @@ pub fn load_settings(
   }
 
   Ok(agents)
+}
+
+pub fn load_settings(
+  settings_path: &std::path::Path,
+  args: &Args,
+) -> Result<Vec<AgentSettings>, Error> {
+  match try_load_settings(settings_path, args) {
+    Ok(agents) => Ok(agents),
+    // A file we cannot parse is reported to the caller, which decides how to
+    // give up; values we can parse but cannot accept stop vtmate right here,
+    // with the whole list of what is wrong.
+    Err(e @ LoadError::Syntax(_)) => {
+      print!("\u{274c} {}", e);
+      thread::sleep(Duration::from_millis(30));
+      Err(Error::msg(e.to_string()))
+    }
+    Err(e @ LoadError::Invalid(_)) => {
+      print!("\u{274c} {}", e);
+      thread::sleep(Duration::from_millis(30));
+      terminate(1);
+    }
+  }
 }
 
 pub fn ensure_settings_file() -> Result<(), Error> {
@@ -1275,8 +1257,266 @@ pub fn pick_input_config(
     .ok_or_else(|| Error::msg("no supported input configs"))
 }
 
+// Writing the settings file back
+// ------------------------------------------------------------------
+
+/// How many lines a prompt may have before it is written as a
+/// `[system_prompt]` block instead of an inline `system_prompt = ...` value.
+pub const INLINE_PROMPT_MAX_LINES: usize = 5;
+
+/// The `@<name>` an agent's raw `system_prompt` value refers to, if any.
+/// `@@...` is an inline prompt starting with a literal '@', not a reference.
+pub fn system_prompt_block_name(raw_value: &str) -> Option<String> {
+  let trimmed = raw_value.trim();
+  if trimmed.starts_with("@@") {
+    return None;
+  }
+  trimmed
+    .strip_prefix('@')
+    .map(|name| name.trim().to_string())
+    .filter(|name| is_valid_prompt_name(name))
+}
+
+/// Every check `try_load_settings` runs on one agent, as a list of messages
+/// (empty when the agent is good). The settings popup runs the same ones
+/// before it writes the file, so what it accepts is what vtmate can load.
+pub fn validate_agent(agent: &AgentSettings) -> Vec<String> {
+  let checks: [Result<(), std::io::Error>; 12] = [
+    validate_agent_name(&agent.name).map(|_| ()),
+    validate_provider(&agent.provider),
+    validate_model(&agent.model),
+    validate_baseurl(&agent.baseurl, &agent.provider),
+    validate_api_key(&agent.api_key, &agent.provider),
+    validate_system_prompt(&agent.system_prompt),
+    validate_sound_threshold_peak(agent.sound_threshold_peak),
+    validate_end_silence_ms(agent.end_silence_ms),
+    validate_tts(&agent.tts),
+    validate_language(&agent.language, &agent.tts),
+    validate_voice(&agent.voice, &agent.language, &agent.tts),
+    validate_voice_speed(agent.voice_speed),
+  ];
+  checks
+    .into_iter()
+    .filter_map(|c| c.err().map(|e| e.to_string()))
+    .collect()
+}
+
+/// Write the whole settings file from `agents`: the `[general]` section (with
+/// `selected_agent` set to `selected`) and the `[daemon]` section are carried
+/// over from the file as they were, then come the `[system_prompt]` blocks the
+/// prompts need, then one `[agent]` section per agent, in order.
+///
+/// A prompt is written inline (`\n` for its line breaks) while it fits in
+/// `INLINE_PROMPT_MAX_LINES` lines and survives the round trip through the
+/// INI syntax; anything longer, or holding text the inline form would eat
+/// (a literal `\n`, surrounding spaces or quotes, a leading comment mark),
+/// becomes a fenced `[system_prompt]` block. A prompt that came from a block
+/// keeps that block's name.
+///
+/// The file is replaced atomically, so an interrupted save never leaves a
+/// half-written settings file.
+pub fn save_settings(
+  settings_path: &std::path::Path,
+  agents: &[AgentSettings],
+  selected: &str,
+) -> std::io::Result<()> {
+  let previous = read_to_string(settings_path).unwrap_or_default();
+  let sections = split_leading_sections(&previous);
+
+  // one [system_prompt] block per prompt that cannot be written inline,
+  // and the value the agent's `system_prompt` key gets
+  let mut blocks: Vec<(String, String)> = Vec::new();
+  let mut prompt_values: Vec<String> = Vec::with_capacity(agents.len());
+  for agent in agents {
+    match inline_prompt_value(&agent.system_prompt) {
+      Some(inline) => prompt_values.push(inline),
+      None => {
+        let wanted = agent
+          .system_prompt_name
+          .clone()
+          .filter(|n| is_valid_prompt_name(n))
+          .unwrap_or_else(|| prompt_name_for(&agent.name));
+        let name = claim_prompt_name(&mut blocks, wanted, &agent.system_prompt);
+        prompt_values.push(format!("@{}", name));
+      }
+    }
+  }
+
+  let mut out = String::with_capacity(previous.len() + 512);
+
+  // [general]: selected_agent first, then whatever else the user had there
+  out.push_str("[general]\n");
+  out.push_str(&format!("selected_agent = {}\n", selected.trim()));
+  if let Some(block) = &sections.general {
+    for line in block.lines() {
+      let key = line.split('=').next().map(str::trim).unwrap_or("");
+      if key == "selected_agent" || line.trim().is_empty() {
+        continue;
+      }
+      out.push_str(line.trim_end_matches('\r'));
+      out.push('\n');
+    }
+  }
+
+  // [daemon]: carried over untouched (it is not edited here)
+  if let Some(block) = &sections.daemon {
+    out.push_str("\n[daemon]\n");
+    for line in block.lines() {
+      if line.trim().is_empty() {
+        continue;
+      }
+      out.push_str(line.trim_end_matches('\r'));
+      out.push('\n');
+    }
+  }
+
+  for (name, body) in &blocks {
+    let fence = "-".repeat(fence_len_for(body));
+    out.push_str("\n[system_prompt]\n");
+    out.push_str(&format!("name = {}\n", name));
+    out.push_str(&fence);
+    out.push('\n');
+    out.push_str(body);
+    out.push('\n');
+    out.push_str(&fence);
+    out.push('\n');
+  }
+
+  for (agent, prompt_value) in agents.iter().zip(prompt_values) {
+    out.push_str("\n[agent]\n");
+    out.push_str(&format!("name = {}\n", agent.name));
+    out.push_str(&format!("language = {}\n", agent.language));
+    out.push_str(&format!("tts = {}\n", agent.tts));
+    out.push_str(&format!("voice = {}\n", agent.voice));
+    out.push_str(&format!("voice_speed = {:.1}\n", agent.voice_speed));
+    out.push_str(&format!("provider = {}\n", agent.provider));
+    out.push_str(&format!("baseurl = {}\n", agent.baseurl));
+    out.push_str(&format!("model = {}\n", agent.model));
+    if !agent.api_key.trim().is_empty() {
+      out.push_str(&format!("api_key = {}\n", agent.api_key.trim()));
+    }
+    out.push_str(&format!("system_prompt = {}\n", prompt_value));
+    out.push_str(&format!(
+      "sound_threshold_peak = {}\n",
+      trim_float(agent.sound_threshold_peak, 3)
+    ));
+    out.push_str(&format!("end_silence_ms = {}\n", agent.end_silence_ms));
+    out.push_str(&format!("ptt = {}\n", agent.ptt));
+    out.push_str(&format!(
+      "whisper_model_path = {}\n",
+      agent.whisper_model_path
+    ));
+  }
+
+  write_atomically(settings_path, &out)
+}
+
 // PRIVATE
 // ------------------------------------------------------------------
+
+/// A `[system_prompt]` name vtmate accepts: letters, digits, '_' and '-'.
+fn is_valid_prompt_name(name: &str) -> bool {
+  !name.is_empty()
+    && name
+      .chars()
+      .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+/// The one-line `system_prompt = ...` value for `body`, or `None` when the
+/// prompt has to be written as a `[system_prompt]` block instead: too many
+/// lines, or text the inline syntax would not give back unchanged.
+fn inline_prompt_value(body: &str) -> Option<String> {
+  if body.is_empty()
+    || body.lines().count() > INLINE_PROMPT_MAX_LINES
+    || body != body.trim()
+    || body.contains('\r')
+    // a literal backslash-n would come back as a line break
+    || body.contains("\\n")
+    // a value starting with these is a comment, or loses its quotes
+    || body.starts_with('#')
+    || body.starts_with(';')
+    || (body.len() >= 2 && body.starts_with('"') && body.ends_with('"'))
+  {
+    return None;
+  }
+  let escaped = body.replace('\n', "\\n");
+  // `@name` pulls in a block, so an inline prompt starting with '@' doubles it
+  Some(if escaped.starts_with('@') {
+    format!("@{}", escaped)
+  } else {
+    escaped
+  })
+}
+
+/// A `[system_prompt]` name made out of an agent name.
+fn prompt_name_for(agent_name: &str) -> String {
+  let mut slug = String::new();
+  let mut pending_separator = false;
+  for c in agent_name.chars() {
+    if c.is_ascii_alphanumeric() || c == '-' {
+      slug.push(c.to_ascii_lowercase());
+      pending_separator = false;
+    } else if !pending_separator {
+      slug.push('_');
+      pending_separator = true;
+    }
+  }
+  let slug: String = slug.chars().take(40).collect();
+  let slug = slug.trim_matches('_');
+  if slug.is_empty() {
+    "agent_prompt".to_string()
+  } else {
+    format!("{}_prompt", slug)
+  }
+}
+
+/// Reserve a name for `body` in `blocks`: the wanted one when it is free,
+/// the same one when it already holds this very prompt (agents sharing a
+/// prompt keep sharing its block), a numbered variant otherwise.
+fn claim_prompt_name(blocks: &mut Vec<(String, String)>, wanted: String, body: &str) -> String {
+  if blocks
+    .iter()
+    .any(|(name, existing)| *name == wanted && existing.as_str() == body)
+  {
+    return wanted;
+  }
+  let mut name = wanted.clone();
+  let mut suffix = 2;
+  while blocks.iter().any(|(existing, _)| *existing == name) {
+    name = format!("{}_{}", wanted, suffix);
+    suffix += 1;
+  }
+  blocks.push((name.clone(), body.to_string()));
+  name
+}
+
+/// Length of the fence around `body`: longer than any line of dashes in it,
+/// so the body cannot close itself early.
+fn fence_len_for(body: &str) -> usize {
+  let mut len = 3;
+  for line in body.lines() {
+    let trimmed = line.trim();
+    if is_fence(trimmed) {
+      len = len.max(trimmed.len() + 1);
+    }
+  }
+  len
+}
+
+/// `value` with at most `decimals` decimals and no trailing zeros (but always
+/// one decimal, so the file keeps reading as a float).
+fn trim_float(value: f32, decimals: usize) -> String {
+  let mut out = format!("{:.*}", decimals, value);
+  if out.contains('.') {
+    while out.ends_with('0') {
+      out.pop();
+    }
+    if out.ends_with('.') {
+      out.push('0');
+    }
+  }
+  out
+}
 
 fn validate_agent_name(name: &str) -> Result<String, std::io::Error> {
   let len = name.chars().count();

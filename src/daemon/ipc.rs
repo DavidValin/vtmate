@@ -99,6 +99,11 @@ pub struct StateView {
   pub modal_agent1: usize,
   pub modal_agent2: usize,
   pub modal_focus: u8,
+  /// The settings popup while it is open, so an attached terminal can draw
+  /// it. The keys that drive it are handled by the daemon, which owns the
+  /// settings file; the client only renders this copy.
+  #[serde(default)]
+  pub settings: Option<crate::settings_ui::SettingsUi>,
 }
 
 impl StateView {
@@ -129,6 +134,10 @@ impl StateView {
       modal_agent1: *state.debate_modal_selected_agent1.lock().unwrap(),
       modal_agent2: *state.debate_modal_selected_agent2.lock().unwrap(),
       modal_focus: *state.debate_modal_focus.lock().unwrap(),
+      settings: {
+        let settings = state.settings_ui.lock().unwrap();
+        settings.open.then(|| settings.clone())
+      },
     }
   }
 
@@ -165,7 +174,7 @@ impl StateView {
       .store(self.debate_paused, Ordering::SeqCst);
     {
       // the modal and the bar only read agent names from these entries
-      let agents = state.agents.as_ref();
+      let agents = state.agents();
       let mut da = state.debate_agents.lock().unwrap();
       *da = self
         .debate_agents
@@ -188,6 +197,7 @@ impl StateView {
     *state.debate_modal_selected_agent1.lock().unwrap() = self.modal_agent1;
     *state.debate_modal_selected_agent2.lock().unwrap() = self.modal_agent2;
     *state.debate_modal_focus.lock().unwrap() = self.modal_focus;
+    *state.settings_ui.lock().unwrap() = self.settings.clone().unwrap_or_default();
   }
 }
 
