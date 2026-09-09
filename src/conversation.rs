@@ -132,7 +132,7 @@ pub fn conversation_thread(
         crate::html_export::open_turn(turn_idx, &settings.name);
         perform_save(&conversation_history, &settings_clone);
         // Display in UI
-        let label = format!("\x1b[48;5;22;37m{}:\x1b[0m", settings.name);
+        let label = format!("\x1b[48;5;22;37m{}\x1b[0m", settings.name);
         let _ = tx_ui.send(format!("line|{}", label));
         let _ = tx_ui.send(format!("stream|{}", reply.trim()));
         let _ = tx_ui.send("line|".to_string());
@@ -947,7 +947,7 @@ fn handle_reply(
   let my_interrupt_clone = my_interrupt;
 
   // render assistant label
-  let label = format!("\x1b[48;5;22;37m{}:\x1b[0m", assistant_name);
+  let label = format!("\x1b[48;5;22;37m{}\x1b[0m", assistant_name);
   let _ = tx_ui.send("line|".to_string());
   let _ = tx_ui.send(format!("line|{}", label));
 

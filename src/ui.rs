@@ -30,8 +30,8 @@ pub static STOP_STREAM: AtomicBool = AtomicBool::new(false);
 pub static UI_SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
 // ANSI labels
-pub const USER_LABEL: &str = "\x1b[47;30mUSER:\x1b[0m";
-pub const ASSIST_LABEL: &str = "\x1b[48;5;22;37mASSISTANT:\x1b[0m";
+pub const USER_LABEL: &str = "\x1b[47;30mUSER\x1b[0m";
+pub const ASSIST_LABEL: &str = "\x1b[48;5;22;37mASSISTANT\x1b[0m";
 
 /// The vtmate mark (a chevron and level bars) beside the wordmark, drawn
 /// with block characters and coloured for the terminal.
@@ -226,9 +226,9 @@ pub fn spawn_ui_thread(
             // Re-send history lines
             for msg in conversation_history.lock().unwrap().iter() {
               let role_label = if msg.role == "assistant" {
-                "\x1b[48;5;22;37mASSISTANT:\x1b[0m"
+                "\x1b[48;5;22;37mASSISTANT\x1b[0m"
               } else {
-                "\x1b[47;30mUSER:\x1b[0m"
+                "\x1b[47;30mUSER\x1b[0m"
               };
               handle_line_message(
                 &mut out,
@@ -343,6 +343,7 @@ fn handle_line_message<W: Write>(
       execute!(
         out,
         MoveTo(0, (std::cmp::min(buffer.len(), visible)) as u16 - 1),
+        ResetColor,
         Clear(ClearType::CurrentLine)
       )
       .unwrap();
@@ -361,6 +362,7 @@ fn handle_line_message<W: Write>(
       execute!(
         out,
         MoveTo(0, y_disp as u16),
+        ResetColor,
         Clear(ClearType::CurrentLine),
         Print(buffer.last().unwrap())
       )
@@ -383,6 +385,7 @@ fn handle_line_message<W: Write>(
   execute!(
     out,
     MoveTo(0, (std::cmp::min(buffer.len(), visible)) as u16 - 1),
+    ResetColor,
     Clear(ClearType::CurrentLine)
   )
   .unwrap();
@@ -464,6 +467,7 @@ fn stream_chunk<W: Write>(
       execute!(
         out,
         MoveTo(0, (std::cmp::min(buffer.len(), visible)) as u16 - 1),
+        ResetColor,
         Clear(ClearType::CurrentLine)
       )
       .unwrap();
@@ -482,6 +486,7 @@ fn stream_chunk<W: Write>(
       execute!(
         out,
         MoveTo(0, y_disp as u16),
+        ResetColor,
         Clear(ClearType::CurrentLine),
         Print(buffer.last().unwrap())
       )
@@ -645,6 +650,7 @@ fn render_bottom_bar<W: Write>(
   execute!(
     out,
     MoveTo(0, y),
+    ResetColor,
     Clear(ClearType::CurrentLine),
     Print(&full_bar),
     ResetColor
@@ -682,6 +688,7 @@ fn redraw_buffer<W: Write>(out: &mut W, buffer: &[String]) {
     execute!(
       out,
       MoveTo(0, y as u16),
+      ResetColor,
       Clear(ClearType::CurrentLine),
       Print(line)
     )
@@ -717,6 +724,7 @@ fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
     execute!(
       out,
       MoveTo(0, y as u16),
+      ResetColor,
       Clear(ClearType::CurrentLine),
       Print(format!("\x1b[90m{}\x1b[0m", line))
     )
