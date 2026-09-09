@@ -1026,6 +1026,10 @@ fn handle_reply(
   if let Some(last_phrase) = last_phrase {
     if !last_phrase.tts.trim().is_empty() {
       let _ = tts_tx.send((last_phrase.tts.clone(), my_interrupt, settings.voice.clone()));
+      // wait for it like every other phrase does: an unconsumed "done" would be
+      // handed to the first phrase of the next turn, putting the reply one
+      // phrase ahead of its own audio for the rest of the debate
+      let _ = tts_done_rx.recv_timeout(Duration::from_secs(60));
     }
     let _ = tx_ui.send(format!("stream|{}", last_phrase.text));
     let _ = tx_ui.send("line|".to_string());
@@ -1062,8 +1066,10 @@ fn handle_reply(
   // Restore settings and wait playback
   restore_agent_settings(state, originals);
   wait_for_playback(state, &interrupt_counter, my_interrupt);
-  // the turn is spoken: close its wav and rewrite the player with it
-  crate::html_export::close_turn();
+  // The turn's wav is deliberately left open: `wait_for_playback` returns as
+  // soon as the speakers fall quiet, which can happen between two phrases of
+  // the same reply. The next turn opening closes it, and so does exiting, so
+  // audio that arrives late still lands in the turn it belongs to.
   perform_save(&conversation_history, settings);
   Some(reply)
 }

@@ -368,9 +368,9 @@ cat "Lets discuss the permissions of this files: \n\n $(ls -la)" > prompt.txt
 vtmate --debate "Unix administrator" "Security Expert" -i prompt.txt --ptt true
 ```
 
-Start a debate that ends by itself after 10 turns
+Start a debate that ends by itself after 10 turns and export the audio session as a playable html in ~/.vtmate/conversations
 ```
-vtmate --debate "God" "Devil" "How to succeed in life?" --ptt true --max-turns 10
+vtmate --debate "God" "Devil" "How to succeed in life?" --ptt true --max-turns 10 --s-html
 ```
 
 * When running in LIVE mode just talk. You can also pause/resume recording by pressing `SPACE` once
