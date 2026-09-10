@@ -38,7 +38,28 @@ https://github.com/user-attachments/assets/8b9e982c-ba97-4aeb-8e55-1db6a92bc164
 
 ![vtmate screenshot](preview.png)
 
-![how it works](https://github.com/DavidValin/vtmate/raw/main/docs/en/diagrams/how-it-works.png)
+### Index
+
+- [Features](#features)
+- [How it works](#how-it-works)
+- [LLM integration](#llm-integration)
+- [TTS engine support](#tts-engine-support)
+- [Installation](#installation)
+- [Configure agents](#configure-agents)
+  - [Reusable system prompts](#reusable-system-prompts)
+- [How to use it](#how-to-use-it)
+  - [Conversation mode](#conversation-mode)
+  - [Debate mode](#debate-mode)
+  - [Quiet mode](#quiet-mode)
+  - [Daemon mode (global shortcuts)](#daemon-mode-global-shortcuts)
+  - [Read mode (file to speech)](#read-mode-file-to-speech)
+  - [Separate agents](#separate-agents)
+  - [Custom voices](#custom-voices)
+  - [Voice cloning](#voice-cloning)
+  - [Model files](#model-files)
+- [Language support](#language-support)
+- [Acceleration support](#acceleration-support)
+- [Build vtmate from source code](#build-vtmate-from-source-code)
 
 ## Features
 
@@ -66,6 +87,8 @@ https://github.com/user-attachments/assets/8b9e982c-ba97-4aeb-8e55-1db6a92bc164
 * Background mode features can be used to assist your daily routine with ai powered voice responses while you use other apps, voice read your favourite books or articles, write emails via voice and even replace paid tools like Superwhisper
 
 ## How it works
+
+![how it works](https://github.com/DavidValin/vtmate/raw/main/docs/en/diagrams/how-it-works.png)
 
 ```
 - You start the program and start talking
@@ -510,6 +533,44 @@ vtmate -c philosophers.txt --debate "Aristoteles" "Ptahhotep" "how to achieve ha
 Drop a new `<name>.json` in that directory and the voice becomes available under that name: `vtmate --list-voices` shows it, `voice = <name>` in an agent passes validation, and the agent speaks with it. Remove the file and it is gone again. `--list-voices` prints the exact directory for each engine.
 
 The other engines (`kokoro`, `opentts`) have fixed voice lists.
+
+###  Voice cloning
+
+Clone a new `supertonic` voice from a short recording, or refine an existing clone further with another one - both run fully offline, no model training knowledge needed.
+
+**Clone a new voice** from a WAV reference and its transcript:
+
+```
+vtmate --clone-voice <voice_name> <language> <wav_file> <ref_text>
+```
+
+* `voice_name`: letters, digits and `_` only, and must not already exist.
+* `language`: one of the languages `supertonic` supports (see `vtmate --list-voices`) - only used to train the clone (matches `ref_text` against it, picks built-in probe sentences for `en`/`es`/`fr`/`de`/`it`/`pt`); it does not lock the resulting voice to that language.
+* `wav_file`: the reference recording (mono or stereo WAV, ~2-30s, any common sample rate).
+* `ref_text`: the exact words spoken in the recording, quoted - the closer the match, the better the clone. It also sets the tempo: the clone is fitted to say this text in the time the recording takes, so no speed has to be given.
+
+On success it prints `Voice "<voice_name>" ready in supertonic3!` and saves it to `~/.vtmate/tts/supertonic-model/voice_styles/<voice_name>.json`, immediately usable like any other voice: `voice = <voice_name>` in an agent, or `--voice <voice_name>` elsewhere. Like the built-in `M1`-`F5` voices, a cloned voice is multilingual - one file, usable with any of the 31 supported languages regardless of which language it was cloned with.
+
+**Refine an existing voice** further with another recording, without touching the original:
+
+```
+vtmate --refine-voice <voice_name> <language> <wav_file> <ref_text>
+```
+
+Same arguments, but `voice_name` must already exist (from a previous `--clone-voice`). It warm-starts from that voice's current style and never overwrites it: the result is saved as a new version, `<voice_name>v<n>` (`v1`, `v2`, `v3`, ...) - the base voice and every earlier version stay untouched and usable. Run it again on the same name to keep improving it: each call picks up from the latest version and produces the next one.
+
+Both commands show a progress popup (current stage, iteration and overall progress) while training, which typically takes a few minutes on CPU.
+
+**What to expect from a clone**
+
+Cloning does not train a model on the speaker: it searches for the `supertonic` style vector that best matches the recording, guided mainly by a speaker-embedding similarity. That sets what a clone can and cannot pick up:
+
+* **Length**: 10-20 s of one or two natural sentences is the sweet spot. Speaker embeddings saturate at around 5-10 s of clean speech, and the transcript is synthesized as a single utterance, so windows over ~15 s trigger a warning. A longer clip adds little; a cleaner one adds a lot.
+* **Quality over quantity**: a quiet room, no music or reverb, a single speaker, and a `ref_text` that matches the audio word for word matter more than extra seconds.
+* **Timbre, pitch range and rhythm** transfer well - this is what the search fits.
+* **Tempo is detected, not configured**: the speech in the recording is measured and the clone is fitted to speak `ref_text` at that pace (which is why `ref_text` is needed). That pace becomes the voice's `voice_speed = 1.0`; the setting and `ARROW_UP` / `ARROW_DOWN` scale from there.
+* **Accent** transfers only partly. `supertonic` reads raw text with no phoneme layer, so pronunciation (vowel quality, `r`, `th`, ...) comes from the model's own rendering of each language and cannot be changed by the style. The speaker's melody and pacing carry over; their individual sounds do not. Clone from a recording in the language you will mostly synthesize, and the prosody will fit that language best.
+* **Expressive range** comes from coverage, not length: one clip pins down one delivery. Use `--refine-voice` with a different sentence (a question, an emphatic line) to widen it.
 
 ###  Model files
 

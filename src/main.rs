@@ -132,6 +132,22 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   }
 
   // ---------------------------------------------------
+  // handle --clone-voice / --refine-voice
+  // ---------------------------------------------------
+  if let Some(clone_args) = &args.clone_voice {
+    let [voice_name, language, wav_file, ref_text] = &clone_args[..] else {
+      unreachable!("clap num_args = 4 guarantees exactly 4 values");
+    };
+    run_clone_voice_cli(voice_name, language, wav_file, ref_text, false);
+  }
+  if let Some(refine_args) = &args.refine_voice {
+    let [voice_name, language, wav_file, ref_text] = &refine_args[..] else {
+      unreachable!("clap num_args = 4 guarantees exactly 4 values");
+    };
+    run_clone_voice_cli(voice_name, language, wav_file, ref_text, true);
+  }
+
+  // ---------------------------------------------------
   // quiet mode validation
   // ---------------------------------------------------
   if args.quiet
@@ -782,4 +798,65 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let _ = ui_handle.join();
 
   Ok(())
+}
+
+/// Shared tail of `--clone-voice` and `--refine-voice`: opens the progress
+/// popup, runs the training (`refine` picks which of the two the crate
+/// actually runs), prints the final green/red message and exits. Never
+/// returns.
+fn run_clone_voice_cli(voice_name: &str, language: &str, wav_file: &str, ref_text: &str, refine: bool) -> ! {
+  let popup_title = if refine {
+    format!("Cloning voice (refining {})", voice_name)
+  } else {
+    format!("Cloning voice \"{}\"", voice_name)
+  };
+  ui::open_clone_progress_popup();
+  // Catch a panic here (there should not be one) so the alternate screen
+  // opened above is always left before this process exits one way or
+  // another - otherwise the terminal would be stranded on a blank screen.
+  let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let render_progress = move |p: tts::supertonic_tts::CloneProgressInfo| {
+      ui::render_clone_progress_popup(
+        &popup_title,
+        &p.stages,
+        p.done_steps,
+        p.total_steps,
+        p.fraction,
+      );
+    };
+    if refine {
+      tts::supertonic_tts::refine_voice(voice_name, language, wav_file, ref_text, render_progress)
+    } else {
+      tts::supertonic_tts::clone_voice(voice_name, language, wav_file, ref_text, render_progress)
+    }
+  }));
+  ui::close_clone_progress_popup();
+  let result = match result {
+    Ok(r) => r,
+    Err(panic) => std::panic::resume_unwind(panic),
+  };
+  match result {
+    Ok(r) => {
+      println!(
+        "\n\x1b[32m Voice \"{}\" ready in supertonic3!\x1b[0m",
+        r.voice_name
+      );
+      match r.speaker_similarity {
+        Some(sim) => println!(
+          "\x1b[90m   loss {:.3} -> {:.3}, speaker similarity {:.2} (rough guide: >0.7 usually the same speaker, <0.3 a different one)\x1b[0m\n\n",
+          r.initial_loss, r.loss, sim
+        ),
+        None => println!(
+          "\x1b[90m   loss {:.3} -> {:.3} (no speaker embedding model was found, so identity was not part of the search - the clone will sound a lot less like the reference)\x1b[0m\n\n",
+          r.initial_loss, r.loss
+        ),
+      }
+      util::terminate(0);
+    }
+    Err(e) => {
+      println!("\n\x1b[31m Voice cloning failed: {}\x1b[0m\n\n", e);
+      crate::log::log("error", &format!("voice cloning failed: {}", e));
+      util::terminate(1);
+    }
+  }
 }

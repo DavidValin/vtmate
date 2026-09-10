@@ -22,7 +22,7 @@ use crossterm::cursor::Show;
 use crossterm::{
   cursor::MoveTo,
   execute,
-  terminal::{Clear, ClearType},
+  terminal::{Clear, ClearType, LeaveAlternateScreen},
 };
 use directories::UserDirs;
 use encoding_rs::*;
@@ -428,8 +428,14 @@ pub fn terminate(code: i32) -> ! {
   run_exit_hook();
    // Disable raw mode if enabled, to restore terminal state
    let _ = crossterm::terminal::disable_raw_mode();
-  // show cursor and clear bottom line before exiting
+  // Leave the alternate screen if something (e.g. --clone-voice's progress
+  // popup) switched to it - a no-op on the primary screen, but mandatory
+  // here since this is the only exit path every close, Ctrl-C included,
+  // funnels through, and never leaving would strand the terminal on a blank
+  // alternate screen after the process is gone.
   let mut stdout = std::io::stdout();
+  let _ = execute!(stdout, LeaveAlternateScreen);
+  // show cursor and clear bottom line before exiting
   let (_cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
   if EXIT_LINE_PRINTED.load(std::sync::atomic::Ordering::Relaxed) {
     let _ = execute!(stdout, Show);
