@@ -559,8 +559,18 @@ smoke_test() { # binary
 
 install_from() { # extracted dir -> 0 on success (files recorded in manifest)
   src="$1"
-  bin="$src/$APP"; [ "$OS_NAME" = "windows" ] && bin="$src/$APP.exe"
-  [ -f "$bin" ] || { warn "$(basename "$bin") not found in archive"; return 1; }
+  name="$APP"; [ "$OS_NAME" = "windows" ] && name="$APP.exe"
+  bin="$src/$name"
+  # Releases ship the binary at the archive's top level (release.yml checks
+  # this), but the 0.8.0 Windows zips and macOS tgz wrapped it in a versioned
+  # directory (vtmate-0.8.0-windows-x86_64-cpu/vtmate.exe). Fall back to the
+  # directory that actually holds the binary, so its bundled libraries are
+  # picked up from the same place.
+  if [ ! -f "$bin" ]; then
+    bin="$(find "$src" -maxdepth 3 -type f -name "$name" | head -1)"
+    [ -n "$bin" ] && src="$(dirname "$bin")"
+  fi
+  [ -n "$bin" ] && [ -f "$bin" ] || { warn "$name not found in archive"; return 1; }
   priv mkdir -p "$BIN_DIR" "$LIB_DIR"
   mkdir -p "$VTMATE_HOME"; : > "$MANIFEST"
   priv cp "$bin" "$BIN_DIR/"

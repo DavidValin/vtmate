@@ -318,7 +318,9 @@ jobs:
         with:
           name: windows-x86_64-${{ matrix.variant }}
           # build_windows.ps1 writes vtmate-<version>-windows-x86_64-<variant>\
-          # holding vtmate.exe plus any bundled DLLs; upload its contents.
+          # holding vtmate.exe plus any bundled DLLs. The wildcard makes
+          # upload-artifact keep that directory name, so the artifact holds
+          # <dir>/vtmate.exe; release.yml packages from inside <dir>.
           path: target-cross\vtmate-*-windows-x86_64-${{ matrix.variant }}
 
   macos:
@@ -360,6 +362,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: macos-${{ matrix.arch }}
-          # build_macos.sh writes vtmate-<version>-macos-<arch>/vtmate; upload
-          # the directory contents so the release step can tar them.
+          # build_macos.sh writes vtmate-<version>-macos-<arch>/vtmate. The
+          # wildcard makes upload-artifact keep that directory name, so the
+          # artifact holds <dir>/vtmate; release.yml packages from inside <dir>.
           path: dist/vtmate-*-macos-${{ matrix.arch }}

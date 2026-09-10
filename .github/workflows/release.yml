@@ -99,18 +99,26 @@ jobs:
               continue
             fi
 
-            # Windows: a directory holding the exe, plus the ONNX Runtime,
-            # cuDNN and cuBLAS DLLs for the CUDA variant.
-            if [ -n "$(find "$dir" -name '*.exe' -print -quit)" ]; then
-              ( cd "$dir" && zip -qr "${GITHUB_WORKSPACE}/assets/vtmate-${VERSION}-${name}.zip" . )
-              echo "packaged (zip): $name"
-              continue
-            fi
-
-            # macOS: a bare binary.
-            cp "$PDF" "$dir"
-            ( cd "$dir" && tar -czf "${GITHUB_WORKSPACE}/assets/vtmate-${VERSION}-${name}.tgz" -- * )
-            echo "packaged (tgz + README.pdf): $name"
+            # Windows and macOS: the CI artifact is a directory holding the
+            # binary, plus whatever ships beside it (ONNX Runtime, cuDNN and
+            # cuBLAS DLLs for the Windows CUDA variant). build.yml uploads that
+            # directory through a wildcard path, and upload-artifact keeps the
+            # directory name after the wildcard, so the binary arrives one
+            # level down: vtmate-<version>-<os>-<arch>[-<variant>]/vtmate[.exe].
+            # Package from the binary's own directory so it - and everything
+            # beside it - lands at the archive's top level.
+            bin="$(find "$dir" -type f \( -name vtmate -o -name vtmate.exe \) -print -quit)"
+            [ -n "$bin" ] || { echo "no vtmate binary found in $dir" >&2; exit 1; }
+            bindir="$(dirname "$bin")"
+            case "$bin" in
+              *.exe)
+                ( cd "$bindir" && zip -qr "${GITHUB_WORKSPACE}/assets/vtmate-${VERSION}-${name}.zip" . )
+                echo "packaged (zip): $name" ;;
+              *)
+                cp "$PDF" "$bindir"
+                ( cd "$bindir" && tar -czf "${GITHUB_WORKSPACE}/assets/vtmate-${VERSION}-${name}.tgz" -- * )
+                echo "packaged (tgz + README.pdf): $name" ;;
+            esac
           done
 
           echo "--- assets ---"
@@ -127,6 +135,23 @@ jobs:
             listing="$(tar -tzf "$a")"
             grep -qxF 'README.pdf' <<<"$listing" || {
               echo "README.pdf missing from $a" >&2; exit 1; }
+            echo "ok: $a"
+          done
+
+      # The installer expects vtmate (vtmate.exe on Windows) at the top level
+      # of every archive, never inside a folder.
+      - name: Verify the binary sits at the top level of every archive
+        run: |
+          set -euo pipefail
+          for a in assets/*; do
+            case "$a" in
+              *.tgz) want=vtmate;     listing="$(tar -tzf "$a")" ;;
+              *.zip) want=vtmate.exe; listing="$(unzip -Z1 "$a")" ;;
+              *) continue ;;
+            esac
+            grep -qxF "$want" <<<"$listing" || {
+              echo "$want is not at the top level of $a:" >&2
+              sed 's/^/  /' <<<"$listing" >&2; exit 1; }
             echo "ok: $a"
           done
 
