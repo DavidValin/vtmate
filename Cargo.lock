@@ -4554,7 +4554,7 @@ checksum = "6a02e4885ed3bc0f2de90ea6dd45ebcbb66dacffe03547fadbb0eeae2770887d"
 
 [[package]]
 name = "vtmate"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "anyhow",
  "arboard",
