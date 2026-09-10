@@ -400,17 +400,23 @@ have_so() {
   for d in $dirs; do [ -e "$d/$1" ] && return 0; done
   return 1
 }
-have_dll() { # cudart64_*.dll on PATH or in the CUDA toolkit
-  for d in $(printf '%s' "$PATH" | tr ':' ' ') "$(winpath "${CUDA_PATH:-}")/bin"; do
-    ls "$d"/$1 >/dev/null 2>&1 && return 0
+# have_dll cudart64_12.dll -> found where the Windows loader will look for it
+# at run time: PATH, the CUDA toolkit's bin (the toolkit installer puts it on
+# PATH; checked explicitly for shells that predate the install) and $LIB_DIR
+# (which this installer adds to PATH). cuDNN's own installer does NOT add its
+# bin directory to PATH, so a cuDNN that is installed but unreachable counts
+# as missing here - it would be missing for vtmate.exe too.
+have_dll() {
+  for d in $(printf '%s' "$PATH" | tr ':' ' ') "$(winpath "${CUDA_PATH:-}")/bin" "$LIB_DIR"; do
+    [ -n "$d" ] && ls "$d"/$1 >/dev/null 2>&1 && return 0
   done
   return 1
 }
 # cuda_runtime_libs MAJOR -> the runtime files the cudaMAJOR build needs here.
 # Library names carry the CUDA major (cuFFT bumps its own: 11 under CUDA 12,
-# 12 under CUDA 13); cuRAND 10 and cuDNN 9 keep theirs across both. On
-# Windows the archive already bundles cuDNN and cuBLAS beside the exe, so
-# only the rest is listed.
+# 12 under CUDA 13); cuRAND 10 and cuDNN 9 keep theirs across both. Nothing
+# is bundled in the archives (cuDNN 9 + cuBLAS alone exceed GitHub's 2 GiB
+# asset cap on Windows), so both platforms list the full set.
 cuda_runtime_libs() {
   if [ "$OS_NAME" = "linux" ]; then
     case "$1" in
@@ -419,8 +425,8 @@ cuda_runtime_libs() {
     esac
   elif [ "$OS_NAME" = "windows" ]; then
     case "$1" in
-      12) echo "cudart64_12.dll cufft64_11.dll curand64_10.dll" ;;
-      13) echo "cudart64_13.dll cufft64_12.dll curand64_10.dll" ;;
+      12) echo "cudart64_12.dll cublas64_12.dll cublasLt64_12.dll cufft64_11.dll curand64_10.dll cudnn64_9.dll" ;;
+      13) echo "cudart64_13.dll cublas64_13.dll cublasLt64_13.dll cufft64_12.dll curand64_10.dll cudnn64_9.dll" ;;
     esac
   fi
 }
@@ -527,7 +533,8 @@ else
           warn "cuda$m: NVIDIA driver found, but the build also needs: $(cuda_runtime_missing "$m")"
         fi
       done
-      warn "Install the CUDA Toolkit 12.x or 13.x$([ "$OS_NAME" = linux ] && echo ' and cuDNN 9') and rerun, or force one with --variant cuda12|cuda13. Falling back to vulkan/cpu."
+      warn "Install the CUDA Toolkit 12.x or 13.x and cuDNN 9 and rerun, or force one with --variant cuda12|cuda13. Falling back to vulkan/cpu."
+      [ "$OS_NAME" = "windows" ] && warn "On Windows, cuDNN's installer does not put its bin directory (e.g. C:\\Program Files\\NVIDIA\\CUDNN\\v9.x\\bin\\<cuda major>.x) on PATH: add it, or copy its DLLs into $LIB_DIR."
     fi
   fi
   [ "$VULKAN" -eq 1 ] && CANDIDATES="$CANDIDATES ${PREFIX_NAME}-vulkan.${EXT}"
@@ -642,7 +649,7 @@ if [ "$OS_NAME" = "windows" ]; then add_to_path "$BIN_DIR" "$LIB_DIR"; else add_
 case "$INSTALLED" in
   *-cuda12.*|*-cuda13.*)
     m="${INSTALLED##*-cuda}"; m="${m%%.*}"
-    say "Installed the cuda$m build. It needs the CUDA $m runtime$([ "$OS_NAME" = linux ] && echo ' and cuDNN 9') on this machine (system-wide or copied into $LIB_DIR)." ;;
+    say "Installed the cuda$m build. It needs the CUDA $m runtime and cuDNN 9 on this machine (system-wide or copied into $LIB_DIR)." ;;
   *-vulkan.*)
     say "Installed the vulkan build. It needs the Vulkan loader (libvulkan.so.1 / vulkan-1.dll) from your GPU driver." ;;
 esac

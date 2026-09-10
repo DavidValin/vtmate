@@ -638,7 +638,7 @@ Run `vtmate --list-voices` to print every voice for every language and TTS syste
 Do you have GPU? (nvidia? an apple computer?) Great! then vtmate speed is at lighting speed =)
 
 * To be able to use acceleration, pick the built version for your hardware from [Releases list](https://github.com/DavidValin/vtmate/releases)
-* For CUDA install the CUDA Toolkit (12.x). The Linux CUDA build also needs cuDNN 9 installed (the Windows build bundles it). For Vulkan install VULKAN SDK
+* For CUDA install the CUDA Toolkit (12.x or 13.x) and cuDNN 9 (on Windows, put cuDNN's `bin\<cuda major>.x` directory on PATH, or copy its DLLs next to the other vtmate libraries). `installer.sh` checks both are reachable and falls back to the Vulkan/CPU build otherwise. For Vulkan install VULKAN SDK
 
 ```
 macOS:            ✅ CPU    ✅ Metal
