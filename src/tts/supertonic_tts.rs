@@ -200,9 +200,6 @@ pub fn clone_voice(
   if reference_text.trim().is_empty() {
     return Err("reference text must not be empty".into());
   }
-  if !std::path::Path::new(wav_file).is_file() {
-    return Err(format!("wav file not found: {}", wav_file).into());
-  }
   let style_path = voice_styles_dir().join(format!("{}.json", voice_name));
   if style_path.exists() {
     return Err(
@@ -215,8 +212,7 @@ pub fn clone_voice(
     );
   }
 
-  let reference = load_reference(wav_file)
-    .map_err(|e| format!("failed to load reference wav '{}': {}", wav_file, e))?;
+  let reference = validate_and_load_reference(wav_file)?;
   let engine = get_or_init_engine()?;
   let rt = runtime()?;
 
@@ -267,6 +263,144 @@ pub fn clone_voice(
 
 // PRIVATE
 // ------------------------------------------------------------------
+
+/// Below this there isn't enough speech for a stable clone (the crate itself
+/// hard-fails under 0.25s; this gives a clearer error before that point).
+const MIN_CLONE_REFERENCE_SECONDS: f64 = 2.0;
+/// `clone_voice` always uses the whole recording as the transcript window (no
+/// `--ref-window` support here), and the crate recommends that window stay a
+/// sentence or two, up to ~15s (`supertonic3_tts::clone::MAX_TRANSCRIPT_SECONDS`)
+/// before alignment quality drops; 30s leaves comfortable slack over that for
+/// an unedited recording (e.g. a few seconds of leading/trailing silence).
+const MAX_CLONE_REFERENCE_SECONDS: f64 = 30.0;
+
+/// Validate `wav_file` as a voice-cloning reference and load it: mono or
+/// stereo, a plausible sample rate, and a duration within
+/// `MIN_CLONE_REFERENCE_SECONDS..=MAX_CLONE_REFERENCE_SECONDS`.
+///
+/// Also repairs a `data` chunk that declares more bytes than the file
+/// actually holds: `arecord` writes that placeholder when it can't seek back
+/// to patch the header on exit (e.g. stopped with Ctrl-C), which otherwise
+/// makes hound fail with "Failed to read enough bytes" partway through
+/// decoding, well past every other check.
+fn validate_and_load_reference(
+  wav_file: &str,
+) -> Result<supertonic3_tts::Audio, Box<dyn std::error::Error + Send + Sync>> {
+  let path = std::path::Path::new(wav_file);
+  if !path.is_file() {
+    return Err(format!("wav file not found: {}", wav_file).into());
+  }
+  let bytes = std::fs::read(path)
+    .map_err(|e| format!("failed to read wav file '{}': {}", wav_file, e))?;
+
+  let spec = hound::WavReader::open(path)
+    .map_err(|e| format!("'{}' is not a readable wav file: {}", wav_file, e))?
+    .spec();
+  if !(1..=2).contains(&spec.channels) {
+    return Err(
+      format!(
+        "'{}' has {} channels; only mono or stereo reference recordings are supported for voice cloning",
+        wav_file, spec.channels
+      )
+      .into(),
+    );
+  }
+  if !(8_000..=192_000).contains(&spec.sample_rate) {
+    return Err(
+      format!(
+        "'{}' has an unusual sample rate ({} Hz); expected somewhere between 8000 and 192000 Hz",
+        wav_file, spec.sample_rate
+      )
+      .into(),
+    );
+  }
+
+  let (data_offset, declared_len) = locate_data_chunk(&bytes)
+    .ok_or_else(|| format!("'{}' has no readable wav data chunk", wav_file))?;
+  let available = bytes.len().saturating_sub(data_offset);
+  let block_align = ((spec.channels as usize) * (spec.bits_per_sample as usize / 8).max(1)).max(1);
+  let mut effective_len = if declared_len == 0 || declared_len > available {
+    available
+  } else {
+    declared_len
+  };
+  effective_len -= effective_len % block_align;
+
+  let duration_secs = effective_len as f64 / block_align as f64 / spec.sample_rate as f64;
+  if duration_secs < MIN_CLONE_REFERENCE_SECONDS {
+    return Err(
+      format!(
+        "'{}' is only {:.1}s long; at least {:.0}s of speech is needed for voice cloning",
+        wav_file, duration_secs, MIN_CLONE_REFERENCE_SECONDS
+      )
+      .into(),
+    );
+  }
+  if duration_secs > MAX_CLONE_REFERENCE_SECONDS {
+    return Err(
+      format!(
+        "'{}' is {:.1}s long; keep the reference under {:.0}s (a sentence or two matching the reference text works best)",
+        wav_file, duration_secs, MAX_CLONE_REFERENCE_SECONDS
+      )
+      .into(),
+    );
+  }
+
+  if declared_len == effective_len {
+    return load_reference(wav_file)
+      .map_err(|e| format!("failed to load reference wav '{}': {}", wav_file, e).into());
+  }
+
+  // The data chunk lied about its size (or was a streaming placeholder):
+  // write a corrected copy to a temp file and load that instead.
+  crate::log::log(
+    "warning",
+    &format!(
+      "[supertonic_tts] '{}' has a broken wav header (data chunk declares {} bytes, {} available); repairing a temporary copy",
+      wav_file, declared_len, available
+    ),
+  );
+  let mut fixed = Vec::with_capacity(data_offset + effective_len);
+  fixed.extend_from_slice(&bytes[..data_offset - 4]);
+  fixed.extend_from_slice(&(effective_len as u32).to_le_bytes());
+  fixed.extend_from_slice(&bytes[data_offset..data_offset + effective_len]);
+  let riff_size = (fixed.len() - 8) as u32;
+  fixed[4..8].copy_from_slice(&riff_size.to_le_bytes());
+
+  let tmp_path =
+    std::env::temp_dir().join(format!("vtmate-clone-ref-{}.wav", uuid::Uuid::new_v4()));
+  std::fs::write(&tmp_path, &fixed)
+    .map_err(|e| format!("failed to write repaired wav to {}: {}", tmp_path.display(), e))?;
+  let result: Result<supertonic3_tts::Audio, Box<dyn std::error::Error + Send + Sync>> =
+    load_reference(&tmp_path)
+      .map_err(|e| format!("failed to load repaired reference wav: {}", e).into());
+  let _ = std::fs::remove_file(&tmp_path);
+  result
+}
+
+/// Byte offset of the `data` chunk's payload and its declared size (which
+/// may be wrong, see [`validate_and_load_reference`]), found by walking RIFF
+/// chunks from the top rather than trusting hound's parsed length.
+fn locate_data_chunk(bytes: &[u8]) -> Option<(usize, usize)> {
+  if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+    return None;
+  }
+  let mut pos = 12usize;
+  while pos + 8 <= bytes.len() {
+    let id = &bytes[pos..pos + 4];
+    let size = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().ok()?) as usize;
+    let body = pos + 8;
+    if id == b"data" {
+      return Some((body, size));
+    }
+    let next = body.checked_add(size)?.checked_add(size % 2)?;
+    if next <= pos {
+      return None;
+    }
+    pos = next;
+  }
+  None
+}
 
 /// Root of the extracted model: <root>/onnx/*.onnx and <root>/voice_styles/*.json
 pub fn model_root() -> PathBuf {
