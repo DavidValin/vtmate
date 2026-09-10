@@ -15,6 +15,31 @@ The program self contains (1.5GB) all TTS models and voices and necessary files 
 * [🤠 Quicksheet (PDF)](https://raw.githubusercontent.com/DavidValin/vtmate/refs/heads/main/docs/en/quicksheet.pdf) (🖨️ print ready for easy access)
 * [🎥 Video Overview](https://www.youtube.com/watch?v=TfNcgVsR3oc)
 
+### Index
+
+- [Quick installation](#quick-installation)
+- [Video demonstration](#video-demonstration)
+- [Features](#features)
+- [How it works](#how-it-works)
+- [LLM integration](#llm-integration)
+- [TTS engine support](#tts-engine-support)
+- [Installation](#installation)
+- [Configure agents](#configure-agents)
+  - [Reusable system prompts](#reusable-system-prompts)
+- [How to use it](#how-to-use-it)
+  - [Conversation mode](#conversation-mode)
+  - [Debate mode](#debate-mode)
+  - [Quiet mode](#quiet-mode)
+  - [Daemon mode (global shortcuts)](#daemon-mode-global-shortcuts)
+  - [Read mode (file to speech)](#read-mode-file-to-speech)
+  - [Separate agents](#separate-agents)
+  - [Custom voices](#custom-voices)
+  - [Voice cloning](#voice-cloning)
+  - [Model files](#model-files)
+- [Language support](#language-support)
+- [Acceleration support](#acceleration-support)
+- [Build vtmate from source code](#build-vtmate-from-source-code)
+
 ### Video demonstration
 <details>
 <summary>(🇬🇧 English) Conversation mode demo</summary>
@@ -510,6 +535,33 @@ vtmate -c philosophers.txt --debate "Aristoteles" "Ptahhotep" "how to achieve ha
 Drop a new `<name>.json` in that directory and the voice becomes available under that name: `vtmate --list-voices` shows it, `voice = <name>` in an agent passes validation, and the agent speaks with it. Remove the file and it is gone again. `--list-voices` prints the exact directory for each engine.
 
 The other engines (`kokoro`, `opentts`) have fixed voice lists.
+
+###  Voice cloning
+
+Clone a new `supertonic` voice from a short recording, or refine an existing clone further with another one - both run fully offline, no model training knowledge needed.
+
+**Clone a new voice** from a WAV reference and its transcript:
+
+```
+vtmate --clone-voice <voice_name> <language> <wav_file> <ref_text>
+```
+
+* `voice_name`: letters, digits and `_` only, and must not already exist.
+* `language`: one of the languages `supertonic` supports (see `vtmate --list-voices`).
+* `wav_file`: the reference recording (mono or stereo WAV, ~2-30s, any common sample rate).
+* `ref_text`: the exact words spoken in the recording, quoted - the closer the match, the better the clone.
+
+On success it prints `Voice "<voice_name>" ready in supertonic3!` and saves it to `~/.vtmate/tts/supertonic-model/voice_styles/<voice_name>.json`, immediately usable like any other voice: `voice = <voice_name>` in an agent, or `--voice <voice_name>` elsewhere.
+
+**Refine an existing voice** further with another recording, without touching the original:
+
+```
+vtmate --refine-voice <voice_name> <language> <wav_file> <ref_text>
+```
+
+Same arguments, but `voice_name` must already exist (from a previous `--clone-voice`). It warm-starts from that voice's current style and never overwrites it: the result is saved as a new version, `<voice_name>v<n>` (`v1`, `v2`, `v3`, ...) - the base voice and every earlier version stay untouched and usable. Run it again on the same name to keep improving it: each call picks up from the latest version and produces the next one.
+
+Both commands show a progress popup (current stage, iteration and overall progress) while training, which typically takes a few minutes on CPU.
 
 ###  Model files
 
