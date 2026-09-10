@@ -341,10 +341,31 @@ fn run_voice_search(
   let engine = get_or_init_engine()?;
   let rt = runtime()?;
 
+  // The speaker identity term (the highest-weighted loss term by far) needs
+  // this model; without it a clone only matches acoustic statistics
+  // (spectral envelope, pitch, tempo), not who it sounds like. It is bundled
+  // and extracted alongside the rest of the Supertonic 3 model (see
+  // build.rs / assets.rs), so it should always be there - the check is just
+  // defensive (e.g. a custom SUPERTONIC_DATA_DIRECTORY override).
+  let speaker_model = model_root().join("speaker_encoder.onnx");
+  let speaker_model = if speaker_model.is_file() {
+    Some(speaker_model)
+  } else {
+    crate::log::log(
+      "warning",
+      &format!(
+        "[supertonic_tts] speaker embedding model not found at {}; cloning without the speaker identity term, which will sound a lot less like the reference",
+        speaker_model.display()
+      ),
+    );
+    None
+  };
+
   let options = supertonic3_tts::CloneOptions {
     language: language.to_string(),
     reference_text: Some(reference_text.to_string()),
     init_voice,
+    speaker_model,
     ..Default::default()
   };
 

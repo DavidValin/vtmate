@@ -805,7 +805,11 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 /// actually runs), prints the final green/red message and exits. Never
 /// returns.
 fn run_clone_voice_cli(voice_name: &str, language: &str, wav_file: &str, ref_text: &str, refine: bool) -> ! {
-  let popup_voice_name = voice_name.to_string();
+  let popup_title = if refine {
+    format!("Cloning voice (refining {})", voice_name)
+  } else {
+    format!("Cloning voice \"{}\"", voice_name)
+  };
   ui::open_clone_progress_popup();
   // Catch a panic here (there should not be one) so the alternate screen
   // opened above is always left before this process exits one way or
@@ -813,7 +817,7 @@ fn run_clone_voice_cli(voice_name: &str, language: &str, wav_file: &str, ref_tex
   let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
     let render_progress = move |p: tts::supertonic_tts::CloneProgressInfo| {
       ui::render_clone_progress_popup(
-        &popup_voice_name,
+        &popup_title,
         &p.stages,
         p.done_steps,
         p.total_steps,

@@ -280,6 +280,63 @@ fn ensure_supertonic_model(home: &str, embedded_dest: &Path, is_release: bool) {
   println!("cargo:warning=Supertonic 3 model embedded from {}", model_dir.display());
 }
 
+// ---------------------------------------------------------------------------
+// Speaker embedding model (3D-Speaker ERes2Net, English VoxCeleb, Apache-2.0,
+// ~26 MB), exported for ONNX by the sherpa-onnx project. Voice cloning
+// (--clone-voice / --refine-voice) uses it as the "does it sound like the
+// same person" loss term (supertonic3_tts::CloneOptions::speaker_model) -
+// without it, a clone only matches acoustic statistics (spectral envelope,
+// pitch, tempo), not identity, and sounds a lot less like the reference
+// speaker.
+// ---------------------------------------------------------------------------
+const SPEAKER_MODEL_URL: &str = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx";
+const SPEAKER_MODEL_SHA256: &str =
+  "c59158379255ad66e161679cca6af8d52d51e389e3224ab7d7a7baae295c2db5";
+
+fn ensure_speaker_model(home: &str, embedded_dest: &Path, is_release: bool) {
+  let model_dir = Path::new(home)
+    .join(".vtmate")
+    .join("tts")
+    .join("supertonic-model");
+  let path = model_dir.join("speaker_encoder.onnx");
+
+  let mut needs_download = !path.exists();
+  if !needs_download && is_release {
+    match sha256_hex(&path) {
+      Ok(h) if h == SPEAKER_MODEL_SHA256 => {}
+      Ok(h) => {
+        println!(
+          "cargo:warning=Checksum mismatch for speaker_encoder.onnx (expected {}, got {}), re-downloading",
+          SPEAKER_MODEL_SHA256, h
+        );
+        needs_download = true;
+      }
+      Err(e) => panic!("{}", e),
+    }
+  }
+  if needs_download {
+    download_to(SPEAKER_MODEL_URL, &path);
+    let got = sha256_hex(&path).expect("hash after download");
+    if got != SPEAKER_MODEL_SHA256 {
+      panic!(
+        "Checksum mismatch for speaker_encoder.onnx: expected {}, got {}",
+        SPEAKER_MODEL_SHA256, got
+      );
+    }
+  }
+
+  let dest_path = embedded_dest
+    .join("supertonic-model")
+    .join("speaker_encoder.onnx");
+  fs::create_dir_all(dest_path.parent().unwrap()).expect("Failed to create embedded model dir");
+  fs::copy(&path, &dest_path).expect("failed to copy speaker_encoder.onnx asset");
+  println!("cargo:rerun-if-changed={}", path.display());
+  println!(
+    "cargo:warning=Speaker embedding model embedded from {}",
+    path.display()
+  );
+}
+
 fn main() {
   // Linux: ALSA error-handler shim, see csrc/alsa_error_shim.c. Compiled with
   // the target C compiler (cc honours CC_<target> / CC from the build images).
@@ -462,6 +519,8 @@ fn main() {
 
   // Supertonic 3 model (multilingual TTS)
   ensure_supertonic_model(&home, &dest, is_release);
+  // Speaker embedding model, for voice cloning identity matching
+  ensure_speaker_model(&home, &dest, is_release);
 
   for &(src_rel, name) in &needed_files {
     if name == tarball_name {

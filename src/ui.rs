@@ -943,14 +943,16 @@ pub fn open_clone_progress_popup() {
   out.flush().unwrap();
 }
 
-/// Modal shown while `--clone-voice` trains a voice: same bordered,
+/// Modal shown while `--clone-voice` / `--refine-voice` trains a voice
+/// (`title` is the caller-built inner title text, e.g. `Cloning voice
+/// "myvoice"` or `Cloning voice (refining myvoice)`): same bordered,
 /// dark-background popup style as [`render_debate_modal`], listing every
 /// cloning stage (done / current / pending) and an overall green progress
 /// bar with a step count below it. Meant to be called again on every
 /// progress update (it redraws from scratch each time, there is no
 /// diffing) - call [`open_clone_progress_popup`] first.
 pub fn render_clone_progress_popup(
-  voice_name: &str,
+  title: &str,
   stages: &[crate::tts::supertonic_tts::CloneStageInfo],
   done_steps: usize,
   total_steps: usize,
@@ -988,15 +990,15 @@ pub fn render_clone_progress_popup(
     ))
   )
   .unwrap();
-  let mut title = format!(" Cloning voice \"{}\" ", voice_name);
-  if title.len() as u16 > modal_width.saturating_sub(2) {
-    title = " Cloning voice ".to_string();
+  let mut padded_title = format!(" {} ", title);
+  if padded_title.len() as u16 > modal_width.saturating_sub(2) {
+    padded_title = " Cloning voice ".to_string();
   }
-  let title_x = modal_x + (modal_width - title.len() as u16) / 2;
+  let title_x = modal_x + (modal_width - padded_title.len() as u16) / 2;
   execute!(
     out,
     MoveTo(title_x, modal_y),
-    Print(format!("\x1b[48;5;234m\x1b[97;1m{}\x1b[0m", title))
+    Print(format!("\x1b[48;5;234m\x1b[97;1m{}\x1b[0m", padded_title))
   )
   .unwrap();
 
