@@ -15,31 +15,6 @@ The program self contains (1.5GB) all TTS models and voices and necessary files 
 * [🤠 Quicksheet (PDF)](https://raw.githubusercontent.com/DavidValin/vtmate/refs/heads/main/docs/en/quicksheet.pdf) (🖨️ print ready for easy access)
 * [🎥 Video Overview](https://www.youtube.com/watch?v=TfNcgVsR3oc)
 
-### Index
-
-- [Quick installation](#quick-installation)
-- [Video demonstration](#video-demonstration)
-- [Features](#features)
-- [How it works](#how-it-works)
-- [LLM integration](#llm-integration)
-- [TTS engine support](#tts-engine-support)
-- [Installation](#installation)
-- [Configure agents](#configure-agents)
-  - [Reusable system prompts](#reusable-system-prompts)
-- [How to use it](#how-to-use-it)
-  - [Conversation mode](#conversation-mode)
-  - [Debate mode](#debate-mode)
-  - [Quiet mode](#quiet-mode)
-  - [Daemon mode (global shortcuts)](#daemon-mode-global-shortcuts)
-  - [Read mode (file to speech)](#read-mode-file-to-speech)
-  - [Separate agents](#separate-agents)
-  - [Custom voices](#custom-voices)
-  - [Voice cloning](#voice-cloning)
-  - [Model files](#model-files)
-- [Language support](#language-support)
-- [Acceleration support](#acceleration-support)
-- [Build vtmate from source code](#build-vtmate-from-source-code)
-
 ### Video demonstration
 <details>
 <summary>(🇬🇧 English) Conversation mode demo</summary>
@@ -62,6 +37,29 @@ https://github.com/user-attachments/assets/8b9e982c-ba97-4aeb-8e55-1db6a92bc164
 </details>
 
 ![vtmate screenshot](preview.png)
+
+### Index
+
+- [Features](#features)
+- [How it works](#how-it-works)
+- [LLM integration](#llm-integration)
+- [TTS engine support](#tts-engine-support)
+- [Installation](#installation)
+- [Configure agents](#configure-agents)
+  - [Reusable system prompts](#reusable-system-prompts)
+- [How to use it](#how-to-use-it)
+  - [Conversation mode](#conversation-mode)
+  - [Debate mode](#debate-mode)
+  - [Quiet mode](#quiet-mode)
+  - [Daemon mode (global shortcuts)](#daemon-mode-global-shortcuts)
+  - [Read mode (file to speech)](#read-mode-file-to-speech)
+  - [Separate agents](#separate-agents)
+  - [Custom voices](#custom-voices)
+  - [Voice cloning](#voice-cloning)
+  - [Model files](#model-files)
+- [Language support](#language-support)
+- [Acceleration support](#acceleration-support)
+- [Build vtmate from source code](#build-vtmate-from-source-code)
 
 ![how it works](https://github.com/DavidValin/vtmate/raw/main/docs/en/diagrams/how-it-works.png)
 
