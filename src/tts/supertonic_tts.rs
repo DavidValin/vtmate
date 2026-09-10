@@ -151,14 +151,30 @@ pub fn speak_via_supertonic(
   Ok(SpeakOutcome::Completed)
 }
 
-/// One progress update of [`clone_voice`], already reduced to what a caller
-/// needs to render a progress bar: `fraction` is the overall (all stages
-/// combined) 0.0..=1.0 progress; `stage`/`iteration`/`stage_total` describe
-/// where in the current stage that overall progress sits.
-pub struct CloneProgressInfo {
-  pub stage: String,
+/// Status of one cloning stage for [`CloneProgressInfo`]: at most one stage
+/// is `current` at a time, every stage before it is `done`, every stage
+/// after it is still pending (neither flag set).
+pub struct CloneStageInfo {
+  pub name: String,
+  /// Iterations this stage will run in total, once known (every stage but
+  /// select-preset knows it upfront; select-preset learns it on its first
+  /// progress update, since it depends on how many presets are on disk).
+  pub total: Option<usize>,
+  /// Iteration reached so far (only meaningful while `current`; 0 before,
+  /// `total` once `done`).
   pub iteration: usize,
-  pub stage_total: usize,
+  pub current: bool,
+  pub done: bool,
+}
+
+/// One progress update of [`clone_voice`]: every stage in order (to render a
+/// checklist), plus the overall (mix-presets + mix-rows + refine;
+/// select-preset does not move it, it has no fixed size) step count and
+/// fraction 0.0..=1.0.
+pub struct CloneProgressInfo {
+  pub stages: Vec<CloneStageInfo>,
+  pub done_steps: usize,
+  pub total_steps: usize,
   pub fraction: f64,
 }
 
@@ -229,18 +245,51 @@ pub fn clone_voice(
       voice_name, language, wav_file
     ),
   );
-  let total_iters =
-    (options.mix_iterations + options.row_iterations + options.iterations).max(1) as f64;
-  let mut done = 0usize;
+  const STAGE_ORDER: [CloneStage; 4] = [
+    CloneStage::SelectPreset,
+    CloneStage::MixPresets,
+    CloneStage::MixRows,
+    CloneStage::Refine,
+  ];
+  let total_steps = (options.mix_iterations + options.row_iterations + options.iterations).max(1);
+  // Select-preset's size depends on how many preset files are on disk, so it
+  // is only known once its first progress update names it; the other three
+  // stages have a fixed size decided by `options` before cloning starts.
+  let mut stage_totals: [Option<usize>; 4] = [
+    None,
+    Some(options.mix_iterations),
+    Some(options.row_iterations),
+    Some(options.iterations),
+  ];
+  let mut done_steps = 0usize;
   let progress = move |p: &CloneProgress<'_>| {
+    let current_idx = STAGE_ORDER.iter().position(|s| *s == p.stage).unwrap_or(0);
+    stage_totals[current_idx] = Some(p.total);
     if p.stage != CloneStage::SelectPreset {
-      done += 1;
+      done_steps += 1;
     }
+    let stages = STAGE_ORDER
+      .iter()
+      .enumerate()
+      .map(|(i, stage)| CloneStageInfo {
+        name: stage.to_string(),
+        total: stage_totals[i],
+        iteration: if i == current_idx {
+          p.iteration
+        } else if i < current_idx {
+          stage_totals[i].unwrap_or(0)
+        } else {
+          0
+        },
+        current: i == current_idx,
+        done: i < current_idx,
+      })
+      .collect();
     on_progress(CloneProgressInfo {
-      stage: p.stage.to_string(),
-      iteration: p.iteration,
-      stage_total: p.total,
-      fraction: (done as f64 / total_iters).min(1.0),
+      stages,
+      done_steps,
+      total_steps,
+      fraction: (done_steps as f64 / total_steps as f64).min(1.0),
     });
   };
 

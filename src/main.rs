@@ -139,18 +139,28 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       unreachable!("clap num_args = 4 guarantees exactly 4 values");
     };
     let popup_voice_name = voice_name.clone();
-    let result = tts::supertonic_tts::clone_voice(voice_name, language, wav_file, ref_text, {
-      move |p| {
-        ui::render_clone_progress_popup(
-          &popup_voice_name,
-          &p.stage,
-          p.iteration,
-          p.stage_total,
-          p.fraction,
-        );
-      }
-    });
+    ui::open_clone_progress_popup();
+    // Catch a panic here (there should not be one) so the alternate screen
+    // opened above is always left before this process exits one way or
+    // another - otherwise the terminal would be stranded on a blank screen.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+      tts::supertonic_tts::clone_voice(voice_name, language, wav_file, ref_text, {
+        move |p| {
+          ui::render_clone_progress_popup(
+            &popup_voice_name,
+            &p.stages,
+            p.done_steps,
+            p.total_steps,
+            p.fraction,
+          );
+        }
+      })
+    }));
     ui::close_clone_progress_popup();
+    let result = match result {
+      Ok(r) => r,
+      Err(panic) => std::panic::resume_unwind(panic),
+    };
     match result {
       Ok(()) => {
         println!(

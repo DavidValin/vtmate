@@ -919,26 +919,40 @@ fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
   out.flush().unwrap();
 }
 
+/// Switches to the terminal's alternate screen before the first
+/// [`render_clone_progress_popup`] call. Cloning redraws the popup on every
+/// iteration (up to a couple hundred times); doing that on the primary
+/// screen would repeatedly `Clear(ClearType::All)` it, and most terminals
+/// push each cleared frame into scrollback rather than overwrite it in
+/// place, so scrolling up would show a stack of near-duplicate popups. The
+/// alternate screen has no scrollback, so redraws just replace each other.
+pub fn open_clone_progress_popup() {
+  let mut out = io::stdout();
+  execute!(out, terminal::EnterAlternateScreen, Hide).unwrap();
+  out.flush().unwrap();
+}
+
 /// Modal shown while `--clone-voice` trains a voice: same bordered,
-/// dark-background popup style as [`render_debate_modal`], with a title, the
-/// current stage / iteration and a green overall progress bar. Meant to be
-/// called again on every progress update (it redraws from scratch each time,
-/// there is no diffing).
+/// dark-background popup style as [`render_debate_modal`], listing every
+/// cloning stage (done / current / pending) and an overall green progress
+/// bar with a step count below it. Meant to be called again on every
+/// progress update (it redraws from scratch each time, there is no
+/// diffing) - call [`open_clone_progress_popup`] first.
 pub fn render_clone_progress_popup(
   voice_name: &str,
-  stage: &str,
-  iteration: usize,
-  stage_total: usize,
+  stages: &[crate::tts::supertonic_tts::CloneStageInfo],
+  done_steps: usize,
+  total_steps: usize,
   fraction: f64,
 ) {
   let mut out = io::stdout();
   let (cols, rows) = terminal::size().unwrap_or((80, 24));
-  let modal_width = std::cmp::min(56, cols.saturating_sub(4)).max(30);
-  let modal_height: u16 = 7;
+  let modal_width = std::cmp::min(56, cols.saturating_sub(4)).max(38);
+  let modal_height = 7 + stages.len() as u16;
   let modal_x = cols.saturating_sub(modal_width) / 2;
   let modal_y = rows.saturating_sub(modal_height) / 2;
 
-  execute!(out, Clear(ClearType::All), Hide).unwrap();
+  execute!(out, Clear(ClearType::All)).unwrap();
 
   // Modal background
   for y in modal_y..modal_y + modal_height {
@@ -975,29 +989,57 @@ pub fn render_clone_progress_popup(
   )
   .unwrap();
 
-  // Stage / iteration
-  execute!(
-    out,
-    MoveTo(modal_x + 2, modal_y + 2),
-    Print(format!(
-      "\x1b[48;5;234m\x1b[97mStage: \x1b[96m{}\x1b[90m ({}/{})\x1b[0m",
-      stage, iteration, stage_total
-    ))
-  )
-  .unwrap();
+  // One line per stage: a checkmark for done, an arrow for the current one
+  // (both with its live iteration count), a dot for pending stages.
+  for (i, s) in stages.iter().enumerate() {
+    let (marker, marker_fg, name_fg) = if s.done {
+      ("✔", "\x1b[32m", "\x1b[97m")
+    } else if s.current {
+      ("▸", "\x1b[96;1m", "\x1b[97;1m")
+    } else {
+      ("•", "\x1b[90m", "\x1b[90m")
+    };
+    let total_str = s.total.map(|t| t.to_string()).unwrap_or_else(|| "?".into());
+    execute!(
+      out,
+      MoveTo(modal_x + 2, modal_y + 2 + i as u16),
+      Print(format!(
+        "\x1b[48;5;234m{marker_fg}{marker} {name_fg}{name:<13}\x1b[90m {iter:>4}/{total:<4}\x1b[0m",
+        marker_fg = marker_fg,
+        marker = marker,
+        name_fg = name_fg,
+        name = s.name,
+        iter = s.iteration,
+        total = total_str
+      ))
+    )
+    .unwrap();
+  }
 
   // Progress bar: green filled, dark gray empty, percentage on the right
+  let bar_y = modal_y + 3 + stages.len() as u16;
   let bar_width = (modal_width as usize).saturating_sub(4 + 5);
   let fraction = fraction.clamp(0.0, 1.0);
   let filled = ((fraction * bar_width as f64).round() as usize).min(bar_width);
   execute!(
     out,
-    MoveTo(modal_x + 2, modal_y + 4),
+    MoveTo(modal_x + 2, bar_y),
     Print(format!(
       "\x1b[48;5;234m\x1b[32m{}\x1b[90m{}\x1b[97m {:>3}%\x1b[0m",
       "█".repeat(filled),
       "░".repeat(bar_width - filled),
       (fraction * 100.0).round() as u32
+    ))
+  )
+  .unwrap();
+
+  // Total steps, below the bar
+  execute!(
+    out,
+    MoveTo(modal_x + 2, bar_y + 1),
+    Print(format!(
+      "\x1b[48;5;234m\x1b[90mTotal: {} / {} steps\x1b[0m",
+      done_steps, total_steps
     ))
   )
   .unwrap();
@@ -1030,11 +1072,11 @@ pub fn render_clone_progress_popup(
   out.flush().unwrap();
 }
 
-/// Clears the [`render_clone_progress_popup`] modal off the screen and
-/// restores the cursor, leaving a blank screen for the caller's final
-/// success/error message.
+/// Leaves the alternate screen opened by [`open_clone_progress_popup`],
+/// restoring the cursor and whatever the primary screen held before
+/// cloning started, ready for the caller's final success/error message.
 pub fn close_clone_progress_popup() {
   let mut out = io::stdout();
-  execute!(out, Clear(ClearType::All), MoveTo(0, 0), Show).unwrap();
+  execute!(out, terminal::LeaveAlternateScreen, Show).unwrap();
   out.flush().unwrap();
 }
