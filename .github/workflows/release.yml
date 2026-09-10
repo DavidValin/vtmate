@@ -100,8 +100,8 @@ jobs:
             fi
 
             # Windows and macOS: the CI artifact is a directory holding the
-            # binary, plus whatever ships beside it (ONNX Runtime, cuDNN and
-            # cuBLAS DLLs for the Windows CUDA variant). build.yml uploads that
+            # binary, plus whatever ships beside it (ONNX Runtime DLLs for the
+            # Windows CUDA variant). build.yml uploads that
             # directory through a wildcard path, and upload-artifact keeps the
             # directory name after the wildcard, so the binary arrives one
             # level down: vtmate-<version>-<os>-<arch>[-<variant>]/vtmate[.exe].

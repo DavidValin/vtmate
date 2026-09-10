@@ -84,8 +84,8 @@ switch ($VARIANT) {
     }
     # cuda12 / cuda13: the same build against a CUDA 12.x / 13.x toolkit,
     # named by the major the user has installed (installer.sh picks the one
-    # whose runtime is present). The toolkit, cuDNN and the prebuilt ONNX
-    # Runtime all follow $CUDA_MAJOR below.
+    # whose runtime - including cuDNN 9 and cuBLAS - is present). The toolkit
+    # and the prebuilt ONNX Runtime both follow $CUDA_MAJOR below.
     "cuda12" {
         $WITH_OPENBLAS = $true
         $WITH_CUDA     = $true
@@ -311,7 +311,7 @@ if ($WITH_CUDA) {
     # variants to a VS 2022 image and a local build needs a VS 2022 toolset
     # too. 12.8 is also what Microsoft builds the CUDA 12 ONNX Runtime
     # package with, so the runtime this variant asks for is never older than
-    # what that package expects. cuDNN and the ORT package follow the major.
+    # what that package expects. The ORT package follows the major.
     switch ($CUDA_MAJOR) {
         12 { $CUDA_VERSION = "12.8.1"; $CUDA_MM = "12.8"; $ORT_PKG = "onnxruntime-win-x64-gpu" }
         13 { $CUDA_VERSION = "13.3.0"; $CUDA_MM = "13.3"; $ORT_PKG = "onnxruntime-win-x64-gpu_cuda13" }
@@ -425,50 +425,13 @@ if ($WITH_CUDA) {
     }
     Write-Host "CUDAARCHS = $env:CUDAARCHS"
 
-    # ------------------------------------------------------
-    # cuDNN (required by the ONNX Runtime CUDA execution provider).
-    # Pulled from NVIDIA's public redist mirror - no developer login needed.
-    # ------------------------------------------------------
-    if (-not $env:CUDNN_HOME -or -not (Test-Path $env:CUDNN_HOME)) {
-        # The _cudaXX suffix must match the CUDA major this variant builds
-        # against; NVIDIA ships one cuDNN archive per major.
-        $CUDNN_VERSION = "9.16.0.29"
-        $CUDNN_NAME    = "cudnn-windows-x86_64-${CUDNN_VERSION}_cuda${CUDA_MAJOR}-archive"
-        $CUDNN_URL     = "https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/windows-x86_64/$CUDNN_NAME.zip"
-        $CUDNN_ZIP     = "$env:TEMP\cudnn.zip"
-        $CUDNN_ROOT    = "C:\cudnn\${CUDNN_VERSION}_cuda${CUDA_MAJOR}"
-
-        Write-Host "cuDNN not detected. Downloading $CUDNN_NAME ..."
-        Invoke-WebRequest -Uri $CUDNN_URL -OutFile $CUDNN_ZIP -UseBasicParsing
-        if (-not (Test-Path $CUDNN_ZIP)) {
-            Write-Error "Failed to download cuDNN."
-            exit 1
-        }
-
-        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $CUDNN_ROOT) | Out-Null
-        Expand-Archive -Path $CUDNN_ZIP -DestinationPath (Split-Path -Parent $CUDNN_ROOT) -Force
-        # The archive unpacks to <name>/ - normalise to a version-only path.
-        $extracted = Join-Path (Split-Path -Parent $CUDNN_ROOT) $CUDNN_NAME
-        if (Test-Path $CUDNN_ROOT) { Remove-Item -Recurse -Force $CUDNN_ROOT }
-        Rename-Item -Path $extracted -NewName (Split-Path -Leaf $CUDNN_ROOT) -Force
-        Remove-Item -Force $CUDNN_ZIP
-
-        $env:CUDNN_HOME = $CUDNN_ROOT
-        Write-Host "cuDNN installed to $env:CUDNN_HOME"
-    }
-    else {
-        Write-Host "cuDNN already present."
-    }
-
-    $env:Path = "$env:CUDNN_HOME\bin;$env:Path"
-
-    # Only the runtime DLLs are used (bundled next to the exe at the end);
-    # ORT's CUDA EP comes prebuilt, so nothing links against cudnn.lib.
-    if (-not (Get-ChildItem -Path (Join-Path $env:CUDNN_HOME "bin") -Filter "cudnn*64*.dll" -ErrorAction SilentlyContinue)) {
-        Write-Error "no cudnn*64*.dll found under $env:CUDNN_HOME\bin"
-        exit 1
-    }
-    Write-Host "CUDNN_HOME = $env:CUDNN_HOME"
+    # cuDNN 9 and cuBLAS are runtime-only here: the ONNX Runtime CUDA
+    # execution provider comes prebuilt (below) and loads them through the
+    # DLL search path, and the ggml CUDA backend links cuBLAS from the
+    # toolkit. Neither is copied next to the exe - they are too large for a
+    # GitHub release asset (cuDNN 9 + cuBLAS for CUDA 12 push the zip past
+    # the 2 GiB cap) - so the user installs them from NVIDIA and installer.sh
+    # checks they are reachable before picking this variant.
 }
 else {
     Remove-Item Env:CUDAToolkit_ROOT -ErrorAction SilentlyContinue
@@ -683,7 +646,8 @@ switch ($VARIANT) {
 #
 # Microsoft ships a prebuilt ORT for exactly this pin and CUDA major, so link
 # that instead. Unlike cpu/vulkan this variant is therefore NOT a single static
-# exe: onnxruntime DLLs ship beside it, as cuDNN/cuBLAS already do.
+# exe: onnxruntime DLLs ship beside it (cuDNN/cuBLAS come from the user's
+# NVIDIA install).
 # ==========================================================
 $ORT_PREBUILT = $null
 if ($WITH_CUDA) {
@@ -1814,7 +1778,7 @@ $env:RUSTFLAGS = "-C target-feature=+crt-static `
 # whisper/ggml CUDA backend. The CUDA EP itself lives in the prebuilt
 # onnxruntime_providers_cuda.dll (loaded at run time by onnxruntime.dll), so
 # nothing here links against ORT's provider or cuDNN; cudnn/cublas stay
-# dynamic and are bundled next to the exe at the end.
+# dynamic and are resolved from the user's NVIDIA install at run time.
 # ----------------------------------------------------------
 if ($WITH_CUDA) {
     $CUDA_LIB_DIR = Join-Path $env:CUDA_PATH "lib\x64"
@@ -1913,18 +1877,9 @@ New-Item -ItemType Directory -Force -Path (Split-Path -Parent $DST_BIN) | Out-Nu
 Copy-Item -Force $SRC_BIN $DST_BIN
 Write-Host "Built $DST_BIN"
 
-# cuDNN and cuBLAS are not part of the NVIDIA driver, so they must ship
-# alongside the exe - the driver alone will not satisfy them at runtime.
-if ($WITH_CUDA) {
-    $binDir = Split-Path -Parent $DST_BIN
-    foreach ($pattern in "cudnn*64*.dll", "cublas*64*.dll") {
-        Get-ChildItem -Path (Join-Path $env:CUDNN_HOME "bin") -Filter $pattern -ErrorAction SilentlyContinue |
-            ForEach-Object { Copy-Item -Force $_.FullName $binDir }
-        Get-ChildItem -Path (Join-Path $env:CUDA_PATH "bin")  -Filter $pattern -ErrorAction SilentlyContinue |
-            ForEach-Object { Copy-Item -Force $_.FullName $binDir }
-    }
-    Write-Host "Bundled CUDA/cuDNN runtime DLLs into $binDir"
-}
+# cuDNN and cuBLAS are deliberately NOT bundled (see the CUDA setup block
+# near the top): they are part of the user's CUDA Toolkit / cuDNN install,
+# which installer.sh verifies before choosing a cuda variant.
 
 # The prebuilt ORT is a shared build, so its DLLs must ship with the exe.
 if ($ORT_PREBUILT) {
