@@ -16,6 +16,7 @@ use std::sync::{
   atomic::{AtomicU64, Ordering},
 };
 use supertonic3_tts::TtsEngine;
+use supertonic3_tts::clone::{CloneProgress, CloneStage, load_reference};
 use supertonic3_tts::device::Device;
 use supertonic3_tts::helper::{Style, chunk_text, load_voice_style, max_chunk_length};
 use tokio::runtime::Runtime;
@@ -148,6 +149,120 @@ pub fn speak_via_supertonic(
     }
   }
   Ok(SpeakOutcome::Completed)
+}
+
+/// One progress update of [`clone_voice`], already reduced to what a caller
+/// needs to render a progress bar: `fraction` is the overall (all stages
+/// combined) 0.0..=1.0 progress; `stage`/`iteration`/`stage_total` describe
+/// where in the current stage that overall progress sits.
+pub struct CloneProgressInfo {
+  pub stage: String,
+  pub iteration: usize,
+  pub stage_total: usize,
+  pub fraction: f64,
+}
+
+/// Train a new supertonic3 voice from a reference recording and drop it into
+/// `voice_styles_dir()`, where it is immediately usable as `--voice
+/// <voice_name>` (any tts picking voices from that folder sees it right away).
+///
+/// `voice_name` must be free (no `<voice_name>.json` there yet, built-in
+/// presets included) and made only of ASCII letters, digits and `_`;
+/// `language` must be one of `SUPPORTED_LANGS`. `on_progress` is called after
+/// every iteration of the mix-presets, mix-rows and refine stages (not
+/// select-preset, which has no fixed size and does not move the bar).
+pub fn clone_voice(
+  voice_name: &str,
+  language: &str,
+  wav_file: &str,
+  reference_text: &str,
+  mut on_progress: impl FnMut(CloneProgressInfo) + Send + 'static,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  if voice_name.is_empty() || !voice_name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+    return Err(
+      format!(
+        "invalid voice name '{}': only alphanumeric characters and '_' are allowed",
+        voice_name
+      )
+      .into(),
+    );
+  }
+  if !SUPPORTED_LANGS.contains(&language) {
+    return Err(
+      format!(
+        "unsupported language '{}' for supertonic3 (supported: {})",
+        language,
+        SUPPORTED_LANGS.join(", ")
+      )
+      .into(),
+    );
+  }
+  if reference_text.trim().is_empty() {
+    return Err("reference text must not be empty".into());
+  }
+  if !std::path::Path::new(wav_file).is_file() {
+    return Err(format!("wav file not found: {}", wav_file).into());
+  }
+  let style_path = voice_styles_dir().join(format!("{}.json", voice_name));
+  if style_path.exists() {
+    return Err(
+      format!(
+        "voice name '{}' is already taken in supertonic3 ({})",
+        voice_name,
+        style_path.display()
+      )
+      .into(),
+    );
+  }
+
+  let reference = load_reference(wav_file)
+    .map_err(|e| format!("failed to load reference wav '{}': {}", wav_file, e))?;
+  let engine = get_or_init_engine()?;
+  let rt = runtime()?;
+
+  let options = supertonic3_tts::CloneOptions {
+    language: language.to_string(),
+    reference_text: Some(reference_text.to_string()),
+    ..Default::default()
+  };
+
+  crate::log::log(
+    "info",
+    &format!(
+      "[supertonic_tts] cloning voice \"{}\" ({}) from {}",
+      voice_name, language, wav_file
+    ),
+  );
+  let total_iters =
+    (options.mix_iterations + options.row_iterations + options.iterations).max(1) as f64;
+  let mut done = 0usize;
+  let progress = move |p: &CloneProgress<'_>| {
+    if p.stage != CloneStage::SelectPreset {
+      done += 1;
+    }
+    on_progress(CloneProgressInfo {
+      stage: p.stage.to_string(),
+      iteration: p.iteration,
+      stage_total: p.total,
+      fraction: (done as f64 / total_iters).min(1.0),
+    });
+  };
+
+  let cloned = rt
+    .block_on(engine.clone_voice_with_progress(&reference, &options, progress))
+    .map_err(|e| {
+      let msg = format!("[supertonic_tts] voice cloning failed: {}", e);
+      crate::log::log("error", &msg);
+      msg
+    })?;
+
+  std::fs::create_dir_all(voice_styles_dir())
+    .map_err(|e| format!("failed to create voice styles folder: {}", e))?;
+  cloned
+    .save(&style_path)
+    .map_err(|e| format!("failed to save cloned voice to {}: {}", style_path.display(), e))?;
+
+  Ok(())
 }
 
 // PRIVATE

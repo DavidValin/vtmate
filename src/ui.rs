@@ -6,7 +6,7 @@ use crate::state::{GLOBAL_STATE, get_speed};
 use crate::util::get_flag;
 use crossbeam_channel::Receiver;
 use crossterm::{
-  cursor::{Hide, MoveTo},
+  cursor::{Hide, MoveTo, Show},
   execute,
   style::{Print, ResetColor},
   terminal::{self, Clear, ClearType, ScrollUp},
@@ -916,5 +916,125 @@ fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
     .unwrap();
   }
 
+  out.flush().unwrap();
+}
+
+/// Modal shown while `--clone-voice` trains a voice: same bordered,
+/// dark-background popup style as [`render_debate_modal`], with a title, the
+/// current stage / iteration and a green overall progress bar. Meant to be
+/// called again on every progress update (it redraws from scratch each time,
+/// there is no diffing).
+pub fn render_clone_progress_popup(
+  voice_name: &str,
+  stage: &str,
+  iteration: usize,
+  stage_total: usize,
+  fraction: f64,
+) {
+  let mut out = io::stdout();
+  let (cols, rows) = terminal::size().unwrap_or((80, 24));
+  let modal_width = std::cmp::min(56, cols.saturating_sub(4)).max(30);
+  let modal_height: u16 = 7;
+  let modal_x = cols.saturating_sub(modal_width) / 2;
+  let modal_y = rows.saturating_sub(modal_height) / 2;
+
+  execute!(out, Clear(ClearType::All), Hide).unwrap();
+
+  // Modal background
+  for y in modal_y..modal_y + modal_height {
+    execute!(
+      out,
+      MoveTo(modal_x, y),
+      Print(format!(
+        "\x1b[48;5;234m{}\x1b[0m",
+        " ".repeat(modal_width as usize)
+      ))
+    )
+    .unwrap();
+  }
+
+  // Border + title
+  execute!(
+    out,
+    MoveTo(modal_x, modal_y),
+    Print(format!(
+      "\x1b[48;5;234m\x1b[97m┌{}┐\x1b[0m",
+      "─".repeat(modal_width as usize - 2)
+    ))
+  )
+  .unwrap();
+  let mut title = format!(" Cloning voice \"{}\" ", voice_name);
+  if title.len() as u16 > modal_width.saturating_sub(2) {
+    title = " Cloning voice ".to_string();
+  }
+  let title_x = modal_x + (modal_width - title.len() as u16) / 2;
+  execute!(
+    out,
+    MoveTo(title_x, modal_y),
+    Print(format!("\x1b[48;5;234m\x1b[97;1m{}\x1b[0m", title))
+  )
+  .unwrap();
+
+  // Stage / iteration
+  execute!(
+    out,
+    MoveTo(modal_x + 2, modal_y + 2),
+    Print(format!(
+      "\x1b[48;5;234m\x1b[97mStage: \x1b[96m{}\x1b[90m ({}/{})\x1b[0m",
+      stage, iteration, stage_total
+    ))
+  )
+  .unwrap();
+
+  // Progress bar: green filled, dark gray empty, percentage on the right
+  let bar_width = (modal_width as usize).saturating_sub(4 + 5);
+  let fraction = fraction.clamp(0.0, 1.0);
+  let filled = ((fraction * bar_width as f64).round() as usize).min(bar_width);
+  execute!(
+    out,
+    MoveTo(modal_x + 2, modal_y + 4),
+    Print(format!(
+      "\x1b[48;5;234m\x1b[32m{}\x1b[90m{}\x1b[97m {:>3}%\x1b[0m",
+      "█".repeat(filled),
+      "░".repeat(bar_width - filled),
+      (fraction * 100.0).round() as u32
+    ))
+  )
+  .unwrap();
+
+  // Bottom border + sides
+  execute!(
+    out,
+    MoveTo(modal_x, modal_y + modal_height - 1),
+    Print(format!(
+      "\x1b[48;5;234m\x1b[97m└{}┘\x1b[0m",
+      "─".repeat(modal_width as usize - 2)
+    ))
+  )
+  .unwrap();
+  for y in (modal_y + 1)..(modal_y + modal_height - 1) {
+    execute!(
+      out,
+      MoveTo(modal_x, y),
+      Print("\x1b[48;5;234m\x1b[97m│\x1b[0m")
+    )
+    .unwrap();
+    execute!(
+      out,
+      MoveTo(modal_x + modal_width - 1, y),
+      Print("\x1b[48;5;234m\x1b[97m│\x1b[0m")
+    )
+    .unwrap();
+  }
+
+  out.flush().unwrap();
+}
+
+/// Clears the [`render_clone_progress_popup`] modal off the screen and
+/// restores the cursor, leaving a blank screen for the caller's final
+/// success/error message.
+pub fn close_clone_progress_popup() {
+  let mut out = io::stdout();
+  execute!(out, Clear(ClearType::All), MoveTo(0, 0), Show).unwrap();
   out.flush().unwrap();
 }

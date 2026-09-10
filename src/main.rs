@@ -132,6 +132,42 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   }
 
   // ---------------------------------------------------
+  // handle --clone-voice
+  // ---------------------------------------------------
+  if let Some(clone_args) = &args.clone_voice {
+    let [voice_name, language, wav_file, ref_text] = &clone_args[..] else {
+      unreachable!("clap num_args = 4 guarantees exactly 4 values");
+    };
+    let popup_voice_name = voice_name.clone();
+    let result = tts::supertonic_tts::clone_voice(voice_name, language, wav_file, ref_text, {
+      move |p| {
+        ui::render_clone_progress_popup(
+          &popup_voice_name,
+          &p.stage,
+          p.iteration,
+          p.stage_total,
+          p.fraction,
+        );
+      }
+    });
+    ui::close_clone_progress_popup();
+    match result {
+      Ok(()) => {
+        println!(
+          "\n\x1b[32m Voice \"{}\" ready in supertonic3!\x1b[0m\n\n",
+          voice_name
+        );
+        util::terminate(0);
+      }
+      Err(e) => {
+        println!("\n\x1b[31m Voice cloning failed: {}\x1b[0m\n\n", e);
+        crate::log::log("error", &format!("voice cloning failed: {}", e));
+        util::terminate(1);
+      }
+    }
+  }
+
+  // ---------------------------------------------------
   // quiet mode validation
   // ---------------------------------------------------
   if args.quiet

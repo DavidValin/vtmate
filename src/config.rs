@@ -297,6 +297,15 @@ pub struct Args {
 
   #[arg(long, action = clap::ArgAction::SetTrue, group = "daemon_cmd", help = "show whether a daemon is running and its hotkeys")]
   pub daemon_status: bool,
+
+  #[arg(
+    long = "clone-voice",
+    num_args = 4,
+    value_names = ["VOICE_NAME", "LANGUAGE", "WAV_FILE", "REF_TEXT"],
+    conflicts_with_all = ["read_file", "quiet", "prompt", "prompt_file", "debate", "list_voices", "daemon", "daemon_foreground", "daemon_stop", "daemon_status"],
+    help = "train a new supertonic3 voice from a wav reference (+ its transcript) and make it immediately available as VOICE_NAME (letters, digits, '_' only)"
+  )]
+  pub clone_voice: Option<Vec<String>>,
 }
 
 /// Accept `-s-html` as written on the command line: clap only knows long
