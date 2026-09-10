@@ -561,6 +561,16 @@ Same arguments, but `voice_name` must already exist (from a previous `--clone-vo
 
 Both commands show a progress popup (current stage, iteration and overall progress) while training, which typically takes a few minutes on CPU.
 
+**What to expect from a clone**
+
+Cloning does not train a model on the speaker: it searches for the `supertonic` style vector that best matches the recording, guided mainly by a speaker-embedding similarity. That sets what a clone can and cannot pick up:
+
+* **Length**: 10-20 s of one or two natural sentences is the sweet spot. Speaker embeddings saturate at around 5-10 s of clean speech, and the transcript is synthesized as a single utterance, so windows over ~15 s trigger a warning. A longer clip adds little; a cleaner one adds a lot.
+* **Quality over quantity**: a quiet room, no music or reverb, a single speaker, and a `ref_text` that matches the audio word for word matter more than extra seconds.
+* **Timbre, pitch range, pace and rhythm** transfer well - this is what the search fits.
+* **Accent** transfers only partly. `supertonic` reads raw text with no phoneme layer, so pronunciation (vowel quality, `r`, `th`, ...) comes from the model's own rendering of each language and cannot be changed by the style. The speaker's melody and pacing carry over; their individual sounds do not. Clone from a recording in the language you will mostly synthesize, and the prosody will fit that language best.
+* **Expressive range** comes from coverage, not length: one clip pins down one delivery. Use `--refine-voice` with a different sentence (a question, an emphatic line) to widen it.
+
 ###  Model files
 
 vtmate self contains (no need for manual installation) espeak-ng-data, the whisper tiny & small models, kokoro model and voices, supersonic2 model and voices and supertonic (Supertonic 3) model and voices which will be autoextracted from the binary when running vtmate if they are not found in next locations:
