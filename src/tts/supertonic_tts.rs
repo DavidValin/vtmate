@@ -178,6 +178,24 @@ pub struct CloneProgressInfo {
   pub fraction: f64,
 }
 
+/// Diagnostics from a finished [`clone_voice`] / [`refine_voice`] run.
+pub struct CloneResult {
+  /// Final voice name to use with `--voice` (differs from the input for
+  /// [`refine_voice`], which always saves a new version instead of the
+  /// input name).
+  pub voice_name: String,
+  /// Final (best) loss reached, and the starting point's loss for
+  /// comparison - lower is better; neither is on any fixed/absolute scale.
+  pub loss: f32,
+  pub initial_loss: f32,
+  /// Cosine similarity between the clone's speaker embedding and the
+  /// reference's - only present when a speaker embedding model was used
+  /// (see `run_voice_search`; it always should be, but this stays `None`
+  /// if that model is ever missing). Rough guide from the crate: different
+  /// voices score below ~0.3, the same voice above ~0.7.
+  pub speaker_similarity: Option<f32>,
+}
+
 /// Train a new supertonic3 voice from a reference recording and drop it into
 /// `voice_styles_dir()`, where it is immediately usable as `--voice
 /// <voice_name>` (any tts picking voices from that folder sees it right away).
@@ -186,16 +204,14 @@ pub struct CloneProgressInfo {
 /// presets included) and made only of ASCII letters, digits and `_`;
 /// `language` must be one of `SUPPORTED_LANGS`. `on_progress` is called after
 /// every iteration of the mix-presets, mix-rows and refine stages (not
-/// select-preset, which has no fixed size and does not move the bar). On
-/// success, returns `voice_name` back (kept symmetric with
-/// [`refine_voice`], whose saved name differs from its input).
+/// select-preset, which has no fixed size and does not move the bar).
 pub fn clone_voice(
   voice_name: &str,
   language: &str,
   wav_file: &str,
   reference_text: &str,
   on_progress: impl FnMut(CloneProgressInfo) + Send + 'static,
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<CloneResult, Box<dyn std::error::Error + Send + Sync>> {
   validate_clone_params(voice_name, language, reference_text)?;
   let style_path = voice_styles_dir().join(format!("{}.json", voice_name));
   if style_path.exists() {
@@ -208,7 +224,7 @@ pub fn clone_voice(
       .into(),
     );
   }
-  run_voice_search(
+  let cloned = run_voice_search(
     voice_name,
     language,
     wav_file,
@@ -218,7 +234,12 @@ pub fn clone_voice(
     "cloning",
     on_progress,
   )?;
-  Ok(voice_name.to_string())
+  Ok(CloneResult {
+    voice_name: voice_name.to_string(),
+    loss: cloned.loss,
+    initial_loss: cloned.initial_loss,
+    speaker_similarity: cloned.speaker_similarity,
+  })
 }
 
 /// Refine an *existing* supertonic3 voice further with a new reference
@@ -237,7 +258,7 @@ pub fn refine_voice(
   wav_file: &str,
   reference_text: &str,
   on_progress: impl FnMut(CloneProgressInfo) + Send + 'static,
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<CloneResult, Box<dyn std::error::Error + Send + Sync>> {
   validate_clone_params(voice_name, language, reference_text)?;
   let Some((warm_start_path, current_version)) = latest_voice_version(voice_name) else {
     return Err(
@@ -251,7 +272,7 @@ pub fn refine_voice(
   let new_version = current_version + 1;
   let new_name = format!("{}v{}", voice_name, new_version);
   let save_path = voice_styles_dir().join(format!("{}.json", new_name));
-  run_voice_search(
+  let cloned = run_voice_search(
     voice_name,
     language,
     wav_file,
@@ -261,7 +282,12 @@ pub fn refine_voice(
     "refining",
     on_progress,
   )?;
-  Ok(new_name)
+  Ok(CloneResult {
+    voice_name: new_name,
+    loss: cloned.loss,
+    initial_loss: cloned.initial_loss,
+    speaker_similarity: cloned.speaker_similarity,
+  })
 }
 
 fn validate_clone_params(
@@ -336,7 +362,7 @@ fn run_voice_search(
   save_path: &std::path::Path,
   log_verb: &str,
   mut on_progress: impl FnMut(CloneProgressInfo) + Send + 'static,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<supertonic3_tts::ClonedVoice, Box<dyn std::error::Error + Send + Sync>> {
   let reference = validate_and_load_reference(wav_file)?;
   let engine = get_or_init_engine()?;
   let rt = runtime()?;
@@ -438,7 +464,7 @@ fn run_voice_search(
     .save(save_path)
     .map_err(|e| format!("failed to save cloned voice to {}: {}", save_path.display(), e))?;
 
-  Ok(())
+  Ok(cloned)
 }
 
 // PRIVATE

@@ -836,11 +836,21 @@ fn run_clone_voice_cli(voice_name: &str, language: &str, wav_file: &str, ref_tex
     Err(panic) => std::panic::resume_unwind(panic),
   };
   match result {
-    Ok(saved_name) => {
+    Ok(r) => {
       println!(
-        "\n\x1b[32m Voice \"{}\" ready in supertonic3!\x1b[0m\n\n",
-        saved_name
+        "\n\x1b[32m Voice \"{}\" ready in supertonic3!\x1b[0m",
+        r.voice_name
       );
+      match r.speaker_similarity {
+        Some(sim) => println!(
+          "\x1b[90m   loss {:.3} -> {:.3}, speaker similarity {:.2} (rough guide: >0.7 usually the same speaker, <0.3 a different one)\x1b[0m\n\n",
+          r.initial_loss, r.loss, sim
+        ),
+        None => println!(
+          "\x1b[90m   loss {:.3} -> {:.3} (no speaker embedding model was found, so identity was not part of the search - the clone will sound a lot less like the reference)\x1b[0m\n\n",
+          r.initial_loss, r.loss
+        ),
+      }
       util::terminate(0);
     }
     Err(e) => {
