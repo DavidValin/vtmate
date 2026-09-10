@@ -928,7 +928,18 @@ fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
 /// alternate screen has no scrollback, so redraws just replace each other.
 pub fn open_clone_progress_popup() {
   let mut out = io::stdout();
-  execute!(out, terminal::EnterAlternateScreen, Hide).unwrap();
+  execute!(
+    out,
+    terminal::EnterAlternateScreen,
+    Hide,
+    Clear(ClearType::All),
+    // `All` (CSI 2J) only clears the visible grid; some terminals keep a
+    // scrollback for the alternate screen too (or carry over a little of
+    // the primary screen's on switching), which then shows stray
+    // characters when scrolled into - `Purge` (CSI 3J) clears that.
+    Clear(ClearType::Purge)
+  )
+  .unwrap();
   out.flush().unwrap();
 }
 
@@ -952,7 +963,7 @@ pub fn render_clone_progress_popup(
   let modal_x = cols.saturating_sub(modal_width) / 2;
   let modal_y = rows.saturating_sub(modal_height) / 2;
 
-  execute!(out, Clear(ClearType::All)).unwrap();
+  execute!(out, Clear(ClearType::All), Clear(ClearType::Purge)).unwrap();
 
   // Modal background
   for y in modal_y..modal_y + modal_height {

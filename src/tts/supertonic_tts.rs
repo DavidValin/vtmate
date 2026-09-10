@@ -186,13 +186,88 @@ pub struct CloneProgressInfo {
 /// presets included) and made only of ASCII letters, digits and `_`;
 /// `language` must be one of `SUPPORTED_LANGS`. `on_progress` is called after
 /// every iteration of the mix-presets, mix-rows and refine stages (not
-/// select-preset, which has no fixed size and does not move the bar).
+/// select-preset, which has no fixed size and does not move the bar). On
+/// success, returns `voice_name` back (kept symmetric with
+/// [`refine_voice`], whose saved name differs from its input).
 pub fn clone_voice(
   voice_name: &str,
   language: &str,
   wav_file: &str,
   reference_text: &str,
-  mut on_progress: impl FnMut(CloneProgressInfo) + Send + 'static,
+  on_progress: impl FnMut(CloneProgressInfo) + Send + 'static,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+  validate_clone_params(voice_name, language, reference_text)?;
+  let style_path = voice_styles_dir().join(format!("{}.json", voice_name));
+  if style_path.exists() {
+    return Err(
+      format!(
+        "voice name '{}' is already taken in supertonic3 ({})",
+        voice_name,
+        style_path.display()
+      )
+      .into(),
+    );
+  }
+  run_voice_search(
+    voice_name,
+    language,
+    wav_file,
+    reference_text,
+    None,
+    &style_path,
+    "cloning",
+    on_progress,
+  )?;
+  Ok(voice_name.to_string())
+}
+
+/// Refine an *existing* supertonic3 voice further with a new reference
+/// recording, warm-started from its current style instead of the closest of
+/// the 10 built-in presets (unlike [`clone_voice`]). Never overwrites: it
+/// saves under `<voice_name>v<n>.json` (`n` = 1, 2, 3, ... the next unused
+/// version), warm-started from the highest version that already exists (or
+/// the base `<voice_name>.json` from the original `--clone-voice` if no
+/// refined version exists yet), so the base voice and every earlier version
+/// stay usable and this can be repeated indefinitely to keep improving it.
+/// Returns the new version's name (`<voice_name>v<n>`) on success - use that,
+/// not `voice_name`, as the final `--voice` value.
+pub fn refine_voice(
+  voice_name: &str,
+  language: &str,
+  wav_file: &str,
+  reference_text: &str,
+  on_progress: impl FnMut(CloneProgressInfo) + Send + 'static,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+  validate_clone_params(voice_name, language, reference_text)?;
+  let Some((warm_start_path, current_version)) = latest_voice_version(voice_name) else {
+    return Err(
+      format!(
+        "voice '{}' does not exist yet in supertonic3; use --clone-voice to create it first",
+        voice_name
+      )
+      .into(),
+    );
+  };
+  let new_version = current_version + 1;
+  let new_name = format!("{}v{}", voice_name, new_version);
+  let save_path = voice_styles_dir().join(format!("{}.json", new_name));
+  run_voice_search(
+    voice_name,
+    language,
+    wav_file,
+    reference_text,
+    Some(warm_start_path.to_string_lossy().to_string()),
+    &save_path,
+    "refining",
+    on_progress,
+  )?;
+  Ok(new_name)
+}
+
+fn validate_clone_params(
+  voice_name: &str,
+  language: &str,
+  reference_text: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   if voice_name.is_empty() || !voice_name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
     return Err(
@@ -216,18 +291,52 @@ pub fn clone_voice(
   if reference_text.trim().is_empty() {
     return Err("reference text must not be empty".into());
   }
-  let style_path = voice_styles_dir().join(format!("{}.json", voice_name));
-  if style_path.exists() {
-    return Err(
-      format!(
-        "voice name '{}' is already taken in supertonic3 ({})",
-        voice_name,
-        style_path.display()
-      )
-      .into(),
-    );
-  }
+  Ok(())
+}
 
+/// Highest existing version of `voice_name` in `voice_styles_dir()`: `0` for
+/// the base `<voice_name>.json` (from `--clone-voice`), `n` for the highest
+/// `<voice_name>vn.json` found (from a prior `--refine-voice`). `None` if not
+/// even the base voice exists yet.
+fn latest_voice_version(voice_name: &str) -> Option<(PathBuf, u32)> {
+  let dir = voice_styles_dir();
+  let base = dir.join(format!("{}.json", voice_name));
+  let mut best = base.is_file().then_some((base, 0u32));
+  let prefix = format!("{}v", voice_name);
+  if let Ok(entries) = std::fs::read_dir(&dir) {
+    for entry in entries.flatten() {
+      let path = entry.path();
+      if !path.is_file() {
+        continue;
+      }
+      let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+        continue;
+      };
+      let Some(version) = stem.strip_prefix(&prefix).and_then(|v| v.parse::<u32>().ok()) else {
+        continue;
+      };
+      if best.as_ref().is_none_or(|(_, best_v)| version > *best_v) {
+        best = Some((path, version));
+      }
+    }
+  }
+  best
+}
+
+/// Shared tail of [`clone_voice`] / [`refine_voice`]: loads and validates the
+/// reference wav, runs the search (warm-started from `init_voice` when
+/// given, otherwise from the closest built-in preset) and saves the result
+/// to `save_path`.
+fn run_voice_search(
+  voice_name: &str,
+  language: &str,
+  wav_file: &str,
+  reference_text: &str,
+  init_voice: Option<String>,
+  save_path: &std::path::Path,
+  log_verb: &str,
+  mut on_progress: impl FnMut(CloneProgressInfo) + Send + 'static,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let reference = validate_and_load_reference(wav_file)?;
   let engine = get_or_init_engine()?;
   let rt = runtime()?;
@@ -235,14 +344,15 @@ pub fn clone_voice(
   let options = supertonic3_tts::CloneOptions {
     language: language.to_string(),
     reference_text: Some(reference_text.to_string()),
+    init_voice,
     ..Default::default()
   };
 
   crate::log::log(
     "info",
     &format!(
-      "[supertonic_tts] cloning voice \"{}\" ({}) from {}",
-      voice_name, language, wav_file
+      "[supertonic_tts] {} voice \"{}\" ({}) from {}",
+      log_verb, voice_name, language, wav_file
     ),
   );
   const STAGE_ORDER: [CloneStage; 4] = [
@@ -304,8 +414,8 @@ pub fn clone_voice(
   std::fs::create_dir_all(voice_styles_dir())
     .map_err(|e| format!("failed to create voice styles folder: {}", e))?;
   cloned
-    .save(&style_path)
-    .map_err(|e| format!("failed to save cloned voice to {}: {}", style_path.display(), e))?;
+    .save(save_path)
+    .map_err(|e| format!("failed to save cloned voice to {}: {}", save_path.display(), e))?;
 
   Ok(())
 }
