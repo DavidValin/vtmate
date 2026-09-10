@@ -61,8 +61,6 @@ https://github.com/user-attachments/assets/8b9e982c-ba97-4aeb-8e55-1db6a92bc164
 - [Acceleration support](#acceleration-support)
 - [Build vtmate from source code](#build-vtmate-from-source-code)
 
-![how it works](https://github.com/DavidValin/vtmate/raw/main/docs/en/diagrams/how-it-works.png)
-
 ## Features
 
 - 📌 Continuous Voice chat (LIVE conversation) with voice interruption
@@ -89,6 +87,8 @@ https://github.com/user-attachments/assets/8b9e982c-ba97-4aeb-8e55-1db6a92bc164
 * Background mode features can be used to assist your daily routine with ai powered voice responses while you use other apps, voice read your favourite books or articles, write emails via voice and even replace paid tools like Superwhisper
 
 ## How it works
+
+![how it works](https://github.com/DavidValin/vtmate/raw/main/docs/en/diagrams/how-it-works.png)
 
 ```
 - You start the program and start talking
