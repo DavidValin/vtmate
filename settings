@@ -39,7 +39,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 [agent]
 name = explainer
 language = en
-tts = supertonic
+tts = supertonic3
 voice = F1
 voice_speed = 1.1
 provider = ollama
@@ -54,7 +54,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 [agent]
 name = planner
 language = en
-tts = supertonic
+tts = supertonic3
 voice = F3
 voice_speed = 1.1
 provider = ollama
@@ -69,7 +69,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 [agent]
 name = Ptahhotep
 language = en
-tts = supertonic
+tts = supertonic3
 voice = M2
 voice_speed = 1.1
 provider = ollama
@@ -84,7 +84,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 [agent]
 name = Aristoteles
 language = en
-tts = supertonic
+tts = supertonic3
 voice = M3
 voice_speed = 1.1
 provider = ollama
@@ -99,7 +99,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 [agent]
 name = Budda
 language = en
-tts = supertonic
+tts = supertonic3
 voice = M4
 voice_speed = 1.1
 provider = ollama
@@ -114,7 +114,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 [agent]
 name = Jesus Christ
 language = en
-tts = supertonic
+tts = supertonic3
 voice = M5
 voice_speed = 1.1
 provider = ollama
