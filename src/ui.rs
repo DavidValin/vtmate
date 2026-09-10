@@ -6,7 +6,7 @@ use crate::state::{GLOBAL_STATE, get_speed};
 use crate::util::get_flag;
 use crossbeam_channel::Receiver;
 use crossterm::{
-  cursor::{Hide, MoveTo},
+  cursor::{Hide, MoveTo, Show},
   execute,
   style::{Print, ResetColor},
   terminal::{self, Clear, ClearType, ScrollUp},
@@ -916,5 +916,180 @@ fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
     .unwrap();
   }
 
+  out.flush().unwrap();
+}
+
+/// Switches to the terminal's alternate screen before the first
+/// [`render_clone_progress_popup`] call. Cloning redraws the popup on every
+/// iteration (up to a couple hundred times); doing that on the primary
+/// screen would repeatedly `Clear(ClearType::All)` it, and most terminals
+/// push each cleared frame into scrollback rather than overwrite it in
+/// place, so scrolling up would show a stack of near-duplicate popups. The
+/// alternate screen has no scrollback, so redraws just replace each other.
+pub fn open_clone_progress_popup() {
+  let mut out = io::stdout();
+  execute!(
+    out,
+    terminal::EnterAlternateScreen,
+    Hide,
+    Clear(ClearType::All),
+    // `All` (CSI 2J) only clears the visible grid; some terminals keep a
+    // scrollback for the alternate screen too (or carry over a little of
+    // the primary screen's on switching), which then shows stray
+    // characters when scrolled into - `Purge` (CSI 3J) clears that.
+    Clear(ClearType::Purge)
+  )
+  .unwrap();
+  out.flush().unwrap();
+}
+
+/// Modal shown while `--clone-voice` / `--refine-voice` trains a voice
+/// (`title` is the caller-built inner title text, e.g. `Cloning voice
+/// "myvoice"` or `Cloning voice (refining myvoice)`): same bordered,
+/// dark-background popup style as [`render_debate_modal`], listing every
+/// cloning stage (done / current / pending) and an overall green progress
+/// bar with a step count below it. Meant to be called again on every
+/// progress update (it redraws from scratch each time, there is no
+/// diffing) - call [`open_clone_progress_popup`] first.
+pub fn render_clone_progress_popup(
+  title: &str,
+  stages: &[crate::tts::supertonic_tts::CloneStageInfo],
+  done_steps: usize,
+  total_steps: usize,
+  fraction: f64,
+) {
+  let mut out = io::stdout();
+  let (cols, rows) = terminal::size().unwrap_or((80, 24));
+  let modal_width = std::cmp::min(56, cols.saturating_sub(4)).max(38);
+  let modal_height = 7 + stages.len() as u16;
+  let modal_x = cols.saturating_sub(modal_width) / 2;
+  let modal_y = rows.saturating_sub(modal_height) / 2;
+
+  execute!(out, Clear(ClearType::All), Clear(ClearType::Purge)).unwrap();
+
+  // Modal background
+  for y in modal_y..modal_y + modal_height {
+    execute!(
+      out,
+      MoveTo(modal_x, y),
+      Print(format!(
+        "\x1b[48;5;234m{}\x1b[0m",
+        " ".repeat(modal_width as usize)
+      ))
+    )
+    .unwrap();
+  }
+
+  // Border + title
+  execute!(
+    out,
+    MoveTo(modal_x, modal_y),
+    Print(format!(
+      "\x1b[48;5;234m\x1b[97m┌{}┐\x1b[0m",
+      "─".repeat(modal_width as usize - 2)
+    ))
+  )
+  .unwrap();
+  let mut padded_title = format!(" {} ", title);
+  if padded_title.len() as u16 > modal_width.saturating_sub(2) {
+    padded_title = " Cloning voice ".to_string();
+  }
+  let title_x = modal_x + (modal_width - padded_title.len() as u16) / 2;
+  execute!(
+    out,
+    MoveTo(title_x, modal_y),
+    Print(format!("\x1b[48;5;234m\x1b[97;1m{}\x1b[0m", padded_title))
+  )
+  .unwrap();
+
+  // One line per stage: a checkmark for done, an arrow for the current one
+  // (both with its live iteration count), a dot for pending stages.
+  for (i, s) in stages.iter().enumerate() {
+    let (marker, marker_fg, name_fg) = if s.done {
+      ("✔", "\x1b[32m", "\x1b[97m")
+    } else if s.current {
+      ("▸", "\x1b[96;1m", "\x1b[97;1m")
+    } else {
+      ("•", "\x1b[90m", "\x1b[90m")
+    };
+    let total_str = s.total.map(|t| t.to_string()).unwrap_or_else(|| "?".into());
+    execute!(
+      out,
+      MoveTo(modal_x + 2, modal_y + 2 + i as u16),
+      Print(format!(
+        "\x1b[48;5;234m{marker_fg}{marker} {name_fg}{name:<13}\x1b[90m {iter:>4}/{total:<4}\x1b[0m",
+        marker_fg = marker_fg,
+        marker = marker,
+        name_fg = name_fg,
+        name = s.name,
+        iter = s.iteration,
+        total = total_str
+      ))
+    )
+    .unwrap();
+  }
+
+  // Progress bar: green filled, dark gray empty, percentage on the right
+  let bar_y = modal_y + 3 + stages.len() as u16;
+  let bar_width = (modal_width as usize).saturating_sub(4 + 5);
+  let fraction = fraction.clamp(0.0, 1.0);
+  let filled = ((fraction * bar_width as f64).round() as usize).min(bar_width);
+  execute!(
+    out,
+    MoveTo(modal_x + 2, bar_y),
+    Print(format!(
+      "\x1b[48;5;234m\x1b[32m{}\x1b[90m{}\x1b[97m {:>3}%\x1b[0m",
+      "█".repeat(filled),
+      "░".repeat(bar_width - filled),
+      (fraction * 100.0).round() as u32
+    ))
+  )
+  .unwrap();
+
+  // Total steps, below the bar
+  execute!(
+    out,
+    MoveTo(modal_x + 2, bar_y + 1),
+    Print(format!(
+      "\x1b[48;5;234m\x1b[90mTotal: {} / {} steps\x1b[0m",
+      done_steps, total_steps
+    ))
+  )
+  .unwrap();
+
+  // Bottom border + sides
+  execute!(
+    out,
+    MoveTo(modal_x, modal_y + modal_height - 1),
+    Print(format!(
+      "\x1b[48;5;234m\x1b[97m└{}┘\x1b[0m",
+      "─".repeat(modal_width as usize - 2)
+    ))
+  )
+  .unwrap();
+  for y in (modal_y + 1)..(modal_y + modal_height - 1) {
+    execute!(
+      out,
+      MoveTo(modal_x, y),
+      Print("\x1b[48;5;234m\x1b[97m│\x1b[0m")
+    )
+    .unwrap();
+    execute!(
+      out,
+      MoveTo(modal_x + modal_width - 1, y),
+      Print("\x1b[48;5;234m\x1b[97m│\x1b[0m")
+    )
+    .unwrap();
+  }
+
+  out.flush().unwrap();
+}
+
+/// Leaves the alternate screen opened by [`open_clone_progress_popup`],
+/// restoring the cursor and whatever the primary screen held before
+/// cloning started, ready for the caller's final success/error message.
+pub fn close_clone_progress_popup() {
+  let mut out = io::stdout();
+  execute!(out, terminal::LeaveAlternateScreen, Show).unwrap();
   out.flush().unwrap();
 }

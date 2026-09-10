@@ -300,6 +300,7 @@ const SUPERTONIC_FILES: &[&str] = &[
   "voice_styles/M3.json",
   "voice_styles/M4.json",
   "voice_styles/M5.json",
+  "speaker_encoder.onnx",
 ];
 
 pub fn ensure_supertonic_assets() {
@@ -404,6 +405,10 @@ fn embedded_supertonic_file(rel: &str) -> &'static [u8] {
     "voice_styles/M5.json" => include_bytes!(concat!(
       env!("OUT_DIR"),
       "/embedded/supertonic-model/voice_styles/M5.json"
+    )),
+    "speaker_encoder.onnx" => include_bytes!(concat!(
+      env!("OUT_DIR"),
+      "/embedded/supertonic-model/speaker_encoder.onnx"
     )),
     _ => panic!("Unknown supertonic file {}", rel),
   }
