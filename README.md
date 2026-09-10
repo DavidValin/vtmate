@@ -545,11 +545,11 @@ vtmate --clone-voice <voice_name> <language> <wav_file> <ref_text>
 ```
 
 * `voice_name`: letters, digits and `_` only, and must not already exist.
-* `language`: one of the languages `supertonic` supports (see `vtmate --list-voices`).
+* `language`: one of the languages `supertonic` supports (see `vtmate --list-voices`) - only used to train the clone (matches `ref_text` against it, picks built-in probe sentences for `en`/`es`/`fr`/`de`/`it`/`pt`); it does not lock the resulting voice to that language.
 * `wav_file`: the reference recording (mono or stereo WAV, ~2-30s, any common sample rate).
 * `ref_text`: the exact words spoken in the recording, quoted - the closer the match, the better the clone.
 
-On success it prints `Voice "<voice_name>" ready in supertonic3!` and saves it to `~/.vtmate/tts/supertonic-model/voice_styles/<voice_name>.json`, immediately usable like any other voice: `voice = <voice_name>` in an agent, or `--voice <voice_name>` elsewhere.
+On success it prints `Voice "<voice_name>" ready in supertonic3!` and saves it to `~/.vtmate/tts/supertonic-model/voice_styles/<voice_name>.json`, immediately usable like any other voice: `voice = <voice_name>` in an agent, or `--voice <voice_name>` elsewhere. Like the built-in `M1`-`F5` voices, a cloned voice is multilingual - one file, usable with any of the 31 supported languages regardless of which language it was cloned with.
 
 **Refine an existing voice** further with another recording, without touching the original:
 
