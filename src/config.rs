@@ -206,7 +206,7 @@ Explanation on the [agent] fields:
   ------------------------------------------------------------
   * tts:                  the tts system to use, it can be
                           'supertonic' (default, 31 languages),
-                          'supersonic2', 'kokoro' or 'opentts'.
+                          'supertonic2', 'kokoro' or 'opentts'.
 
                             - opentts requires opentts docker
                             container to be running:
@@ -1685,11 +1685,11 @@ fn validate_voice(voice: &str, language: &str, tts: &str) -> Result<(), std::io:
 }
 
 fn validate_tts(tts: &str) -> Result<(), std::io::Error> {
-  if tts != "kokoro" && tts != "opentts" && tts != "supersonic2" && tts != "supertonic" {
+  if tts != "kokoro" && tts != "opentts" && tts != "supertonic2" && tts != "supertonic" {
     return Err(std::io::Error::new(
       std::io::ErrorKind::Other,
       format!(
-        "Invalid tts '{}' . Must be 'kokoro', 'opentts', 'supersonic2', or 'supertonic'",
+        "Invalid tts '{}' . Must be 'kokoro', 'opentts', 'supertonic2', or 'supertonic'",
         tts
       ),
     ));

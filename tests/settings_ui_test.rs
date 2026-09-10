@@ -271,7 +271,7 @@ fn the_form_edits_an_agent_and_saves_it_to_the_file() {
 
   // TTS, then the language and voice it allows
   press(&state, KeyCode::Down);
-  press(&state, KeyCode::Right); // supertonic -> supersonic2 (no voices)
+  press(&state, KeyCode::Right); // supertonic -> supertonic2 (no voices)
   press(&state, KeyCode::Right); // -> kokoro
   let draft = ui(&state).form.draft.clone();
   assert_eq!(draft.tts, "kokoro");

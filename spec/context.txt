@@ -8,7 +8,7 @@ Tech Stack:
 ---------------------------------------------------------------------------------------------------
 
   Language: Rust
-  Key libraries: whisper-rs, supersonic2, kokoro-micro, ort, cpal, crossbeam-channel
+  Key libraries: whisper-rs, supertonic2, kokoro-micro, ort, cpal, crossbeam-channel
   Testing: no testing framework
   Data persistance: -
 

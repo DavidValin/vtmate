@@ -107,7 +107,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   assets::ensure_piper_espeak_env();
   // make sure the user has the whisper + tts models unpacked
   assets::ensure_assets_env();
-  assets::ensure_supersonic2_assets();
+  assets::ensure_supertonic2_assets();
   assets::ensure_supertonic_assets();
 
   // ---------------------------------------------------
@@ -193,10 +193,10 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let content = util::read_file(filename);
 
     // Initialize TTS engines only if needed
-    let use_supersonic = agents.iter().any(|a| a.tts == "supersonic2");
+    let use_supertonic2 = agents.iter().any(|a| a.tts == "supertonic2");
     let use_kokoro = agents.iter().any(|a| a.tts == "kokoro");
-    if use_supersonic {
-      tts::supersonic2_tts::start_supersonic_engine()?;
+    if use_supertonic2 {
+      tts::supertonic2_tts::start_supertonic2_engine()?;
     }
     if use_kokoro {
       tts::kokoro_tts::start_kokoro_engine()?;

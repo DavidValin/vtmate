@@ -39,8 +39,8 @@ fn find_url_for_file(file_name: &str) -> Option<String> {
       Some("https://github.com/DavidValin/kokoro-micro/raw/main/models/0.onnx".to_string())
     }
     "0.bin" => Some("https://github.com/DavidValin/kokoro-micro/raw/main/models/0.bin".to_string()),
-    "supersonic2-model.tgz" => Some(
-      "https://github.com/DavidValin/supersonic2-tts/releases/download/1.0.1/supersonic2-model.tgz"
+    "supertonic2-model.tgz" => Some(
+      "https://github.com/DavidValin/supertonic2-tts/releases/download/1.2.0/supertonic2-model.tgz"
         .to_string(),
     ),
     _ => None,
@@ -74,8 +74,8 @@ fn verify_file(path: &Path, name: &str) -> Result<(), String> {
   }
 }
 
-// Extract the supersonic2 tarball.
-fn extract_supersonic2(tgz_path: &Path) {
+// Extract the supertonic2 tarball.
+fn extract_supertonic2(tgz_path: &Path) {
   let home = get_home_dir();
   let dest_dir = Path::new(&home).join(".vtmate").join("tts");
   fs::create_dir_all(&dest_dir).expect("Failed to create tts dir");
@@ -84,7 +84,7 @@ fn extract_supersonic2(tgz_path: &Path) {
   let mut archive = Archive::new(decompressor);
   archive
     .unpack(&dest_dir)
-    .expect("Failed to unpack supersonic2 tgz");
+    .expect("Failed to unpack supertonic2 tgz");
 }
 
 fn init_expected_hashes() -> HashMap<&'static str, &'static str> {
@@ -106,8 +106,8 @@ fn init_expected_hashes() -> HashMap<&'static str, &'static str> {
     "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
   );
   m.insert(
-    "supersonic2-model.tgz",
-    "db410b2b6e35057e15ed3cbd1432e9a5159746dfa79c9654ac04be6c9a8c312a",
+    "supertonic2-model.tgz",
+    "f6cdcd6da51c2ed6be5b51cefb1cb4daeed3bc86ba8254bb7fe43f557dcfed69",
   );
   m.insert(
     "duration_predictor.onnx",
@@ -185,7 +185,7 @@ static EXPECTED_HASHES: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(in
 // ---------------------------------------------------------------------------
 // Supertonic 3 (multilingual TTS) - fetched file by file from Hugging Face
 // into $HOME/.vtmate/tts/supertonic-model and copied into OUT_DIR/embedded so
-// assets.rs can include_bytes! them, the same way the supersonic2 model is.
+// assets.rs can include_bytes! them, the same way the supertonic2 model is.
 // ---------------------------------------------------------------------------
 const SUPERTONIC_HF_BASE: &str = "https://huggingface.co/Supertone/supertonic-3/resolve/main";
 
@@ -446,8 +446,8 @@ fn main() {
   ];
   let home = get_home_dir();
 
-  // Check if any supersonic2 files are missing; if so, download and extract the tarball
-  const SUPERSONIC2_FILES: &[&str] = &[
+  // Check if any supertonic2 files are missing; if so, download and extract the tarball
+  const SUPERTONIC2_FILES: &[&str] = &[
     "onnx/duration_predictor.onnx",
     "onnx/text_encoder.onnx",
     "onnx/tts.json",
@@ -466,14 +466,14 @@ fn main() {
     "voice_styles/M5.json",
     "config.json",
   ];
-  let tarball_name = "supersonic2-model.tgz";
+  let tarball_name = "supertonic2-model.tgz";
   let mut need_tgz_download = false;
   // Check each expected file; if any are missing, we need to download the tarball
-  for rel in SUPERSONIC2_FILES {
+  for rel in SUPERTONIC2_FILES {
     let file_path = Path::new(&home)
       .join(".vtmate")
       .join("tts")
-      .join("supersonic2-model")
+      .join("supertonic2-model")
       .join(rel);
     if !file_path.exists() {
       need_tgz_download = true;
@@ -493,20 +493,20 @@ fn main() {
         panic!("Failed to download {}: {:?}", tarball_name, output);
       }
       verify_file(&tarball_path, tarball_name).expect("Checksum mismatch after download");
-      extract_supersonic2(&tarball_path);
+      extract_supertonic2(&tarball_path);
     }
   }
-  // Copy extracted supersonic2 files into embedded dir
+  // Copy extracted supertonic2 files into embedded dir
   let base = Path::new(&home).join(".vtmate").join("tts");
-  let model_dest = dest.join("supersonic2-model");
+  let model_dest = dest.join("supertonic2-model");
   fs::create_dir_all(&model_dest).expect("Failed to create model dir");
-  let inner = base.join("supersonic2-model");
+  let inner = base.join("supertonic2-model");
   copy_dir_all(&inner, &model_dest);
 
-  // Validate checksums of all extracted supersonic2 files (release mode only)
+  // Validate checksums of all extracted supertonic2 files (release mode only)
   if is_release {
-    for rel in SUPERSONIC2_FILES {
-      let path = dest.join("supersonic2-model").join(rel);
+    for rel in SUPERTONIC2_FILES {
+      let path = dest.join("supertonic2-model").join(rel);
       // Use the file name component for lookup in EXPECTED_HASHES
       let name = Path::new(rel).file_name().unwrap().to_str().unwrap();
       if let Err(e) = verify_file(&path, name) {

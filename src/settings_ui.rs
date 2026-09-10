@@ -84,7 +84,7 @@ pub const FIELDS: [Field; 14] = [
 ];
 
 /// The TTS engines an agent can speak with.
-pub const TTS_ENGINES: [&str; 4] = ["supertonic", "supersonic2", "kokoro", "opentts"];
+pub const TTS_ENGINES: [&str; 4] = ["supertonic", "supertonic2", "kokoro", "opentts"];
 
 /// Longest agent name the form accepts (what `validate_agent_name` allows).
 pub const NAME_MAX: usize = 200;

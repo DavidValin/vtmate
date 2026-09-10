@@ -379,7 +379,7 @@ pub fn run_foreground(args: &Args) -> ! {
   // ---------------------------------------------------
   crate::assets::ensure_piper_espeak_env();
   crate::assets::ensure_assets_env();
-  crate::assets::ensure_supersonic2_assets();
+  crate::assets::ensure_supertonic2_assets();
   crate::assets::ensure_supertonic_assets();
 
   let channels = engine::Channels::new();

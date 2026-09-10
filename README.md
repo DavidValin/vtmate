@@ -78,7 +78,7 @@ https://github.com/user-attachments/assets/8b9e982c-ba97-4aeb-8e55-1db6a92bc164
 - 📌 Save audio speech of a text file or STDIN content
 - 📌 Load separate settings file with different agents
 - 📌 Integrated `whisper` speech recognition system (no external intallation required)
-- 📌 Integrated `kokoro TTS`, `supersonic 2 TTS` and `supertonic TTS` systems (no external intallation required)
+- 📌 Integrated `kokoro TTS`, `supertonic 2 TTS` and `supertonic TTS` systems (no external intallation required)
 - 📌 Interface with `OpenTTS` system (requires external docker service)
 - 📌 Source code in the replies (text inside ``` blocks) is shown on screen but never spoken
 - 📌 Use any gguf model from huggingface.com (using llama-server), any ollama model, or a hosted provider (OpenAI, Anthropic, Google, Groq, Mistral, OpenRouter, DeepSeek, xAI)
@@ -119,7 +119,7 @@ Thinking / reasoning is disabled on local servers so replies start speaking righ
 ## TTS engine support
 
 - ✅ Kokoro (integrated)
-- ✅ Supersonic 2 (integrated)
+- ✅ Supertonic 2 (integrated)
 - ✅ Supertonic 3 (integrated)
 - ✅ OpenTTS (requires external docker service)
 
@@ -521,11 +521,11 @@ vtmate -c philosophers.txt --debate "Aristoteles" "Ptahhotep" "how to achieve ha
 
 ###  Custom voices
 
-`supertonic` and `supersonic2` read their voices from one JSON file per voice:
+`supertonic` and `supertonic2` read their voices from one JSON file per voice:
 
 ```
 ~/.vtmate/tts/supertonic-model/voice_styles/M1.json
-~/.vtmate/tts/supersonic2-model/voice_styles/F3.json
+~/.vtmate/tts/supertonic2-model/voice_styles/F3.json
 ```
 
 (on Windows `%USERPROFILE%\.vtmate\...`, on macOS `~/.vtmate/...` as well)
@@ -574,7 +574,7 @@ Cloning does not train a model on the speaker: it searches for the `supertonic` 
 
 ###  Model files
 
-vtmate self contains (no need for manual installation) espeak-ng-data, the whisper tiny & small models, kokoro model and voices, supersonic2 model and voices and supertonic (Supertonic 3) model and voices which will be autoextracted from the binary when running vtmate if they are not found in next locations:
+vtmate self contains (no need for manual installation) espeak-ng-data, the whisper tiny & small models, kokoro model and voices, supertonic2 model and voices and supertonic (Supertonic 3) model and voices which will be autoextracted from the binary when running vtmate if they are not found in next locations:
 
 whisper models:
 ```
@@ -593,24 +593,24 @@ espeak phonemes (used by kokoro):
 - `~/.vtmate/espeak-ng-data.tar.gz`
 ```
 
-supersonic2 files:
+supertonic2 files:
 ```
-~/.vtmate/tts/supersonic2-model/onnx/duration_predictor.onnx
-~/.vtmate/tts/supersonic2-model/onnx/text_encoder.onnx
-~/.vtmate/tts/supersonic2-model/onnx/tts.json
-~/.vtmate/tts/supersonic2-model/onnx/unicode_indexer.json
-~/.vtmate/tts/supersonic2-model/onnx/vector_estimator.onnx
-~/.vtmate/tts/supersonic2-model/onnx/vocoder.onnx
-~/.vtmate/tts/supersonic2-model/voice_styles/M1.json
-~/.vtmate/tts/supersonic2-model/voice_styles/M2.json
-~/.vtmate/tts/supersonic2-model/voice_styles/M3.json
-~/.vtmate/tts/supersonic2-model/voice_styles/M4.json
-~/.vtmate/tts/supersonic2-model/voice_styles/M5.json
-~/.vtmate/tts/supersonic2-model/voice_styles/F1.json
-~/.vtmate/tts/supersonic2-model/voice_styles/F2.json
-~/.vtmate/tts/supersonic2-model/voice_styles/F3.json
-~/.vtmate/tts/supersonic2-model/voice_styles/F4.json
-~/.vtmate/tts/supersonic2-model/voice_styles/F5.json
+~/.vtmate/tts/supertonic2-model/onnx/duration_predictor.onnx
+~/.vtmate/tts/supertonic2-model/onnx/text_encoder.onnx
+~/.vtmate/tts/supertonic2-model/onnx/tts.json
+~/.vtmate/tts/supertonic2-model/onnx/unicode_indexer.json
+~/.vtmate/tts/supertonic2-model/onnx/vector_estimator.onnx
+~/.vtmate/tts/supertonic2-model/onnx/vocoder.onnx
+~/.vtmate/tts/supertonic2-model/voice_styles/M1.json
+~/.vtmate/tts/supertonic2-model/voice_styles/M2.json
+~/.vtmate/tts/supertonic2-model/voice_styles/M3.json
+~/.vtmate/tts/supertonic2-model/voice_styles/M4.json
+~/.vtmate/tts/supertonic2-model/voice_styles/M5.json
+~/.vtmate/tts/supertonic2-model/voice_styles/F1.json
+~/.vtmate/tts/supertonic2-model/voice_styles/F2.json
+~/.vtmate/tts/supertonic2-model/voice_styles/F3.json
+~/.vtmate/tts/supertonic2-model/voice_styles/F4.json
+~/.vtmate/tts/supertonic2-model/voice_styles/F5.json
 ```
 
 supertonic files (Supertonic 3, https://huggingface.co/Supertone/supertonic-3):
@@ -646,7 +646,7 @@ vtmate --help
 
 ## Language support
 
-Engines: **SS2** Supersonic 2 (5 languages, 10 voices: M1-M5, F1-F5), **ST3** Supertonic 3 (31 languages, its own 10 voices: M1-M5, F1-F5, usable in every one of its languages), **KK** Kokoro (8 languages), **OpenTTS** (external docker service). Total languages: 41.
+Engines: **SS2** Supertonic 2 (5 languages, 10 voices: M1-M5, F1-F5), **ST3** Supertonic 3 (31 languages, its own 10 voices: M1-M5, F1-F5, usable in every one of its languages), **KK** Kokoro (8 languages), **OpenTTS** (external docker service). Total languages: 41.
 
 | ID |           Language       |      Support       |        TTS supported                          |   Number of voices  |
 |----|--------------------------|--------------------|-----------------------------------------------------------|-------------|
