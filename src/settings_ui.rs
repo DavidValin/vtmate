@@ -71,13 +71,15 @@ pub const FIELDS: [Field; 14] = [
   Field::Voice,
   Field::VoiceSpeed,
   Field::Ptt,
+  // only meaningful in LIVE mode (ptt off, voice-activity detection listens
+  // for you); hidden while ptt is on - see `visible_fields`
+  Field::Threshold,
+  Field::EndSilence,
   Field::Provider,
   Field::BaseUrl,
   Field::Model,
   Field::ApiKey,
   Field::WhisperModel,
-  Field::Threshold,
-  Field::EndSilence,
   Field::SystemPrompt,
 ];
 
@@ -107,10 +109,12 @@ pub struct Form {
   pub cli_models: Vec<String>,
   pub cli_models_provider: String,
   pub cli_models_error: Option<String>,
-  /// Whether `draft.provider`'s cli binary was found on PATH: `None` until
-  /// the background check (in `refresh_cli_models`) resolves.
-  pub cli_installed: Option<bool>,
-  pub cli_installed_provider: String,
+  /// Whether `draft.provider` is actually there: a cli's binary on PATH,
+  /// or ollama/llama-server answering at `draft.baseurl`. `None` until the
+  /// check resolves - see `refresh_cli_models` and, for ollama specifically,
+  /// `poll_ollama_models`.
+  pub provider_reachable: Option<bool>,
+  pub provider_reachable_for: String,
   /// Models last fetched from the running ollama server, refreshed every 5s
   /// while the form shows an ollama agent - see `poll_ollama_models`.
   pub ollama_models: Vec<String>,
@@ -126,7 +130,7 @@ impl Form {
     self.draft != self.original
   }
   fn fields(&self) -> Vec<Field> {
-    visible_fields(&self.draft.provider)
+    visible_fields(&self.draft)
   }
   fn on_done(&self) -> bool {
     self.cursor == self.fields().len()
@@ -538,6 +542,14 @@ fn form_key(ui: &mut SettingsUi, k: &KeyEvent) {
       | Some(Field::WhisperModel)
       | Some(Field::SystemPrompt)
   ) || (field == Some(Field::Model) && !model_is_select(&ui.form.draft.provider));
+  // Model on a cli with no listing command but a static seed list, or
+  // WhisperModel when there are models sitting in ~/.whisper-models: still
+  // an editable text field (typing anything always works), but ←/→ cycles
+  // the seed/found list instead of moving the caret one character at a time
+  let model_cycles_while_editable = (field == Some(Field::Model)
+    && crate::llm_cli::is_cli_provider(&ui.form.draft.provider)
+    && !crate::llm_cli::static_models(&ui.form.draft.provider).is_empty())
+    || (field == Some(Field::WhisperModel) && !crate::config::whisper_models_available().is_empty());
 
   match k.code {
     KeyCode::Esc => {
@@ -600,6 +612,14 @@ fn form_key(ui: &mut SettingsUi, k: &KeyEvent) {
   };
 
   match k.code {
+    KeyCode::Left if model_cycles_while_editable => {
+      step_value(ui, field, -1);
+      ui.form.caret = field_text(&ui.form.draft, field).chars().count();
+    }
+    KeyCode::Right if model_cycles_while_editable => {
+      step_value(ui, field, 1);
+      ui.form.caret = field_text(&ui.form.draft, field).chars().count();
+    }
     KeyCode::Left if in_text => {
       ui.form.caret = ui.form.caret.saturating_sub(1);
     }
@@ -728,14 +748,27 @@ fn remove_at(text: &mut String, index: usize) {
 
 /// Move a select one step, or a slider by one step of its range.
 fn step_value(ui: &mut SettingsUi, field: Field, direction: i32) {
-  // read before the draft is borrowed below: whichever picker Model uses
-  // for the current provider (a cli's fetched models, or ollama's)
+  // read before the draft is borrowed below: whichever list ←/→ cycles
+  // through for Model under the current provider - a cli's live-fetched
+  // models, its static seed list when it has no listing command, or
+  // ollama's
+  let provider = ui.form.draft.provider.trim().to_lowercase();
   let model_options: Vec<String> = if field != Field::Model {
     Vec::new()
-  } else if crate::llm_cli::is_cli_provider(&ui.form.draft.provider) {
+  } else if crate::llm_cli::has_model_listing(&provider) {
     ui.form.cli_models.clone()
-  } else if ui.form.draft.provider.trim().to_lowercase() == "ollama" {
+  } else if crate::llm_cli::is_cli_provider(&provider) {
+    crate::llm_cli::static_models(&provider)
+      .iter()
+      .map(|s| s.to_string())
+      .collect()
+  } else if provider == "ollama" {
     ui.form.ollama_models.clone()
+  } else {
+    Vec::new()
+  };
+  let whisper_options: Vec<String> = if field == Field::WhisperModel {
+    crate::config::whisper_models_available()
   } else {
     Vec::new()
   };
@@ -771,6 +804,9 @@ fn step_value(ui: &mut SettingsUi, field: Field, direction: i32) {
     }
     Field::Model if !model_options.is_empty() => {
       draft.model = cycle(&model_options, &draft.model, direction);
+    }
+    Field::WhisperModel if !whisper_options.is_empty() => {
+      draft.whisper_model_path = cycle(&whisper_options, &draft.whisper_model_path, direction);
     }
     Field::Ptt => draft.ptt = !draft.ptt,
     Field::VoiceSpeed => {
@@ -943,33 +979,44 @@ fn set_field_text(ui: &mut SettingsUi, field: Field, value: String) {
 /// bounding that with its own timeout.
 fn refresh_cli_models(ui: &mut SettingsUi) {
   let provider = ui.form.draft.provider.trim().to_lowercase();
+
+  // reachability indicator (the Provider field's tick / red treatment): a
+  // cli's binary on PATH, or a local server actually answering. ollama
+  // manages this itself, continuously, from its own poller below; llama-
+  // server gets a one-shot check here, the same as a cli's PATH check.
+  if provider == "ollama" {
+    if ui.form.provider_reachable_for != provider {
+      ui.form.provider_reachable_for = provider.clone();
+      ui.form.provider_reachable = None; // poll_ollama_models fills this in
+    }
+  } else if provider == "llama-server" {
+    if ui.form.provider_reachable_for != provider {
+      ui.form.provider_reachable_for = provider.clone();
+      ui.form.provider_reachable = None;
+      let baseurl = ui.form.draft.baseurl.clone();
+      std::thread::spawn(move || {
+        publish_provider_reachable("llama-server", local_server_reachable(&baseurl));
+      });
+    }
+  } else if crate::llm_cli::is_cli_provider(&provider) {
+    if ui.form.provider_reachable_for != provider {
+      ui.form.provider_reachable_for = provider.clone();
+      ui.form.provider_reachable = None;
+      let provider_for_check = provider.clone();
+      std::thread::spawn(move || {
+        publish_provider_reachable(&provider_for_check, crate::llm_cli::is_installed(&provider_for_check));
+      });
+    }
+  } else {
+    ui.form.provider_reachable = None;
+    ui.form.provider_reachable_for.clear();
+  }
+
   if !crate::llm_cli::is_cli_provider(&provider) {
     ui.form.cli_models.clear();
     ui.form.cli_models_provider.clear();
     ui.form.cli_models_error = None;
-    ui.form.cli_installed = None;
-    ui.form.cli_installed_provider.clear();
     return;
-  }
-
-  // whether the binary is even on PATH - every cli provider gets this
-  // check, independent of whether it can also list its models
-  if ui.form.cli_installed_provider != provider {
-    ui.form.cli_installed_provider = provider.clone();
-    ui.form.cli_installed = None;
-    let provider_for_check = provider.clone();
-    std::thread::spawn(move || {
-      let installed = crate::llm_cli::is_installed(&provider_for_check);
-      if let Some(state) = crate::state::GLOBAL_STATE.get().cloned() {
-        let mut ui = state.settings_ui.lock().unwrap();
-        if ui.form.draft.provider.trim().to_lowercase() == provider_for_check {
-          ui.form.cli_installed = Some(installed);
-        }
-      }
-      if let Some(tx) = crate::log::tx_ui_sender() {
-        let _ = tx.send("settings_update|".to_string());
-      }
-    });
   }
 
   // model listing: only for the clis that actually have a command for it -
@@ -1013,6 +1060,34 @@ fn refresh_cli_models(ui: &mut SettingsUi) {
       let _ = tx.send("settings_update|".to_string());
     }
   });
+}
+
+/// Publishes a reachability result for `provider`'s Provider-field tick /
+/// red treatment, if the draft is still on that same provider (a stale
+/// in-flight check must not clobber a newer one), and nudges a redraw.
+fn publish_provider_reachable(provider: &str, reachable: bool) {
+  if let Some(state) = crate::state::GLOBAL_STATE.get().cloned() {
+    let mut ui = state.settings_ui.lock().unwrap();
+    if ui.form.draft.provider.trim().to_lowercase() == provider {
+      ui.form.provider_reachable = Some(reachable);
+    }
+  }
+  if let Some(tx) = crate::log::tx_ui_sender() {
+    let _ = tx.send("settings_update|".to_string());
+  }
+}
+
+/// Whether something answers an http request at `baseurl` at all right now
+/// - not whether it returns anything meaningful, just whether it is up and
+/// speaking http. Used for llama-server's reachability check; ollama uses
+/// its own richer poller (`poll_ollama_models`) for the same purpose.
+fn local_server_reachable(baseurl: &str) -> bool {
+  let url = format!("{}/", crate::llm::base_url_with_scheme(baseurl));
+  reqwest::blocking::Client::builder()
+    .timeout(std::time::Duration::from_secs(3))
+    .build()
+    .and_then(|c| c.get(&url).send())
+    .is_ok()
 }
 
 /// At most one ollama poller runs at a time, regardless of how many times
@@ -1059,6 +1134,7 @@ fn poll_ollama_models() {
       ui.form.draft.baseurl.clone()
     };
     let result = fetch_ollama_models(&baseurl);
+    let reachable = result.is_ok();
     {
       let mut ui = state.settings_ui.lock().unwrap();
       if ui.open
@@ -1073,6 +1149,7 @@ fn poll_ollama_models() {
           Err(e) => ui.form.ollama_models_error = Some(e),
         }
         ui.form.ollama_fetched_once = true;
+        ui.form.provider_reachable = Some(reachable);
       }
     }
     if let Some(tx) = crate::log::tx_ui_sender() {
@@ -1157,12 +1234,14 @@ pub fn providers() -> Vec<String> {
   out
 }
 
-/// Fields shown for `provider`: cli providers use the model a cli reports
+/// Fields shown for `agent`: cli providers use the model a cli reports
 /// instead of a base url / api key, so those two are hidden for them; ollama
 /// keeps them (it is still addressed over http) but gets its model list from
-/// the running server instead of free text.
-fn visible_fields(provider: &str) -> Vec<Field> {
-  let p = provider.trim().to_lowercase();
+/// the running server instead of free text. Mic threshold and end silence
+/// only matter in LIVE mode (voice-activity detection deciding when you've
+/// stopped talking), so they are hidden while push to talk is on.
+fn visible_fields(agent: &AgentSettings) -> Vec<Field> {
+  let p = agent.provider.trim().to_lowercase();
   let hide_api_key = crate::llm_cli::is_cli_provider(&p);
   // no hosted -api provider takes a custom endpoint - that is what the
   // local openai-compatible-api provider is for (LOCAL_PROVIDERS already
@@ -1170,13 +1249,27 @@ fn visible_fields(provider: &str) -> Vec<Field> {
   // needed here for it); every cli provider makes no network call of
   // vtmate's own to redirect either
   let hide_base_url = hide_api_key || crate::llm::is_cloud_provider(&p);
+  let hide_live_only = agent.ptt;
   FIELDS
     .iter()
     .copied()
     .filter(|f| {
-      !(hide_api_key && *f == Field::ApiKey) && !(hide_base_url && *f == Field::BaseUrl)
+      !(hide_api_key && *f == Field::ApiKey)
+        && !(hide_base_url && *f == Field::BaseUrl)
+        && !(hide_live_only && matches!(f, Field::Threshold | Field::EndSilence))
     })
     .collect()
+}
+
+/// Whether the Provider field shows a reachability tick/red for `provider`:
+/// every cli provider (its binary on PATH), plus ollama and llama-server
+/// (their address actually answering). The other local/hosted providers get
+/// no such check - openai-compatible-api's endpoint varies too freely to
+/// probe usefully, and hosted apis are reached fresh on every request
+/// anyway.
+fn has_reachability_check(provider: &str) -> bool {
+  let p = provider.trim().to_lowercase();
+  crate::llm_cli::is_cli_provider(&p) || p == "ollama" || p == "llama-server"
 }
 
 /// Whether the Model field is a picker rather than free text: a cli that
@@ -1549,7 +1642,7 @@ fn form_lines(ui: &SettingsUi, inner: usize, rows: u16) -> (String, Vec<String>,
           } else {
             provider == "ollama" && form.ollama_fetched_once
           },
-          form.cli_installed,
+          form.provider_reachable,
         )
       ));
     }
@@ -1628,24 +1721,53 @@ fn model_field_hint(field: &Field, provider: &str, form: &Form) -> Option<(Strin
     ));
   }
   if *field == Field::Provider {
-    if !crate::llm_cli::is_cli_provider(provider) {
+    if crate::llm_cli::is_cli_provider(provider) {
+      let bin = crate::llm_cli::binary_for(provider).unwrap_or(provider);
+      return Some(match form.provider_reachable {
+        Some(false) => (
+          format!(
+            "✗ '{}' was not found on PATH - install it (and log it in), then come back to this provider",
+            bin
+          ),
+          RED,
+        ),
+        Some(true) => (
+          format!("←/→ where the answers come from; runs the '{}' cli, found on PATH", bin),
+          CYAN,
+        ),
+        None => (format!("checking whether '{}' is on PATH…", bin), CYAN),
+      });
+    }
+    if provider == "ollama" || provider == "llama-server" {
+      return Some(match form.provider_reachable {
+        Some(false) => (
+          format!(
+            "✗ nothing answered at {} - make sure {} is running there",
+            form.draft.baseurl, provider
+          ),
+          RED,
+        ),
+        Some(true) => (
+          format!("←/→ where the answers come from; {} answered at {}", provider, form.draft.baseurl),
+          CYAN,
+        ),
+        None => (format!("checking whether {} is reachable…", form.draft.baseurl), CYAN),
+      });
+    }
+    return None;
+  }
+  if *field == Field::WhisperModel {
+    let found = crate::config::whisper_models_available();
+    if found.is_empty() {
       return None;
     }
-    let bin = crate::llm_cli::binary_for(provider).unwrap_or(provider);
-    return Some(match form.cli_installed {
-      Some(false) => (
-        format!(
-          "✗ '{}' was not found on PATH - install it (and log it in), then come back to this provider",
-          bin
-        ),
-        RED,
+    return Some((
+      format!(
+        "←/→ cycles the {} model(s) found in ~/.whisper-models, or type any path",
+        found.len()
       ),
-      Some(true) => (
-        format!("←/→ where the answers come from; runs the '{}' cli, found on PATH", bin),
-        CYAN,
-      ),
-      None => (format!("checking whether '{}' is on PATH…", bin), CYAN),
-    });
+      CYAN,
+    ));
   }
   if *field != Field::Model {
     return None;
@@ -1654,7 +1776,17 @@ fn model_field_hint(field: &Field, provider: &str, form: &Form) -> Option<(Strin
     if let Some(e) = &form.cli_models_error {
       return Some((format!("{} models: {}", provider, e), RED));
     }
-    if crate::llm_cli::has_model_listing(provider) && form.cli_models.is_empty() {
+    if !crate::llm_cli::has_model_listing(provider) {
+      let bin = crate::llm_cli::binary_for(provider).unwrap_or(provider);
+      return Some((
+        format!(
+          "'{}' has no command to list its models - ←/→ cycles a few known ones, or type any model id",
+          bin
+        ),
+        CYAN,
+      ));
+    }
+    if form.cli_models.is_empty() {
       return Some((format!("fetching models from {}…", provider), CYAN));
     }
   } else if provider == "ollama" {
@@ -1678,7 +1810,7 @@ fn field_value(
   width: usize,
   model_options: &[String],
   model_options_authoritative: bool,
-  cli_installed: Option<bool>,
+  provider_reachable: Option<bool>,
 ) -> String {
   let is_model_select = field == Field::Model && model_is_select(&agent.provider);
   if field.is_slider() {
@@ -1742,11 +1874,14 @@ fn field_value(
       None => format!("?/{}", options.len()),
     };
     let arrows = if focused { FG } else { DIM };
-    // a cli found on PATH gets a tick after its name; not found is red (see
-    // the color below) rather than decorated, the hint line says why
-    let is_cli_provider_field = field == Field::Provider && crate::llm_cli::is_cli_provider(&agent.provider);
-    let display_value = if is_cli_provider_field && cli_installed == Some(true) {
-      format!("{} ✅", value)
+    // a reachable provider gets a tick after its name; not found is red
+    // (see the color below) rather than decorated, the hint line says why
+    let is_reachability_field = field == Field::Provider && has_reachability_check(&agent.provider);
+    // a narrow tick, not the ✅ emoji: that one renders as 2 terminal
+    // columns wide while counting as 1 char, which threw the padding math
+    // below off by a column and pushed the popup's right border out of line
+    let display_value = if is_reachability_field && provider_reachable == Some(true) {
+      format!("{} ✓", value)
     } else {
       value.clone()
     };
@@ -1759,7 +1894,7 @@ fn field_value(
     // provider not found on PATH gets the same treatment
     let missing =
       field == Field::Model && model_options_authoritative && at.is_none() && !value.trim().is_empty();
-    let not_found = is_cli_provider_field && cli_installed == Some(false);
+    let not_found = is_reachability_field && provider_reachable == Some(false);
     let value_color = if missing || not_found {
       RED
     } else if focused {

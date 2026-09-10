@@ -990,6 +990,34 @@ pub fn resolved_whisper_model_path(whisper_model_path: &str) -> String {
   }
 }
 
+/// Every whisper model (a `.bin` file) sitting in `~/.whisper-models`, in
+/// the `~/...` style `whisper_model_path` is normally written in. Empty
+/// when the directory does not exist or is empty - the settings field
+/// stays a plain editable input either way, this only seeds what ←/→
+/// cycles through.
+pub fn whisper_models_available() -> Vec<String> {
+  let Some(home) = get_user_home_path() else {
+    return Vec::new();
+  };
+  let dir = home.join(".whisper-models");
+  let Ok(entries) = std::fs::read_dir(&dir) else {
+    return Vec::new();
+  };
+  let mut models: Vec<String> = entries
+    .filter_map(|e| e.ok())
+    .filter(|e| {
+      e.path()
+        .extension()
+        .map(|ext| ext.eq_ignore_ascii_case("bin"))
+        .unwrap_or(false)
+    })
+    .filter_map(|e| e.file_name().into_string().ok())
+    .map(|name| format!("~/.whisper-models/{}", name))
+    .collect();
+  models.sort();
+  models
+}
+
 /// Why a settings file could not be turned into a list of agents.
 #[derive(Debug)]
 pub enum LoadError {
