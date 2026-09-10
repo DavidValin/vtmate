@@ -35,7 +35,7 @@ whisper-rs-sys = { version = "0.15.0", default-features = false }
 ort = { version = "2.0.0-rc.11", features = [ "std", "ndarray", "tls-rustls" ] }
 hound = "3"
 crossterm = { version = "0.27", features = ["serde"] }
-tokio = { version = "1", features = ["rt", "macros"] }
+tokio = { version = "1", features = ["rt", "macros", "process", "io-util", "time"] }
 ctrlc = { version = "3", features = ["termination"] }
 kokoro-micro = "1.2.0"
 supersonic2-tts = "1.2.0"

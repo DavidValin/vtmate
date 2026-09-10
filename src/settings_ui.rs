@@ -96,26 +96,42 @@ pub struct Form {
   pub draft: AgentSettings,
   /// The agent as the form opened on it, to know whether anything was typed.
   pub original: AgentSettings,
-  /// Cursor: a `FIELDS` index, then the Done and Cancel buttons.
+  /// Cursor: a `visible_fields()` index, then the Done and Cancel buttons.
   pub cursor: usize,
   /// Character position inside the focused text field.
   pub caret: usize,
   /// What is wrong with the draft, shown under it.
   pub errors: Vec<String>,
+  /// Models last fetched from `draft.provider`'s cli, and what went wrong
+  /// fetching them, if anything - see `refresh_cli_models`.
+  pub cli_models: Vec<String>,
+  pub cli_models_provider: String,
+  pub cli_models_error: Option<String>,
+  /// Models last fetched from the running ollama server, refreshed every 5s
+  /// while the form shows an ollama agent - see `poll_ollama_models`.
+  pub ollama_models: Vec<String>,
+  pub ollama_models_error: Option<String>,
+  /// Whether at least one ollama fetch has completed, so a model missing
+  /// from an empty list (never fetched yet) is not mistaken for one missing
+  /// from a genuinely empty (never-pulled) ollama.
+  pub ollama_fetched_once: bool,
 }
 
 impl Form {
   fn dirty(&self) -> bool {
     self.draft != self.original
   }
+  fn fields(&self) -> Vec<Field> {
+    visible_fields(&self.draft.provider)
+  }
   fn on_done(&self) -> bool {
-    self.cursor == FIELDS.len()
+    self.cursor == self.fields().len()
   }
   fn on_cancel(&self) -> bool {
-    self.cursor == FIELDS.len() + 1
+    self.cursor == self.fields().len() + 1
   }
   fn field(&self) -> Option<Field> {
-    FIELDS.get(self.cursor).copied()
+    self.fields().get(self.cursor).copied()
   }
 }
 
@@ -436,6 +452,8 @@ fn new_agent(ui: &mut SettingsUi) {
     draft,
     ..Form::default()
   };
+  refresh_cli_models(ui);
+  maybe_spawn_ollama_poller(ui);
 }
 
 fn edit_agent(ui: &mut SettingsUi) {
@@ -451,6 +469,8 @@ fn edit_agent(ui: &mut SettingsUi) {
     draft: agent,
     ..Form::default()
   };
+  refresh_cli_models(ui);
+  maybe_spawn_ollama_poller(ui);
 }
 
 fn confirm_delete_key(ui: &mut SettingsUi, k: &KeyEvent) {
@@ -504,17 +524,16 @@ fn leave_form(ui: &mut SettingsUi) {
 }
 
 fn form_key(ui: &mut SettingsUi, k: &KeyEvent) {
-  let last = FIELDS.len() + 1; // fields, then Done, then Cancel
+  let last = ui.form.fields().len() + 1; // fields, then Done, then Cancel
   let field = ui.form.field();
   let in_text = matches!(
     field,
     Some(Field::Name)
       | Some(Field::BaseUrl)
-      | Some(Field::Model)
       | Some(Field::ApiKey)
       | Some(Field::WhisperModel)
       | Some(Field::SystemPrompt)
-  );
+  ) || (field == Some(Field::Model) && !model_is_select(&ui.form.draft.provider));
 
   match k.code {
     KeyCode::Esc => {
@@ -529,7 +548,7 @@ fn form_key(ui: &mut SettingsUi, k: &KeyEvent) {
       } else if ui.form.on_cancel() {
         0 // Cancel -> back to the first field
       } else {
-        FIELDS.len() // any field -> Done
+        ui.form.fields().len() // any field -> Done
       };
       place_caret(ui, true);
       return;
@@ -705,6 +724,17 @@ fn remove_at(text: &mut String, index: usize) {
 
 /// Move a select one step, or a slider by one step of its range.
 fn step_value(ui: &mut SettingsUi, field: Field, direction: i32) {
+  // read before the draft is borrowed below: whichever picker Model uses
+  // for the current provider (a cli's fetched models, or ollama's)
+  let model_options: Vec<String> = if field != Field::Model {
+    Vec::new()
+  } else if crate::llm_cli::is_cli_provider(&ui.form.draft.provider) {
+    ui.form.cli_models.clone()
+  } else if ui.form.draft.provider.trim().to_lowercase() == "ollama" {
+    ui.form.ollama_models.clone()
+  } else {
+    Vec::new()
+  };
   let draft = &mut ui.form.draft;
   match field {
     Field::Tts => {
@@ -735,6 +765,9 @@ fn step_value(ui: &mut SettingsUi, field: Field, direction: i32) {
     Field::Provider => {
       draft.provider = cycle(&providers(), &draft.provider, direction);
     }
+    Field::Model if !model_options.is_empty() => {
+      draft.model = cycle(&model_options, &draft.model, direction);
+    }
     Field::Ptt => draft.ptt = !draft.ptt,
     Field::VoiceSpeed => {
       let steps = ((draft.voice_speed - 1.0) * 10.0).round() as i32 + direction;
@@ -749,6 +782,10 @@ fn step_value(ui: &mut SettingsUi, field: Field, direction: i32) {
       draft.end_silence_ms = (steps.clamp(1, 40) as u64) * END_SILENCE_STEP_MS;
     }
     _ => {}
+  }
+  if field == Field::Provider {
+    refresh_cli_models(ui);
+    maybe_spawn_ollama_poller(ui);
   }
 }
 
@@ -892,6 +929,152 @@ fn set_field_text(ui: &mut SettingsUi, field: Field, value: String) {
   }
 }
 
+// Live model lists (cli providers, and ollama)
+// ------------------------------------------------------------------
+
+/// Refetches the Model picker's options for a cli provider, in the
+/// background so a slow or hung cli never freezes the settings popup.
+/// Static-list providers resolve near-instantly; a provider with a real
+/// listing command runs it in its own thread, `llm_cli::list_models`
+/// bounding that with its own timeout.
+fn refresh_cli_models(ui: &mut SettingsUi) {
+  let provider = ui.form.draft.provider.trim().to_lowercase();
+  if !crate::llm_cli::is_cli_provider(&provider) {
+    ui.form.cli_models.clear();
+    ui.form.cli_models_provider.clear();
+    ui.form.cli_models_error = None;
+    return;
+  }
+  if ui.form.cli_models_provider == provider
+    && (!ui.form.cli_models.is_empty() || ui.form.cli_models_error.is_some())
+  {
+    return; // already fetched (or already failed) for this provider
+  }
+  ui.form.cli_models_provider = provider.clone();
+  ui.form.cli_models.clear();
+  ui.form.cli_models_error = None;
+  std::thread::spawn(move || {
+    let result = crate::llm_cli::list_models(&provider);
+    let Some(state) = crate::state::GLOBAL_STATE.get().cloned() else {
+      return;
+    };
+    {
+      let mut ui = state.settings_ui.lock().unwrap();
+      // the user may have moved on to a different provider while this was
+      // in flight; a stale answer would otherwise clobber the new one
+      if ui.form.draft.provider.trim().to_lowercase() != provider {
+        return;
+      }
+      match result {
+        Ok(models) => {
+          ui.form.cli_models = models;
+          ui.form.cli_models_error = None;
+        }
+        Err(e) => ui.form.cli_models_error = Some(e),
+      }
+    }
+    if let Some(tx) = crate::log::tx_ui_sender() {
+      let _ = tx.send("settings_update|".to_string());
+    }
+  });
+}
+
+/// At most one ollama poller runs at a time, regardless of how many times
+/// the form is opened or the provider cycled through ollama.
+static OLLAMA_POLLER_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Starts the background poller (see `poll_ollama_models`) if the draft is
+/// now an ollama agent and nothing is already polling for it.
+fn maybe_spawn_ollama_poller(ui: &mut SettingsUi) {
+  if ui.form.draft.provider.trim().to_lowercase() != "ollama" {
+    return;
+  }
+  if OLLAMA_POLLER_RUNNING
+    .compare_exchange(
+      false,
+      true,
+      std::sync::atomic::Ordering::SeqCst,
+      std::sync::atomic::Ordering::SeqCst,
+    )
+    .is_err()
+  {
+    return; // one is already running; it re-checks the current draft itself
+  }
+  std::thread::spawn(poll_ollama_models);
+}
+
+/// Runs every 5s while the popup shows an ollama agent, refreshing the
+/// model list a ◀ ▶ picker offers; exits (clearing the running flag) as soon
+/// as the popup closes or moves off ollama, so at most one of these ever
+/// runs.
+fn poll_ollama_models() {
+  loop {
+    let Some(state) = crate::state::GLOBAL_STATE.get().cloned() else {
+      break;
+    };
+    let baseurl = {
+      let ui = state.settings_ui.lock().unwrap();
+      let still_relevant = ui.open
+        && ui.screen == Screen::Form
+        && ui.form.draft.provider.trim().to_lowercase() == "ollama";
+      if !still_relevant {
+        break;
+      }
+      ui.form.draft.baseurl.clone()
+    };
+    let result = fetch_ollama_models(&baseurl);
+    {
+      let mut ui = state.settings_ui.lock().unwrap();
+      if ui.open
+        && ui.screen == Screen::Form
+        && ui.form.draft.provider.trim().to_lowercase() == "ollama"
+      {
+        match result {
+          Ok(models) => {
+            ui.form.ollama_models = models;
+            ui.form.ollama_models_error = None;
+          }
+          Err(e) => ui.form.ollama_models_error = Some(e),
+        }
+        ui.form.ollama_fetched_once = true;
+      }
+    }
+    if let Some(tx) = crate::log::tx_ui_sender() {
+      let _ = tx.send("settings_update|".to_string());
+    }
+    std::thread::sleep(std::time::Duration::from_secs(5));
+  }
+  OLLAMA_POLLER_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// One model name per line, from ollama's native tag listing.
+fn fetch_ollama_models(baseurl: &str) -> Result<Vec<String>, String> {
+  let url = format!("{}/api/tags", crate::llm::base_url_with_scheme(baseurl));
+  let client = reqwest::blocking::Client::builder()
+    .timeout(std::time::Duration::from_secs(4))
+    .build()
+    .map_err(|e| e.to_string())?;
+  let resp = client
+    .get(&url)
+    .send()
+    .map_err(|e| format!("cannot reach ollama at {}: {}", baseurl, e))?;
+  if !resp.status().is_success() {
+    return Err(format!("ollama at {} returned {}", baseurl, resp.status()));
+  }
+  let body: serde_json::Value = resp.json().map_err(|e| e.to_string())?;
+  let models: Vec<String> = body
+    .get("models")
+    .and_then(|m| m.as_array())
+    .map(|arr| {
+      arr
+        .iter()
+        .filter_map(|m| m.get("name").and_then(|n| n.as_str()).map(str::to_string))
+        .collect()
+    })
+    .unwrap_or_default();
+  Ok(models)
+}
+
 /// The languages an engine can speak, i.e. those it has voices for.
 pub fn languages_for(tts: &str) -> Vec<String> {
   crate::tts::get_all_available_languages()
@@ -901,13 +1084,38 @@ pub fn languages_for(tts: &str) -> Vec<String> {
     .collect()
 }
 
-/// Every provider vtmate can talk to, local servers first.
+/// Every provider vtmate can talk to: local servers, hosted apis, then the
+/// subscription clis.
 pub fn providers() -> Vec<String> {
   crate::llm::LOCAL_PROVIDERS
     .iter()
     .chain(crate::llm::CLOUD_PROVIDERS.iter())
+    .chain(crate::llm_cli::CLI_PROVIDERS.iter())
     .map(|p| p.to_string())
     .collect()
+}
+
+/// Fields shown for `provider`: cli providers use the model a cli reports
+/// instead of a base url / api key, so those two are hidden for them; ollama
+/// keeps them (it is still addressed over http) but gets its model list from
+/// the running server instead of free text.
+fn visible_fields(provider: &str) -> Vec<Field> {
+  if crate::llm_cli::is_cli_provider(provider) {
+    FIELDS
+      .iter()
+      .copied()
+      .filter(|f| !matches!(f, Field::BaseUrl | Field::ApiKey))
+      .collect()
+  } else {
+    FIELDS.to_vec()
+  }
+}
+
+/// Whether the Model field is a picker (cli providers, and ollama once its
+/// live model list has been fetched) rather than free text.
+fn model_is_select(provider: &str) -> bool {
+  let provider = provider.trim().to_lowercase();
+  crate::llm_cli::is_cli_provider(&provider) || provider == "ollama"
 }
 
 /// A name no agent of the list uses yet ("new agent", "new agent 2"...).
@@ -1229,8 +1437,17 @@ fn form_lines(ui: &SettingsUi, inner: usize, rows: u16) -> (String, Vec<String>,
   let mut lines: Vec<String> = Vec::new();
   // where each field starts, so the focused one can be scrolled into view
   let mut anchors: Vec<usize> = Vec::new();
+  let fields = form.fields();
+  let provider = form.draft.provider.trim().to_lowercase();
+  let model_options: &[String] = if crate::llm_cli::is_cli_provider(&provider) {
+    &form.cli_models
+  } else if provider == "ollama" {
+    &form.ollama_models
+  } else {
+    &[]
+  };
 
-  for (i, field) in FIELDS.iter().enumerate() {
+  for (i, field) in fields.iter().enumerate() {
     let focused = form.cursor == i;
     anchors.push(lines.len());
     let label = format!(
@@ -1250,15 +1467,24 @@ fn form_lines(ui: &SettingsUi, inner: usize, rows: u16) -> (String, Vec<String>,
       lines.push(format!(
         "{} {}",
         label,
-        field_value(&form.draft, *field, focused, form.caret, value_width)
+        field_value(
+          &form.draft,
+          *field,
+          focused,
+          form.caret,
+          value_width,
+          model_options,
+          form.ollama_fetched_once && provider == "ollama",
+        )
       ));
     }
     if focused {
+      let hint = model_field_hint(field, &provider, form).unwrap_or_else(|| field.hint().to_string());
       lines.push(format!(
         "{:<width$} {}{}{}",
         "",
         CYAN,
-        cut(field.hint(), value_width),
+        cut(&hint, value_width),
         OFF,
         width = label_width
       ));
@@ -1272,7 +1498,7 @@ fn form_lines(ui: &SettingsUi, inner: usize, rows: u16) -> (String, Vec<String>,
     .saturating_sub(reserved)
     .max(3);
   let anchor = anchors
-    .get(form.cursor.min(FIELDS.len()))
+    .get(form.cursor.min(fields.len()))
     .copied()
     .unwrap_or(0);
   let end = anchors
@@ -1312,6 +1538,41 @@ fn form_lines(ui: &SettingsUi, inner: usize, rows: u16) -> (String, Vec<String>,
   (title, visible, footer)
 }
 
+/// Replaces the Provider/Model fields' static hint with something more
+/// useful once a cli provider is picked: which binary it actually runs (the
+/// settings names it e.g. "claude-cli", the command on PATH is "claude"),
+/// and - for Model - what is actually going on fetching its list (still
+/// loading, or what the cli/ollama said went wrong).
+fn model_field_hint(field: &Field, provider: &str, form: &Form) -> Option<String> {
+  if *field == Field::Provider {
+    return crate::llm_cli::binary_for(provider).map(|bin| {
+      format!(
+        "←/→ where the answers come from; runs the '{}' cli - it must be installed and logged in",
+        bin
+      )
+    });
+  }
+  if *field != Field::Model {
+    return None;
+  }
+  if crate::llm_cli::is_cli_provider(provider) {
+    if let Some(e) = &form.cli_models_error {
+      return Some(format!("{} models: {}", provider, e));
+    }
+    if form.cli_models.is_empty() {
+      return Some(format!("fetching models from {}…", provider));
+    }
+  } else if provider == "ollama" {
+    if let Some(e) = &form.ollama_models_error {
+      return Some(format!("ollama models: {}", e));
+    }
+    if !form.ollama_fetched_once {
+      return Some("fetching models from ollama…".to_string());
+    }
+  }
+  None
+}
+
 /// The rendered value of one field: a box for text, `◀ value ▶` for a select,
 /// a bar for a slider.
 fn field_value(
@@ -1320,7 +1581,10 @@ fn field_value(
   focused: bool,
   caret: usize,
   width: usize,
+  model_options: &[String],
+  model_options_authoritative: bool,
 ) -> String {
+  let is_model_select = field == Field::Model && model_is_select(&agent.provider);
   if field.is_slider() {
     let (position, text) = match field {
       Field::VoiceSpeed => (
@@ -1343,7 +1607,7 @@ fn field_value(
     };
     return slider(position, &text, focused, width);
   }
-  if field.is_select() {
+  if field.is_select() || is_model_select {
     let (value, options, at) = match field {
       Field::Tts => {
         let options: Vec<String> = TTS_ENGINES.iter().map(|s| s.to_string()).collect();
@@ -1365,6 +1629,11 @@ fn field_value(
         let at = options.iter().position(|o| *o == agent.provider);
         (agent.provider.clone(), options, at)
       }
+      Field::Model => {
+        let options = model_options.to_vec();
+        let at = options.iter().position(|o| *o == agent.model);
+        (agent.model.clone(), options, at)
+      }
       _ => {
         let options = vec!["OFF".to_string(), "ON".to_string()];
         let value = if agent.ptt { "ON" } else { "OFF" }.to_string();
@@ -1380,18 +1649,21 @@ fn field_value(
     // padded, so the ▶ and the counter do not jump as the value changes
     let body_width = width.saturating_sub(counter.chars().count() + 6);
     let body = pad(&cut(&value, body_width), body_width, ' ');
+    // a model picked while a cli or ollama no longer offers it (an ollama
+    // pull removed, a subscription's catalog changed) is flagged in red
+    // rather than silently shown as if it were still a live choice
+    let missing =
+      field == Field::Model && model_options_authoritative && at.is_none() && !value.trim().is_empty();
+    let value_color = if missing {
+      RED
+    } else if focused {
+      FG
+    } else {
+      OFF
+    };
     return format!(
       "{}◀{} {}{}{} {}▶{} {}{}{}",
-      arrows,
-      OFF,
-      if focused { FG } else { OFF },
-      body,
-      OFF,
-      arrows,
-      OFF,
-      DIM,
-      counter,
-      OFF
+      arrows, OFF, value_color, body, OFF, arrows, OFF, DIM, counter, OFF
     );
   }
   let text = field_text(agent, field);

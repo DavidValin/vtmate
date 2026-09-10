@@ -64,7 +64,11 @@ impl LlmTarget {
 
   /// Human hint appended to error logs
   pub fn hint(&self) -> String {
-    match self.provider.trim().to_lowercase().as_str() {
+    let provider = self.provider.trim().to_lowercase();
+    if crate::llm_cli::is_cli_provider(&provider) {
+      return crate::llm_cli::cli_hint(&provider);
+    }
+    match provider.as_str() {
       "ollama" => format!(
         "Make sure ollama (0.13 or newer) is running at {} and model '{}' is pulled",
         self.baseurl, self.model
@@ -88,13 +92,14 @@ pub fn is_cloud_provider(provider: &str) -> bool {
 }
 
 pub fn is_supported_provider(provider: &str) -> bool {
-  is_local_provider(provider) || is_cloud_provider(provider)
+  is_local_provider(provider) || is_cloud_provider(provider) || crate::llm_cli::is_cli_provider(provider)
 }
 
 pub fn supported_providers_list() -> String {
   LOCAL_PROVIDERS
     .iter()
     .chain(CLOUD_PROVIDERS.iter())
+    .chain(crate::llm_cli::CLI_PROVIDERS.iter())
     .map(|p| format!("'{}'", p))
     .collect::<Vec<_>>()
     .join(", ")
@@ -141,6 +146,30 @@ pub async fn stream_response_into(
 
   if interrupted() {
     return Ok(());
+  }
+
+  if crate::llm_cli::is_cli_provider(&target.provider) {
+    crate::log::log(
+      "info",
+      &format!(
+        "Requesting provider '{}' model '{}' at {}",
+        target.provider,
+        target.model,
+        describe_endpoint(target)
+      ),
+    );
+    let result = crate::llm_cli::stream_cli_response_into(
+      messages,
+      target,
+      interrupt_counter,
+      expected_interrupt,
+      on_piece,
+    )
+    .await;
+    if let Ok(()) = &result {
+      crate::log::log("info", &format!("Streaming response from: {}", describe_endpoint(target)));
+    }
+    return result;
   }
 
   let (system_prompt, chat) = split_messages(messages);
@@ -228,14 +257,22 @@ impl OpenAIProviderConfig for LocalOpenAiCompatible {
   const SUPPORTS_REASONING_EFFORT: bool = true;
 }
 
-/// Turn the configured `host[:port]` into the `/v1` root the local server exposes
-fn local_base_url(baseurl: &str) -> String {
+/// Add a scheme to a bare `host[:port]` and drop a trailing slash, without
+/// the `/v1` suffix `local_base_url` adds - used wherever something other
+/// than the OpenAI-compatible chat path is being addressed (e.g. ollama's
+/// native `/api/tags`).
+pub(crate) fn base_url_with_scheme(baseurl: &str) -> String {
   let trimmed = baseurl.trim().trim_end_matches('/');
-  let with_scheme = if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+  if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
     trimmed.to_string()
   } else {
     format!("http://{}", trimmed)
-  };
+  }
+}
+
+/// Turn the configured `host[:port]` into the `/v1` root the local server exposes
+fn local_base_url(baseurl: &str) -> String {
+  let with_scheme = base_url_with_scheme(baseurl);
   if with_scheme.ends_with("/v1") {
     with_scheme
   } else {
@@ -244,7 +281,9 @@ fn local_base_url(baseurl: &str) -> String {
 }
 
 fn describe_endpoint(target: &LlmTarget) -> String {
-  if is_local_provider(&target.provider) {
+  if crate::llm_cli::is_cli_provider(&target.provider) {
+    format!("the '{}' cli (model: {})", target.provider, target.model)
+  } else if is_local_provider(&target.provider) {
     format!("{}/chat/completions", local_base_url(&target.baseurl))
   } else if target.baseurl.trim().is_empty() {
     format!("{} (default endpoint)", target.provider)

@@ -22,6 +22,7 @@ mod engine;
 mod html_export;
 mod keyboard;
 mod llm;
+mod llm_cli;
 mod log;
 mod playback;
 mod record;

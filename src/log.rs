@@ -26,6 +26,12 @@ pub fn set_tx_ui_sender(sender: Sender<String>) {
   TX_UI.set(sender).ok();
 }
 
+/// A clone of the UI channel, for code that needs to push its own message
+/// (not a log line) - e.g. a background poller nudging a redraw.
+pub fn tx_ui_sender() -> Option<Sender<String>> {
+  TX_UI.get().cloned()
+}
+
 pub fn is_verbose() -> bool {
   VERBOSE.load(Ordering::Relaxed)
 }

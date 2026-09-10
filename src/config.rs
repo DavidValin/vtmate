@@ -1742,6 +1742,10 @@ fn validate_api_key(api_key: &str, provider: &str) -> Result<(), std::io::Error>
 }
 
 fn validate_baseurl(baseurl: &str, provider: &str) -> Result<(), std::io::Error> {
+  // cli providers never use it - the field is hidden in the settings form
+  if crate::llm_cli::is_cli_provider(provider) {
+    return Ok(());
+  }
   if baseurl.trim().is_empty() {
     // hosted providers have a default endpoint, local servers must be addressed
     if crate::llm::is_cloud_provider(provider) {
