@@ -140,9 +140,20 @@ Explanation on the [agent] fields:
                             /v1/chat/completions)
 
                           Hosted providers (api key needed):
-                            'openai', 'anthropic', 'google',
-                            'groq', 'mistral', 'openrouter',
-                            'deepseek', 'xai'
+                            'openai-api', 'anthropic-api',
+                            'google-api', 'groq-api',
+                            'mistral-api', 'openrouter-api',
+                            'deepseek-api', 'xai-api'
+
+                          Subscription clis (no api key, use
+                          whatever the cli is logged into; no
+                          baseurl either - model is passed to
+                          the cli directly):
+                            'claude-cli', 'codex-cli',
+                            'gemini-cli', 'copilot-cli',
+                            'kiro-cli', 'vibe-cli',
+                            'hermes-cli', 'opencode-cli',
+                            'pi-cli', 'aichat-cli', 'grok-cli'
   ------------------------------------------------------------
   * baseurl:              the base url used to contact the
                           provider. For local servers it is

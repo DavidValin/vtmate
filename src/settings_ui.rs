@@ -1084,15 +1084,41 @@ pub fn languages_for(tts: &str) -> Vec<String> {
     .collect()
 }
 
-/// Every provider vtmate can talk to: local servers, hosted apis, then the
-/// subscription clis.
+/// Every provider vtmate can talk to: local servers first, then each hosted
+/// api next to its matching cli subscription (so the two ways of reaching
+/// the same brand sit together), then whichever of the two has no
+/// counterpart.
 pub fn providers() -> Vec<String> {
-  crate::llm::LOCAL_PROVIDERS
+  const PAIRS: &[(&str, &str)] = &[
+    ("anthropic-api", "claude-cli"),
+    ("openai-api", "codex-cli"),
+    ("google-api", "gemini-cli"),
+    ("mistral-api", "vibe-cli"),
+    ("xai-api", "grok-cli"),
+  ];
+  let paired: Vec<&str> = PAIRS.iter().flat_map(|(api, cli)| [*api, *cli]).collect();
+
+  let mut out: Vec<String> = crate::llm::LOCAL_PROVIDERS
     .iter()
-    .chain(crate::llm::CLOUD_PROVIDERS.iter())
-    .chain(crate::llm_cli::CLI_PROVIDERS.iter())
     .map(|p| p.to_string())
-    .collect()
+    .collect();
+  for (api, cli) in PAIRS {
+    out.push(api.to_string());
+    out.push(cli.to_string());
+  }
+  out.extend(
+    crate::llm::CLOUD_PROVIDERS
+      .iter()
+      .filter(|p| !paired.contains(*p))
+      .map(|p| p.to_string()),
+  );
+  out.extend(
+    crate::llm_cli::CLI_PROVIDERS
+      .iter()
+      .filter(|p| !paired.contains(*p))
+      .map(|p| p.to_string()),
+  );
+  out
 }
 
 /// Fields shown for `provider`: cli providers use the model a cli reports
@@ -1474,7 +1500,14 @@ fn form_lines(ui: &SettingsUi, inner: usize, rows: u16) -> (String, Vec<String>,
           form.caret,
           value_width,
           model_options,
-          form.ollama_fetched_once && provider == "ollama",
+          if crate::llm_cli::is_cli_provider(&provider) {
+            // a cli's model list only ever holds real choices (fetched, or
+            // the static fallback) - never empty once settled, so "we have
+            // it" and "it is non-empty" are the same check here
+            !form.cli_models.is_empty()
+          } else {
+            provider == "ollama" && form.ollama_fetched_once
+          },
         )
       ));
     }

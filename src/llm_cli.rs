@@ -143,11 +143,7 @@ pub async fn stream_cli_response_into(
   }
 
   let (system, transcript) = flatten_prompt(messages);
-  let prompt = match system {
-    Some(s) => format!("Instructions: {}\n\n{}", s, transcript),
-    None => transcript,
-  };
-  let args = chat_args(&provider, target.model.trim(), &prompt);
+  let args = chat_args(&provider, target.model.trim(), system.as_deref(), &transcript);
 
   let mut cmd = tokio::process::Command::new(spec.binary);
   cmd
@@ -397,22 +393,45 @@ fn spec(provider: &str) -> Option<Spec> {
 /// The argv (after the binary) for one non-interactive turn: the prompt,
 /// the model, and each cli's closest thing to "answer only, don't touch
 /// anything" - see the module doc.
-fn chat_args(provider: &str, model: &str, prompt: &str) -> Vec<String> {
+///
+/// `system`, when the agent has one, goes through a cli's own system-prompt
+/// flag where one is confirmed to exist (claude, pi, aichat). A cli without
+/// one gets it prepended to the prompt text as plain context instead - not
+/// under a label like "Instructions:", which reads as an injected system
+/// directive smuggled into user text; claude itself refused to treat a
+/// prompt built that way as real for exactly that reason before this.
+fn chat_args(provider: &str, model: &str, system: Option<&str>, transcript: &str) -> Vec<String> {
   let m = model.to_string();
+  let system = system.map(str::trim).filter(|s| !s.is_empty());
+  let combined = || match system {
+    Some(s) => format!("{}\n\n{}", s, transcript),
+    None => transcript.to_string(),
+  };
   match provider {
-    "claude-cli" => vec![
-      "-p".into(),
-      prompt.into(),
-      "--model".into(),
-      m,
-      "--output-format".into(),
-      "stream-json".into(),
-      "--include-partial-messages".into(),
-      "--verbose".into(),
-      "--no-session-persistence".into(),
-      "--permission-mode".into(),
-      "plan".into(),
-    ],
+    "claude-cli" => {
+      let mut args = vec![
+        "-p".to_string(),
+        transcript.to_string(),
+        "--model".to_string(),
+        m,
+        "--output-format".to_string(),
+        "stream-json".to_string(),
+        "--include-partial-messages".to_string(),
+        "--verbose".to_string(),
+        "--no-session-persistence".to_string(),
+        "--permission-mode".to_string(),
+        "plan".to_string(),
+      ];
+      if let Some(s) = system {
+        // `--system-prompt` replaces the session's prompt outright; the
+        // similarly named `--append-system-prompt` only adds to Claude
+        // Code's own default coding-assistant persona, which is not what an
+        // agent's system prompt is meant to do here
+        args.push("--system-prompt".to_string());
+        args.push(s.to_string());
+      }
+      args
+    }
     "codex-cli" => vec![
       "exec".into(),
       "-m".into(),
@@ -421,11 +440,11 @@ fn chat_args(provider: &str, model: &str, prompt: &str) -> Vec<String> {
       "--skip-git-repo-check".into(),
       "--sandbox".into(),
       "read-only".into(),
-      prompt.into(),
+      combined(),
     ],
     "gemini-cli" => vec![
       "-p".into(),
-      prompt.into(),
+      combined(),
       "-m".into(),
       m,
       "--approval-mode".into(),
@@ -433,7 +452,7 @@ fn chat_args(provider: &str, model: &str, prompt: &str) -> Vec<String> {
     ],
     "copilot-cli" => vec![
       "-p".into(),
-      prompt.into(),
+      combined(),
       "--model".into(),
       m,
       "--available-tools=".into(),
@@ -442,42 +461,59 @@ fn chat_args(provider: &str, model: &str, prompt: &str) -> Vec<String> {
     ],
     "kiro-cli" => vec![
       "chat".into(),
-      prompt.into(),
+      combined(),
       "--no-interactive".into(),
       "--model".into(),
       m,
     ],
     "vibe-cli" => vec![
       "-p".into(),
-      prompt.into(),
+      combined(),
       "--output".into(),
       "text".into(),
       "--agent".into(),
       "plan".into(),
       "--trust".into(),
     ],
-    "hermes-cli" => vec!["-z".into(), prompt.into(), "--model".into(), m],
+    "hermes-cli" => vec!["-z".into(), combined(), "--model".into(), m],
     "opencode-cli" => vec![
       "run".into(),
       "-m".into(),
       m,
       "--format".into(),
       "json".into(),
-      prompt.into(),
+      combined(),
     ],
-    "pi-cli" => vec![
-      "-p".into(),
-      "--mode".into(),
-      "json".into(),
-      "--model".into(),
-      m,
-      "--no-tools".into(),
-      "--no-session".into(),
-      prompt.into(),
-    ],
-    "aichat-cli" => vec!["-m".into(), m, prompt.into()],
-    "grok-cli" => vec!["-p".into(), prompt.into(), "--model".into(), m],
-    _ => vec![prompt.into()],
+    "pi-cli" => {
+      let mut args = vec![
+        "-p".to_string(),
+        "--mode".to_string(),
+        "json".to_string(),
+        "--model".to_string(),
+        m,
+        "--no-tools".to_string(),
+        "--no-session".to_string(),
+      ];
+      if let Some(s) = system {
+        // replaces pi's default coding-assistant persona rather than
+        // appending to it, matching what vtmate's system prompt is for
+        args.push("--system-prompt".to_string());
+        args.push(s.to_string());
+      }
+      args.push(transcript.to_string());
+      args
+    }
+    "aichat-cli" => {
+      let mut args = vec!["-m".to_string(), m];
+      if let Some(s) = system {
+        args.push("--prompt".to_string());
+        args.push(s.to_string());
+      }
+      args.push(transcript.to_string());
+      args
+    }
+    "grok-cli" => vec!["-p".into(), combined(), "--model".into(), m],
+    _ => vec![combined()],
   }
 }
 

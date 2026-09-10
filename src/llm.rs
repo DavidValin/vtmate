@@ -22,16 +22,21 @@ use std::time::Duration;
 /// Providers served by a user supplied host through an OpenAI-compatible endpoint.
 pub const LOCAL_PROVIDERS: &[&str] = &["ollama", "llama-server", "openai-compatible"];
 
-/// Hosted providers handled by the `llm` crate backends (an api key is needed).
+/// Hosted providers handled by the `llm` crate backends (an api key is
+/// needed). Named with an `-api` suffix so they read clearly next to their
+/// cli-subscription counterpart in the settings picker (`anthropic-api` /
+/// `claude-cli`); `is_cloud_provider`/`api_key_env_var`/`build_provider`
+/// still accept the old bare form too, so a settings file written before
+/// this rename keeps working.
 pub const CLOUD_PROVIDERS: &[&str] = &[
-  "openai",
-  "anthropic",
-  "google",
-  "groq",
-  "mistral",
-  "openrouter",
-  "deepseek",
-  "xai",
+  "openai-api",
+  "anthropic-api",
+  "google-api",
+  "groq-api",
+  "mistral-api",
+  "openrouter-api",
+  "deepseek-api",
+  "xai-api",
 ];
 
 /// Where a request goes: provider name plus the connection details of one agent.
@@ -88,7 +93,11 @@ pub fn is_local_provider(provider: &str) -> bool {
 }
 
 pub fn is_cloud_provider(provider: &str) -> bool {
-  CLOUD_PROVIDERS.contains(&provider.trim().to_lowercase().as_str())
+  let p = provider.trim().to_lowercase();
+  CLOUD_PROVIDERS.contains(&p.as_str())
+    || CLOUD_PROVIDERS
+      .iter()
+      .any(|c| c.strip_suffix("-api") == Some(p.as_str()))
 }
 
 pub fn is_supported_provider(provider: &str) -> bool {
@@ -107,7 +116,9 @@ pub fn supported_providers_list() -> String {
 
 /// Environment variable consulted when `api_key` is empty in the settings
 pub fn api_key_env_var(provider: &str) -> Option<&'static str> {
-  match provider.trim().to_lowercase().as_str() {
+  let p = provider.trim().to_lowercase();
+  let base = p.strip_suffix("-api").unwrap_or(&p);
+  match base {
     "openai" => Some("OPENAI_API_KEY"),
     "anthropic" => Some("ANTHROPIC_API_KEY"),
     "google" => Some("GOOGLE_API_KEY"),
@@ -373,7 +384,11 @@ fn build_provider(
     ));
   }
 
+  // the `llm` crate's own backend names are the bare form (`anthropic`),
+  // vtmate's provider identifier is `anthropic-api`
   let backend: LLMBackend = provider
+    .strip_suffix("-api")
+    .unwrap_or(&provider)
     .parse()
     .map_err(|e| format!("Unsupported provider '{}': {}", target.provider, e))?;
   let api_key = resolve_api_key(&provider, &target.api_key).ok_or_else(|| {
@@ -452,26 +467,31 @@ mod tests {
   fn provider_classification() {
     assert!(is_local_provider("ollama"));
     assert!(is_local_provider("Llama-Server"));
+    assert!(is_cloud_provider("anthropic-api"));
+    // a settings file written before the `-api` rename still works
     assert!(is_cloud_provider("anthropic"));
     assert!(!is_supported_provider("foo"));
+    assert_eq!(api_key_env_var("openai-api"), Some("OPENAI_API_KEY"));
     assert_eq!(api_key_env_var("openai"), Some("OPENAI_API_KEY"));
     assert_eq!(api_key_env_var("ollama"), None);
   }
 
   #[test]
   fn cloud_provider_without_key_is_an_error() {
-    let target = LlmTarget {
-      provider: "anthropic".into(),
-      baseurl: String::new(),
-      model: "claude-sonnet-5".into(),
-      api_key: String::new(),
-    };
-    // make sure the env fallback does not kick in
-    unsafe { std::env::remove_var("ANTHROPIC_API_KEY") };
-    let err = build_provider(&target, None)
-      .err()
-      .expect("must fail without key");
-    assert!(err.contains("ANTHROPIC_API_KEY"), "{err}");
+    for provider in ["anthropic-api", "anthropic"] {
+      let target = LlmTarget {
+        provider: provider.into(),
+        baseurl: String::new(),
+        model: "claude-sonnet-5".into(),
+        api_key: String::new(),
+      };
+      // make sure the env fallback does not kick in
+      unsafe { std::env::remove_var("ANTHROPIC_API_KEY") };
+      let err = build_provider(&target, None)
+        .err()
+        .expect("must fail without key");
+      assert!(err.contains("ANTHROPIC_API_KEY"), "{err}");
+    }
   }
 
   fn test_target() -> LlmTarget {
