@@ -205,7 +205,7 @@ Explanation on the [agent] fields:
                           to be released to submit the audio.
   ------------------------------------------------------------
   * tts:                  the tts system to use, it can be
-                          'supertonic' (default, 31 languages),
+                          'supertonic3' (default, 31 languages),
                           'supertonic2', 'kokoro' or 'opentts'.
 
                             - opentts requires opentts docker
@@ -1211,7 +1211,7 @@ Rules:
 [agent]
 name = main agent
 language = en
-tts = supertonic
+tts = supertonic3
 voice = M1
 voice_speed = 1.1
 provider = ollama
@@ -1226,7 +1226,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 [agent]
 name = explainer
 language = en
-tts = supertonic
+tts = supertonic3
 voice = F1
 voice_speed = 1.1
 provider = ollama
@@ -1241,7 +1241,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 [agent]
 name = planner
 language = en
-tts = supertonic
+tts = supertonic3
 voice = F3
 voice_speed = 1.1
 provider = ollama
@@ -1256,7 +1256,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 [agent]
 name = Ptahhotep
 language = en
-tts = supertonic
+tts = supertonic3
 voice = M2
 voice_speed = 1.1
 provider = ollama
@@ -1271,7 +1271,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 [agent]
 name = Aristoteles
 language = en
-tts = supertonic
+tts = supertonic3
 voice = M3
 voice_speed = 1.1
 provider = ollama
@@ -1286,7 +1286,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 [agent]
 name = Budda
 language = en
-tts = supertonic
+tts = supertonic3
 voice = M4
 voice_speed = 1.1
 provider = ollama
@@ -1301,7 +1301,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 [agent]
 name = Jesus Christ
 language = en
-tts = supertonic
+tts = supertonic3
 voice = M5
 voice_speed = 1.1
 provider = ollama
@@ -1685,11 +1685,11 @@ fn validate_voice(voice: &str, language: &str, tts: &str) -> Result<(), std::io:
 }
 
 fn validate_tts(tts: &str) -> Result<(), std::io::Error> {
-  if tts != "kokoro" && tts != "opentts" && tts != "supertonic2" && tts != "supertonic" {
+  if tts != "kokoro" && tts != "opentts" && tts != "supertonic2" && tts != "supertonic3" {
     return Err(std::io::Error::new(
       std::io::ErrorKind::Other,
       format!(
-        "Invalid tts '{}' . Must be 'kokoro', 'opentts', 'supertonic2', or 'supertonic'",
+        "Invalid tts '{}' . Must be 'kokoro', 'opentts', 'supertonic2', or 'supertonic3'",
         tts
       ),
     ));

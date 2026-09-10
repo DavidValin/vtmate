@@ -8,10 +8,14 @@ use crossbeam_channel::{Receiver, Sender};
 use kokoro_micro::TtsEngine;
 extern crate supertonic2_tts as supertonic2_tts_crate;
 use supertonic2_tts_crate::TtsEngine as Supertonic2TtsEngine;
+// aliased: `pub mod supertonic3_tts` below (vtmate's own wrapper module)
+// shares its name with this external crate, so the bare name would
+// otherwise resolve to the module instead
+extern crate supertonic3_tts as supertonic3_tts_crate;
 pub mod kokoro_tts;
 pub mod opentts_tts;
 pub mod supertonic2_tts;
-pub mod supertonic_tts;
+pub mod supertonic3_tts;
 
 use std::sync::OnceLock;
 use std::sync::{Arc, Mutex, atomic::AtomicU64};
@@ -38,13 +42,13 @@ pub enum SpeakOutcome {
 static KOKORO_ENGINE: OnceLock<Arc<Mutex<TtsEngine>>> = OnceLock::new();
 static SUPERTONIC2_ENGINE: OnceLock<Arc<Mutex<Supertonic2TtsEngine>>> = OnceLock::new();
 /// Replaceable, unlike the two above: when the GPU refuses mid-synthesis the
-/// engine is rebuilt on the CPU in place (supertonic_tts::rebuild_on_cpu).
-static SUPERTONIC_ENGINE: Mutex<Option<Arc<supertonic3_tts::TtsEngine>>> = Mutex::new(None);
+/// engine is rebuilt on the CPU in place (supertonic3_tts::rebuild_on_cpu).
+static SUPERTONIC3_ENGINE: Mutex<Option<Arc<supertonic3_tts_crate::TtsEngine>>> = Mutex::new(None);
 
 // Supported languages for Supertonic2 TTS
 static SUPERTONIC2_LANGS: &[&str] = &["en", "es", "fr", "ko", "pt"];
-// Supported languages for Supertonic TTS (Supertonic 3, multilingual)
-static SUPERTONIC_LANGS: &[&str] = crate::tts::supertonic_tts::SUPPORTED_LANGS;
+// Supported languages for Supertonic3 TTS (Supertonic 3, multilingual)
+static SUPERTONIC3_LANGS: &[&str] = crate::tts::supertonic3_tts::SUPPORTED_LANGS;
 
 pub fn speak(
   text: &str,
@@ -81,9 +85,9 @@ pub fn speak(
       interrupt_counter,
       expected_interrupt,
     )
-  } else if tts == "supertonic" {
+  } else if tts == "supertonic3" {
     let speed = crate::state::get_speed();
-    supertonic_tts::speak_via_supertonic(
+    supertonic3_tts::speak_via_supertonic3(
       text,
       voice,
       speed,
@@ -218,8 +222,8 @@ pub fn get_all_available_languages() -> Vec<&'static str> {
   );
   // Include supertonic2 supported languages
   langs.extend(SUPERTONIC2_LANGS.iter().copied());
-  // Include supertonic supported languages
-  langs.extend(SUPERTONIC_LANGS.iter().copied());
+  // Include supertonic3 supported languages
+  langs.extend(SUPERTONIC3_LANGS.iter().copied());
   langs.sort();
   langs.dedup();
   langs
@@ -255,12 +259,12 @@ pub fn get_voices_for(tts: &str, language: &str) -> Vec<String> {
         Vec::new()
       }
     }
-    "supertonic" => {
-      // Supertonic voices are supported for all its languages
-      if SUPERTONIC_LANGS.contains(&language) {
+    "supertonic3" => {
+      // Supertonic3 voices are supported for all its languages
+      if SUPERTONIC3_LANGS.contains(&language) {
         voice_styles_in(
-          crate::tts::supertonic_tts::voice_styles_dir(),
-          &crate::tts::supertonic_tts::SUPERTONIC_VOICE_STYLES,
+          crate::tts::supertonic3_tts::voice_styles_dir(),
+          &crate::tts::supertonic3_tts::SUPERTONIC3_VOICE_STYLES,
         )
       } else {
         Vec::new()
@@ -274,7 +278,7 @@ pub fn get_voices_for(tts: &str, language: &str) -> Vec<String> {
 /// voice on disk. `None` for engines whose voices are fixed (kokoro, opentts).
 pub fn voice_styles_dir_for(tts: &str) -> Option<std::path::PathBuf> {
   match tts {
-    "supertonic" => Some(crate::tts::supertonic_tts::voice_styles_dir()),
+    "supertonic3" => Some(crate::tts::supertonic3_tts::voice_styles_dir()),
     "supertonic2" => Some(crate::tts::supertonic2_tts::voice_styles_dir()),
     _ => None,
   }
@@ -321,12 +325,12 @@ pub fn print_voices() {
   let langs = get_all_available_languages();
 
   println!(
-    "supertonic 🏆 High Quality Voices\n======================================================\n{:<8}\t{:<12}\t{:<2}\t{}",
+    "supertonic3 🏆 High Quality Voices\n======================================================\n{:<8}\t{:<12}\t{:<2}\t{}",
     "TTS", "Language", "Flag", "Voices"
   );
   println!("======================================================");
   for lang in langs.iter() {
-    let voices = get_voices_for("supertonic", lang);
+    let voices = get_voices_for("supertonic3", lang);
     if voices.is_empty() {
       continue;
     }
@@ -334,10 +338,10 @@ pub fn print_voices() {
     let voices_str = voices.join(", ");
     println!(
       "{:<8}\t{:<12}\t{:<2}\t{}",
-      "supertonic", lang, flag, voices_str
+      "supertonic3", lang, flag, voices_str
     );
   }
-  print_voice_styles_hint("supertonic");
+  print_voice_styles_hint("supertonic3");
   println!();
   println!(
     "supertonic2 🏆 High Quality Voices\n======================================================\n{:<8}\t{:<12}\t{:<2}\t{}",

@@ -407,7 +407,7 @@ fn unknown_section_is_reported_and_headers_are_case_insensitive() {
   // a typo'd header used to be swallowed into the first agent block and
   // surface as `missing field name`
   let path = temp_settings(
-    "[Deamon]\nllm_background_reset = ctrl+alt+x\n\n[agent]\nname = a\nlanguage = en\ntts = supertonic\nvoice = M1\nprovider = ollama\nmodel = m\nbaseurl = http://127.0.0.1:11434\nsystem_prompt = x\n",
+    "[Deamon]\nllm_background_reset = ctrl+alt+x\n\n[agent]\nname = a\nlanguage = en\ntts = supertonic3\nvoice = M1\nprovider = ollama\nmodel = m\nbaseurl = http://127.0.0.1:11434\nsystem_prompt = x\n",
   );
   let err = load_settings(&path, &default_args()).unwrap_err().to_string();
   assert!(err.contains("unknown section [Deamon]"), "{}", err);

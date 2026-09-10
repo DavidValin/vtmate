@@ -84,7 +84,7 @@ pub const FIELDS: [Field; 14] = [
 ];
 
 /// The TTS engines an agent can speak with.
-pub const TTS_ENGINES: [&str; 4] = ["supertonic", "supertonic2", "kokoro", "opentts"];
+pub const TTS_ENGINES: [&str; 4] = ["supertonic3", "supertonic2", "kokoro", "opentts"];
 
 /// Longest agent name the form accepts (what `validate_agent_name` allows).
 pub const NAME_MAX: usize = 200;
@@ -1294,7 +1294,7 @@ fn unique_name(agents: &[AgentSettings], wanted: &str) -> String {
 
 /// The agent a brand new one is built from when the list is empty.
 fn default_agent() -> AgentSettings {
-  let tts = "supertonic".to_string();
+  let tts = "supertonic3".to_string();
   let language = languages_for(&tts)
     .first()
     .cloned()

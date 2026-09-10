@@ -953,7 +953,7 @@ pub fn open_clone_progress_popup() {
 /// diffing) - call [`open_clone_progress_popup`] first.
 pub fn render_clone_progress_popup(
   title: &str,
-  stages: &[crate::tts::supertonic_tts::CloneStageInfo],
+  stages: &[crate::tts::supertonic3_tts::CloneStageInfo],
   done_steps: usize,
   total_steps: usize,
   fraction: f64,

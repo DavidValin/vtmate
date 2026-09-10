@@ -108,7 +108,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   // make sure the user has the whisper + tts models unpacked
   assets::ensure_assets_env();
   assets::ensure_supertonic2_assets();
-  assets::ensure_supertonic_assets();
+  assets::ensure_supertonic3_assets();
 
   // ---------------------------------------------------
   // setup thread communication channels
@@ -816,7 +816,7 @@ fn run_clone_voice_cli(voice_name: &str, language: &str, wav_file: &str, ref_tex
   // opened above is always left before this process exits one way or
   // another - otherwise the terminal would be stranded on a blank screen.
   let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-    let render_progress = move |p: tts::supertonic_tts::CloneProgressInfo| {
+    let render_progress = move |p: tts::supertonic3_tts::CloneProgressInfo| {
       ui::render_clone_progress_popup(
         &popup_title,
         &p.stages,
@@ -826,9 +826,9 @@ fn run_clone_voice_cli(voice_name: &str, language: &str, wav_file: &str, ref_tex
       );
     };
     if refine {
-      tts::supertonic_tts::refine_voice(voice_name, language, wav_file, ref_text, render_progress)
+      tts::supertonic3_tts::refine_voice(voice_name, language, wav_file, ref_text, render_progress)
     } else {
-      tts::supertonic_tts::clone_voice(voice_name, language, wav_file, ref_text, render_progress)
+      tts::supertonic3_tts::clone_voice(voice_name, language, wav_file, ref_text, render_progress)
     }
   }));
   ui::close_clone_progress_popup();

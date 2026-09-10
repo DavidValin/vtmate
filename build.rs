@@ -184,13 +184,13 @@ static EXPECTED_HASHES: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(in
 
 // ---------------------------------------------------------------------------
 // Supertonic 3 (multilingual TTS) - fetched file by file from Hugging Face
-// into $HOME/.vtmate/tts/supertonic-model and copied into OUT_DIR/embedded so
+// into $HOME/.vtmate/tts/supertonic3-model and copied into OUT_DIR/embedded so
 // assets.rs can include_bytes! them, the same way the supertonic2 model is.
 // ---------------------------------------------------------------------------
-const SUPERTONIC_HF_BASE: &str = "https://huggingface.co/Supertone/supertonic-3/resolve/main";
+const SUPERTONIC3_HF_BASE: &str = "https://huggingface.co/Supertone/supertonic-3/resolve/main";
 
 // (relative path inside the model dir, sha256)
-const SUPERTONIC_FILES: &[(&str, &str)] = &[
+const SUPERTONIC3_FILES: &[(&str, &str)] = &[
   ("config.json", "4099082b107a9d4029849ac76b89eca65e03732660969c2babe5bf308c7357f2"),
   ("onnx/duration_predictor.onnx", "c3eb91414d5ff8a7a239b7fe9e34e7e2bf8a8140d8375ffb14718b1c639325db"),
   ("onnx/text_encoder.onnx", "c7befd5ea8c3119769e8a6c1486c4edc6a3bc8365c67621c881bbb774b9902ff"),
@@ -235,15 +235,15 @@ fn download_to(url: &str, dest: &Path) {
 // Make sure every Supertonic 3 file is present in $HOME (downloading and
 // checksum-verifying missing or corrupt ones) and copy the model into the
 // embedded dir.
-fn ensure_supertonic_model(home: &str, embedded_dest: &Path, is_release: bool) {
+fn ensure_supertonic3_model(home: &str, embedded_dest: &Path, is_release: bool) {
   let model_dir = Path::new(home)
     .join(".vtmate")
     .join("tts")
-    .join("supertonic-model");
+    .join("supertonic3-model");
 
-  for &(rel, expected) in SUPERTONIC_FILES {
+  for &(rel, expected) in SUPERTONIC3_FILES {
     let path = model_dir.join(rel);
-    let url = format!("{}/{}", SUPERTONIC_HF_BASE, rel);
+    let url = format!("{}/{}", SUPERTONIC3_HF_BASE, rel);
 
     // Existing files are trusted in debug builds (fast iteration); release
     // builds verify them and re-download on mismatch.
@@ -266,15 +266,15 @@ fn ensure_supertonic_model(home: &str, embedded_dest: &Path, is_release: bool) {
       let got = sha256_hex(&path).expect("hash after download");
       if got != expected {
         panic!(
-          "Checksum mismatch for supertonic file {}: expected {}, got {}",
+          "Checksum mismatch for supertonic3 file {}: expected {}, got {}",
           rel, expected, got
         );
       }
     }
 
-    let dest_path = embedded_dest.join("supertonic-model").join(rel);
+    let dest_path = embedded_dest.join("supertonic3-model").join(rel);
     fs::create_dir_all(dest_path.parent().unwrap()).expect("Failed to create embedded model dir");
-    fs::copy(&path, &dest_path).expect("failed to copy supertonic asset");
+    fs::copy(&path, &dest_path).expect("failed to copy supertonic3 asset");
     println!("cargo:rerun-if-changed={}", path.display());
   }
   println!("cargo:warning=Supertonic 3 model embedded from {}", model_dir.display());
@@ -297,7 +297,7 @@ fn ensure_speaker_model(home: &str, embedded_dest: &Path, is_release: bool) {
   let model_dir = Path::new(home)
     .join(".vtmate")
     .join("tts")
-    .join("supertonic-model");
+    .join("supertonic3-model");
   let path = model_dir.join("speaker_encoder.onnx");
 
   let mut needs_download = !path.exists();
@@ -326,7 +326,7 @@ fn ensure_speaker_model(home: &str, embedded_dest: &Path, is_release: bool) {
   }
 
   let dest_path = embedded_dest
-    .join("supertonic-model")
+    .join("supertonic3-model")
     .join("speaker_encoder.onnx");
   fs::create_dir_all(dest_path.parent().unwrap()).expect("Failed to create embedded model dir");
   fs::copy(&path, &dest_path).expect("failed to copy speaker_encoder.onnx asset");
@@ -518,7 +518,7 @@ fn main() {
   }
 
   // Supertonic 3 model (multilingual TTS)
-  ensure_supertonic_model(&home, &dest, is_release);
+  ensure_supertonic3_model(&home, &dest, is_release);
   // Speaker embedding model, for voice cloning identity matching
   ensure_speaker_model(&home, &dest, is_release);
 
