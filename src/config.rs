@@ -135,9 +135,12 @@ Explanation on the [agent] fields:
                           Local servers (no api key needed):
                             'ollama' (0.13 or newer),
                             'llama-server',
-                            'openai-compatible' (LM Studio,
-                            vLLM or any server exposing
-                            /v1/chat/completions)
+                            'openai-compatible-api' (LM Studio,
+                            vLLM, or any local or remote server
+                            exposing /v1/chat/completions -
+                            Azure OpenAI, a proxy, LiteLLM, ...
+                            included; the baseurl is where it
+                            has to point)
 
                           Hosted providers (api key needed):
                             'openai-api', 'anthropic-api',
@@ -156,11 +159,16 @@ Explanation on the [agent] fields:
                             'pi-cli', 'aichat-cli', 'grok-cli'
   ------------------------------------------------------------
   * baseurl:              the base url used to contact the
-                          provider. For local servers it is
+                          provider. Required for local servers -
                           the host and port without path, e.g.
-                          http://127.0.0.1:11434
-                          For hosted providers leave it empty
-                          to use the provider's default url.
+                          http://127.0.0.1:11434 for ollama, or
+                          wherever an openai-compatible-api
+                          endpoint actually is, local or remote.
+
+                          Every hosted provider (including
+                          openai-api) and every subscription cli
+                          ignores it - set it there and it is
+                          rejected.
   ------------------------------------------------------------
   * model:                the model name to use
                           (some llama-server versions will
@@ -1753,13 +1761,26 @@ fn validate_api_key(api_key: &str, provider: &str) -> Result<(), std::io::Error>
 }
 
 fn validate_baseurl(baseurl: &str, provider: &str) -> Result<(), std::io::Error> {
+  let p = provider.trim().to_lowercase();
   // cli providers never use it - the field is hidden in the settings form
-  if crate::llm_cli::is_cli_provider(provider) {
+  if crate::llm_cli::is_cli_provider(&p) {
     return Ok(());
+  }
+  // no hosted provider takes a custom endpoint - that is what the local
+  // openai-compatible-api provider is for; a value left over for a hosted
+  // provider would silently go unused, so it is rejected here instead
+  if crate::llm::is_cloud_provider(&p) && !baseurl.trim().is_empty() {
+    return Err(std::io::Error::new(
+      std::io::ErrorKind::Other,
+      format!(
+        "baseurl is not used for provider '{}' (use openai-compatible-api for a custom endpoint); leave it empty",
+        provider
+      ),
+    ));
   }
   if baseurl.trim().is_empty() {
     // hosted providers have a default endpoint, local servers must be addressed
-    if crate::llm::is_cloud_provider(provider) {
+    if crate::llm::is_cloud_provider(&p) {
       return Ok(());
     }
     return Err(std::io::Error::new(

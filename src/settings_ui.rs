@@ -1162,15 +1162,21 @@ pub fn providers() -> Vec<String> {
 /// keeps them (it is still addressed over http) but gets its model list from
 /// the running server instead of free text.
 fn visible_fields(provider: &str) -> Vec<Field> {
-  if crate::llm_cli::is_cli_provider(provider) {
-    FIELDS
-      .iter()
-      .copied()
-      .filter(|f| !matches!(f, Field::BaseUrl | Field::ApiKey))
-      .collect()
-  } else {
-    FIELDS.to_vec()
-  }
+  let p = provider.trim().to_lowercase();
+  let hide_api_key = crate::llm_cli::is_cli_provider(&p);
+  // no hosted -api provider takes a custom endpoint - that is what the
+  // local openai-compatible-api provider is for (LOCAL_PROVIDERS already
+  // keeps baseurl visible for every local provider, so no exception is
+  // needed here for it); every cli provider makes no network call of
+  // vtmate's own to redirect either
+  let hide_base_url = hide_api_key || crate::llm::is_cloud_provider(&p);
+  FIELDS
+    .iter()
+    .copied()
+    .filter(|f| {
+      !(hide_api_key && *f == Field::ApiKey) && !(hide_base_url && *f == Field::BaseUrl)
+    })
+    .collect()
 }
 
 /// Whether the Model field is a picker rather than free text: a cli that
@@ -1615,6 +1621,12 @@ fn form_lines(ui: &SettingsUi, inner: usize, rows: u16) -> (String, Vec<String>,
 /// ollama said went wrong). Returns the hint text and the color to show it
 /// in; `None` leaves the field's normal static hint in place.
 fn model_field_hint(field: &Field, provider: &str, form: &Form) -> Option<(String, &'static str)> {
+  if *field == Field::BaseUrl && provider == "openai-compatible-api" {
+    return Some((
+      "an openai compatible endpoint, set the base url to use it".to_string(),
+      CYAN,
+    ));
+  }
   if *field == Field::Provider {
     if !crate::llm_cli::is_cli_provider(provider) {
       return None;
