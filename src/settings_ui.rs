@@ -107,6 +107,10 @@ pub struct Form {
   pub cli_models: Vec<String>,
   pub cli_models_provider: String,
   pub cli_models_error: Option<String>,
+  /// Whether `draft.provider`'s cli binary was found on PATH: `None` until
+  /// the background check (in `refresh_cli_models`) resolves.
+  pub cli_installed: Option<bool>,
+  pub cli_installed_provider: String,
   /// Models last fetched from the running ollama server, refreshed every 5s
   /// while the form shows an ollama agent - see `poll_ollama_models`.
   pub ollama_models: Vec<String>,
@@ -943,6 +947,38 @@ fn refresh_cli_models(ui: &mut SettingsUi) {
     ui.form.cli_models.clear();
     ui.form.cli_models_provider.clear();
     ui.form.cli_models_error = None;
+    ui.form.cli_installed = None;
+    ui.form.cli_installed_provider.clear();
+    return;
+  }
+
+  // whether the binary is even on PATH - every cli provider gets this
+  // check, independent of whether it can also list its models
+  if ui.form.cli_installed_provider != provider {
+    ui.form.cli_installed_provider = provider.clone();
+    ui.form.cli_installed = None;
+    let provider_for_check = provider.clone();
+    std::thread::spawn(move || {
+      let installed = crate::llm_cli::is_installed(&provider_for_check);
+      if let Some(state) = crate::state::GLOBAL_STATE.get().cloned() {
+        let mut ui = state.settings_ui.lock().unwrap();
+        if ui.form.draft.provider.trim().to_lowercase() == provider_for_check {
+          ui.form.cli_installed = Some(installed);
+        }
+      }
+      if let Some(tx) = crate::log::tx_ui_sender() {
+        let _ = tx.send("settings_update|".to_string());
+      }
+    });
+  }
+
+  // model listing: only for the clis that actually have a command for it -
+  // no invented list stands in for the rest, the Model field stays free
+  // text for them instead (see `model_is_select`)
+  if !crate::llm_cli::has_model_listing(&provider) {
+    ui.form.cli_models.clear();
+    ui.form.cli_models_provider.clear();
+    ui.form.cli_models_error = None;
     return;
   }
   if ui.form.cli_models_provider == provider
@@ -1137,11 +1173,13 @@ fn visible_fields(provider: &str) -> Vec<Field> {
   }
 }
 
-/// Whether the Model field is a picker (cli providers, and ollama once its
-/// live model list has been fetched) rather than free text.
+/// Whether the Model field is a picker rather than free text: a cli that
+/// actually has a model-listing command of its own, or ollama. A cli with
+/// no listing command has nothing real to offer a picker, so its Model
+/// field stays plain text instead of showing an invented list.
 fn model_is_select(provider: &str) -> bool {
   let provider = provider.trim().to_lowercase();
-  crate::llm_cli::is_cli_provider(&provider) || provider == "ollama"
+  crate::llm_cli::has_model_listing(&provider) || provider == "ollama"
 }
 
 /// A name no agent of the list uses yet ("new agent", "new agent 2"...).
@@ -1500,23 +1538,22 @@ fn form_lines(ui: &SettingsUi, inner: usize, rows: u16) -> (String, Vec<String>,
           form.caret,
           value_width,
           model_options,
-          if crate::llm_cli::is_cli_provider(&provider) {
-            // a cli's model list only ever holds real choices (fetched, or
-            // the static fallback) - never empty once settled, so "we have
-            // it" and "it is non-empty" are the same check here
+          if crate::llm_cli::has_model_listing(&provider) {
             !form.cli_models.is_empty()
           } else {
             provider == "ollama" && form.ollama_fetched_once
           },
+          form.cli_installed,
         )
       ));
     }
     if focused {
-      let hint = model_field_hint(field, &provider, form).unwrap_or_else(|| field.hint().to_string());
+      let (hint, hint_color) = model_field_hint(field, &provider, form)
+        .unwrap_or_else(|| (field.hint().to_string(), CYAN));
       lines.push(format!(
         "{:<width$} {}{}{}",
         "",
-        CYAN,
+        hint_color,
         cut(&hint, value_width),
         OFF,
         width = label_width
@@ -1572,17 +1609,30 @@ fn form_lines(ui: &SettingsUi, inner: usize, rows: u16) -> (String, Vec<String>,
 }
 
 /// Replaces the Provider/Model fields' static hint with something more
-/// useful once a cli provider is picked: which binary it actually runs (the
-/// settings names it e.g. "claude-cli", the command on PATH is "claude"),
-/// and - for Model - what is actually going on fetching its list (still
-/// loading, or what the cli/ollama said went wrong).
-fn model_field_hint(field: &Field, provider: &str, form: &Form) -> Option<String> {
+/// useful once a cli provider is picked: whether its binary was found on
+/// PATH (red, with why, when it was not), and - for Model - what is
+/// actually going on fetching its list (still loading, or what the cli/
+/// ollama said went wrong). Returns the hint text and the color to show it
+/// in; `None` leaves the field's normal static hint in place.
+fn model_field_hint(field: &Field, provider: &str, form: &Form) -> Option<(String, &'static str)> {
   if *field == Field::Provider {
-    return crate::llm_cli::binary_for(provider).map(|bin| {
-      format!(
-        "←/→ where the answers come from; runs the '{}' cli - it must be installed and logged in",
-        bin
-      )
+    if !crate::llm_cli::is_cli_provider(provider) {
+      return None;
+    }
+    let bin = crate::llm_cli::binary_for(provider).unwrap_or(provider);
+    return Some(match form.cli_installed {
+      Some(false) => (
+        format!(
+          "✗ '{}' was not found on PATH - install it (and log it in), then come back to this provider",
+          bin
+        ),
+        RED,
+      ),
+      Some(true) => (
+        format!("←/→ where the answers come from; runs the '{}' cli, found on PATH", bin),
+        CYAN,
+      ),
+      None => (format!("checking whether '{}' is on PATH…", bin), CYAN),
     });
   }
   if *field != Field::Model {
@@ -1590,17 +1640,17 @@ fn model_field_hint(field: &Field, provider: &str, form: &Form) -> Option<String
   }
   if crate::llm_cli::is_cli_provider(provider) {
     if let Some(e) = &form.cli_models_error {
-      return Some(format!("{} models: {}", provider, e));
+      return Some((format!("{} models: {}", provider, e), RED));
     }
-    if form.cli_models.is_empty() {
-      return Some(format!("fetching models from {}…", provider));
+    if crate::llm_cli::has_model_listing(provider) && form.cli_models.is_empty() {
+      return Some((format!("fetching models from {}…", provider), CYAN));
     }
   } else if provider == "ollama" {
     if let Some(e) = &form.ollama_models_error {
-      return Some(format!("ollama models: {}", e));
+      return Some((format!("ollama models: {}", e), RED));
     }
     if !form.ollama_fetched_once {
-      return Some("fetching models from ollama…".to_string());
+      return Some(("fetching models from ollama…".to_string(), CYAN));
     }
   }
   None
@@ -1616,6 +1666,7 @@ fn field_value(
   width: usize,
   model_options: &[String],
   model_options_authoritative: bool,
+  cli_installed: Option<bool>,
 ) -> String {
   let is_model_select = field == Field::Model && model_is_select(&agent.provider);
   if field.is_slider() {
@@ -1679,15 +1730,25 @@ fn field_value(
       None => format!("?/{}", options.len()),
     };
     let arrows = if focused { FG } else { DIM };
+    // a cli found on PATH gets a tick after its name; not found is red (see
+    // the color below) rather than decorated, the hint line says why
+    let is_cli_provider_field = field == Field::Provider && crate::llm_cli::is_cli_provider(&agent.provider);
+    let display_value = if is_cli_provider_field && cli_installed == Some(true) {
+      format!("{} ✅", value)
+    } else {
+      value.clone()
+    };
     // padded, so the ▶ and the counter do not jump as the value changes
     let body_width = width.saturating_sub(counter.chars().count() + 6);
-    let body = pad(&cut(&value, body_width), body_width, ' ');
+    let body = pad(&cut(&display_value, body_width), body_width, ' ');
     // a model picked while a cli or ollama no longer offers it (an ollama
     // pull removed, a subscription's catalog changed) is flagged in red
-    // rather than silently shown as if it were still a live choice
+    // rather than silently shown as if it were still a live choice; a cli
+    // provider not found on PATH gets the same treatment
     let missing =
       field == Field::Model && model_options_authoritative && at.is_none() && !value.trim().is_empty();
-    let value_color = if missing {
+    let not_found = is_cli_provider_field && cli_installed == Some(false);
+    let value_color = if missing || not_found {
       RED
     } else if focused {
       FG

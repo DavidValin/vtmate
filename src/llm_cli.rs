@@ -72,10 +72,30 @@ pub fn cli_hint(provider: &str) -> String {
   }
 }
 
+/// Whether `provider`'s cli binary is actually on PATH right now - not
+/// whether it is logged in, just whether it exists to run at all.
+pub fn is_installed(provider: &str) -> bool {
+  match spec(&provider.trim().to_lowercase()) {
+    Some(s) => !which_missing(s.binary),
+    None => false,
+  }
+}
+
+/// Whether `provider` has a real model-listing command of its own. Several
+/// clis have no such command at all (checked against their own `--help` or
+/// documentation - see `spec`), so for those the Model field stays free
+/// text instead of a picker with nothing real to offer.
+pub fn has_model_listing(provider: &str) -> bool {
+  spec(&provider.trim().to_lowercase())
+    .map(|s| s.list_cmd.is_some())
+    .unwrap_or(false)
+}
+
 /// Retrieve the models a cli reports, blocking with a short timeout so the
 /// settings popup never hangs on a cli that stalls (e.g. waiting on a login
-/// prompt it cannot show non-interactively). Falls back to a small curated
-/// list for the several clis that have no model-listing command at all.
+/// prompt it cannot show non-interactively). Only meaningful when
+/// `has_model_listing` is true; there is no invented fallback list for the
+/// clis that have no listing command of their own.
 pub fn list_models(provider: &str) -> Result<Vec<String>, String> {
   let provider = provider.trim().to_lowercase();
   let Some(spec) = spec(&provider) else {
@@ -85,7 +105,10 @@ pub fn list_models(provider: &str) -> Result<Vec<String>, String> {
     return Err(format!("'{}' is not installed or not on PATH", spec.binary));
   }
   let Some(list_args) = spec.list_cmd else {
-    return Ok(spec.static_models.iter().map(|s| s.to_string()).collect());
+    return Err(format!(
+      "'{}' has no command to list its models; type the model name",
+      spec.binary
+    ));
   };
 
   let (tx, rx) = std::sync::mpsc::channel();
@@ -294,10 +317,10 @@ struct Spec {
   binary: &'static str,
   output: OutputKind,
   /// Args (after the binary) that print one model id per line, when the cli
-  /// has a real listing command.
+  /// has a real listing command. `None` for a cli with no such command -
+  /// there is no invented list standing in for one; the Model field is
+  /// plain text for those instead of a picker.
   list_cmd: Option<&'static [&'static str]>,
-  /// Fallback offered when `list_cmd` is `None`, or as a seed otherwise.
-  static_models: &'static [&'static str],
 }
 
 fn spec(provider: &str) -> Option<Spec> {
@@ -306,85 +329,56 @@ fn spec(provider: &str) -> Option<Spec> {
       binary: "claude",
       output: OutputKind::ClaudeStreamJson,
       list_cmd: None,
-      static_models: &[
-        "sonnet",
-        "opus",
-        "haiku",
-        "fable",
-        "claude-opus-4-7",
-        "claude-sonnet-4-6",
-        "claude-haiku-4-5",
-      ],
     },
     "codex-cli" => Spec {
       binary: "codex",
       output: OutputKind::CodexJson,
       list_cmd: None,
-      static_models: &["gpt-5.1-codex", "gpt-5.1", "gpt-5-codex", "o3"],
     },
     "gemini-cli" => Spec {
       binary: "gemini",
       output: OutputKind::PlainText,
       list_cmd: None,
-      static_models: &[
-        "gemini-3-pro",
-        "gemini-3-flash",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
-      ],
     },
     "copilot-cli" => Spec {
       binary: "copilot",
       output: OutputKind::PlainText,
       list_cmd: None,
-      static_models: &[
-        "claude-sonnet-4.5",
-        "claude-sonnet-4",
-        "claude-opus-4.5",
-        "gpt-5",
-      ],
     },
     "kiro-cli" => Spec {
       binary: "kiro-cli",
       output: OutputKind::PlainText,
       list_cmd: None,
-      static_models: &["claude-sonnet-4.6", "claude-opus-4.7"],
     },
     "vibe-cli" => Spec {
       binary: "vibe",
       output: OutputKind::PlainText,
       list_cmd: None,
-      static_models: &["mistral-medium-3.5", "mistral-large-3", "codestral-3"],
     },
     "hermes-cli" => Spec {
       binary: "hermes",
       output: OutputKind::PlainText,
       list_cmd: None,
-      static_models: &["anthropic/claude-sonnet-4.6", "hermes-4-405b", "hermes-4-70b"],
     },
     "opencode-cli" => Spec {
       binary: "opencode",
       output: OutputKind::OpencodeJson,
       list_cmd: Some(&["models"]),
-      static_models: &[],
     },
     "pi-cli" => Spec {
       binary: "pi",
       output: OutputKind::PiJson,
       list_cmd: Some(&["--list-models"]),
-      static_models: &[],
     },
     "aichat-cli" => Spec {
       binary: "aichat",
       output: OutputKind::PlainText,
       list_cmd: Some(&["--list-models"]),
-      static_models: &[],
     },
     "grok-cli" => Spec {
       binary: "grok",
       output: OutputKind::PlainText,
       list_cmd: None,
-      static_models: &["grok-4.6", "grok-build-0.1"],
     },
     _ => return None,
   })
