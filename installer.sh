@@ -152,14 +152,37 @@ resolve_dirs() { # sets BIN_DIR LIB_DIR SUDO
       BIN_DIR="$HOME/.local/bin"; LIB_DIR="$HOME/.local/lib/$APP"
     fi
   fi
-  if [ "$SCOPE" = "system" ] && [ "$OS_NAME" != "windows" ] && [ "$(id -u)" -ne 0 ]; then
-    command -v sudo >/dev/null 2>&1 || die "system-wide install needs root or sudo"
-    SUDO="sudo"
+  # Windows has no sudo: a system-wide install needs the shell itself to be
+  # elevated (Git Bash / MSYS started with "Run as administrator").
+  if [ "$SCOPE" = "system" ]; then
+    if [ "$OS_NAME" = "windows" ]; then
+      is_admin || die "system-wide install needs an Administrator shell: right-click Git Bash and choose 'Run as administrator', or install for this user only (--scope user)"
+    elif [ "$(id -u)" -ne 0 ]; then
+      command -v sudo >/dev/null 2>&1 || die "system-wide install needs root or sudo"
+      SUDO="sudo"
+    fi
   fi
+}
+
+# is_admin -> true in an elevated Windows shell. MSYS maps the Administrators
+# group to gid 544; "net session" only succeeds when elevated.
+is_admin() {
+  id -G 2>/dev/null | tr ' ' '\n' | grep -qx 544 && return 0
+  net session >/dev/null 2>&1
 }
 
 # run a command with sudo when the target needs it
 priv() { if [ -n "$SUDO" ]; then $SUDO "$@"; else "$@"; fi; }
+
+# rm_any FILE - remove a file wherever it lives, escalating only where that
+# is possible (sudo on Linux/macOS; on Windows the shell is elevated or not).
+rm_any() {
+  [ -e "$1" ] || return 0
+  if [ -w "$(dirname "$1")" ]; then rm -f "$1"
+  elif [ "$OS_NAME" != "windows" ] && command -v sudo >/dev/null 2>&1; then sudo rm -f "$1"
+  else rm -f "$1" 2>/dev/null || { warn "could not remove $1 (needs $([ "$OS_NAME" = windows ] && echo Administrator || echo root))"; return 0; }
+  fi
+}
 
 # -------------------------
 # PATH persistence
@@ -240,7 +263,7 @@ remove_installed() { # from manifest + anything at the resolved locations
     while IFS= read -r f; do
       [ -n "$f" ] || continue
       if [ -e "$f" ]; then
-        if [ -w "$(dirname "$f")" ]; then rm -f "$f"; else sudo rm -f "$f" 2>/dev/null || rm -f "$f"; fi
+        rm_any "$f"
         say "Removed $f"
       fi
     done < "$MANIFEST"
