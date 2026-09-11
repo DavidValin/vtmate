@@ -18,6 +18,53 @@ pub fn looks_like_gpu_failure(msg: &str) -> bool {
     .any(|needle| msg.contains(needle))
 }
 
+/// What to *tell someone* about a GPU failure, as one short phrase.
+///
+/// `looks_like_gpu_failure` decides whether to fall back; this decides what
+/// the line on screen says while it happens. The raw text is not fit to show:
+/// ONNX Runtime reports a full card as around fifteen lines of C++ template
+/// signatures, absolute paths from the machine it was built on, and the
+/// `cublasCreate` call site - inside which the only word that matters to
+/// anyone is "memory". Printing that mid-conversation buries the one thing
+/// the user can act on, so the detail goes to the log at a level only
+/// `--verbose` shows and the screen gets the sentence.
+///
+/// Unrecognised trouble deliberately gets a vague phrase rather than a guess:
+/// the fallback happens either way, and being wrong about *why* is worse than
+/// admitting the card simply refused.
+pub fn describe_gpu_failure(msg: &str) -> &'static str {
+  let msg = msg.to_ascii_lowercase();
+  let has = |needles: &[&str]| needles.iter().any(|needle| msg.contains(needle));
+
+  // Checked before the initialisation cases below: a card that is merely full
+  // often reports it *as* a failure to initialise something (cuBLAS cannot
+  // create its handle without a workspace), and "out of memory" is both the
+  // likelier cause and the more useful thing to be told.
+  if has(&[
+    "alloc_failed",
+    "out of memory",
+    "outofmemory",
+    "cudaerrormemoryallocation",
+    "cuda_error_out_of_memory",
+  ]) {
+    return "the GPU is out of memory";
+  }
+  if has(&[
+    "no cuda-capable device",
+    "cudaerrornodevice",
+    "no kernel image",
+  ]) {
+    return "no usable GPU was found";
+  }
+  if has(&["driver version", "cudaerrorinsufficientdriver"]) {
+    return "the GPU driver is too old for this build";
+  }
+  if has(&["not_initialized", "initializationerror"]) {
+    return "the GPU could not be initialised";
+  }
+  "the GPU refused the work"
+}
+
 use crossterm::cursor::Show;
 use crossterm::{
   cursor::MoveTo,

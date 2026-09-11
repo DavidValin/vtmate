@@ -278,9 +278,14 @@ impl StreamingTts {
               crate::log::log(
                 "warning",
                 &format!(
-                  "[supertonic2_tts] GPU synthesis failed ({}); falling back to the CPU for the rest of this run",
-                  e
+                  "[supertonic2_tts] {}; falling back to the CPU for the rest of this run",
+                  crate::util::describe_gpu_failure(&e.to_string())
                 ),
+              );
+              // The unabridged thing, for whoever is actually debugging the card.
+              crate::log::log(
+                "info",
+                &format!("[supertonic2_tts] GPU error in full: {}", e),
               );
               if !reload_engine_on_cpu(&engine, &rt) {
                 break;
