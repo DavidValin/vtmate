@@ -172,16 +172,16 @@ api_key = sk-ant-...
 The quickest way is to press `Control+S` while vtmate is running: a popup opens with the list of your agents, and everything you change there is written to the settings file when you save it.
 
 ```
-┌ Settings - 2 agents ────────────────────────────────────────────────────────────────────┐
-│ NAME        LANG  MODE  TTS         VOICE   SPD   PROVIDER    MODEL          PROMPT     │
-│                                                                                         │
+┌ Settings - 2 agents ─────────────────────────────────────────────────────────────────────┐
+│ NAME        LANG  MODE  TTS         VOICE   SPD   PROVIDER    MODEL          PROMPT      │
+│                                                                                          │
 │ main agent  en    PTT   supertonic3  M1      1.1x  ollama      llama3.2:3b    You are... │
 │ explainer   en    LIVE  supertonic3  F1      1.1x  ollama      llama3.2:3b    You exp... │
-│                                                                                         │
-│ ─────────────────────────────────────────────────────────────────────────────────────── │
-│ n new agent   e edit agent   d delete agent   ↑/↓ move                                  │
-│   [ Save ]   [ Cancel ]                                                                 │
-└─────────────────────────────────────────────────────────────────────────────────────────┘
+│                                                                                          │
+│ ───────────────────────────────────────────────────────────────────────────────────────  │
+│ n new agent   e edit agent   d delete agent   ↑/↓ move                                   │
+│   [ Save ]   [ Cancel ]                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 * `n` adds an agent (starting from the one you are on), `e` edits the selected one, `d` removes it after asking.
