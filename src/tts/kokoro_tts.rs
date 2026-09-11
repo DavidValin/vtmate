@@ -5,7 +5,7 @@
 use super::{KOKORO_ENGINE, SpeakOutcome};
 use crate::audio::AudioChunk;
 use crossbeam_channel::Sender;
-use kokoro_micro::TtsEngine;
+use kokoro_micro::{Device, TtsEngine};
 use std::sync::{
   Arc, Mutex,
   atomic::{AtomicBool, AtomicU64, Ordering},
@@ -23,27 +23,96 @@ pub struct StreamingTts {
   gain: f32,
 }
 
-// Engine initialization
-pub fn start_kokoro_engine() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-  KOKORO_ENGINE.set(Arc::new(Mutex::new(load_engine()?))).ok();
-  Ok(())
-}
+/// Set once kokoro-micro has fallen back to the CPU, so later loads go
+/// straight there instead of probing a card that is already refusing.
+///
+/// kokoro-micro remembers a failed GPU *inside* the engine it rebuilds
+/// (`TtsEngine::fallback_to_cpu`), which is the right place for it right up
+/// until the engine is unloaded - then the memory of it goes too, and the next
+/// load would start on the dead card again. This flag outlives the engine so
+/// it does not. The other two engines keep their own `FORCE_CPU` for the same
+/// reason.
+static FORCE_CPU: AtomicBool = AtomicBool::new(false);
 
-/// Load the Kokoro model. `TtsEngine::new` is Device::Auto: the GPU when this
-/// build carries a GPU execution provider (`ort-cuda`) and it comes up, the CPU
-/// otherwise. Unlike the other two engines this needs no fallback of ours -
+/// Load the Kokoro model. Device::Auto is the GPU when this build carries a
+/// GPU execution provider (`ort-cuda`) and it comes up, the CPU otherwise;
+/// FORCE_CPU is the stronger statement made after a GPU failure that Auto
+/// cannot see, because it happened past initialisation.
+///
+/// Unlike the other two engines this needs no per-phrase fallback of ours:
 /// kokoro-micro retries on the CPU itself when inference fails on the GPU, and
 /// a second layer here would only synthesize every failed chunk twice.
 fn load_engine() -> Result<TtsEngine, Box<dyn std::error::Error + Send + Sync>> {
   let rt = tokio::runtime::Builder::new_current_thread()
     .enable_all()
     .build()?;
-  let engine = rt.block_on(TtsEngine::new())?;
+  let device = if FORCE_CPU.load(Ordering::SeqCst) {
+    Device::Cpu
+  } else {
+    Device::Auto
+  };
+  let engine = rt.block_on(TtsEngine::new_on_device(device))?;
   crate::log::log(
     "info",
     &format!("[kokoro_tts] running on {}", engine.backend()),
   );
   Ok(engine)
+}
+
+/// Notice kokoro-micro's own GPU -> CPU fallback and record it in FORCE_CPU,
+/// so an engine loaded again after an unload does not start on the GPU that
+/// just failed. Called after each phrase; the check is a cheap field read.
+fn note_backend(engine: &Arc<Mutex<TtsEngine>>) {
+  if FORCE_CPU.load(Ordering::SeqCst) {
+    return;
+  }
+  let on_cpu = match engine.lock() {
+    Ok(e) => !e.backend().is_gpu(),
+    Err(_) => return,
+  };
+  if on_cpu {
+    FORCE_CPU.store(true, Ordering::SeqCst);
+    crate::log::log(
+      "info",
+      "[kokoro_tts] now on the CPU; later loads skip the GPU for the rest of this run",
+    );
+  }
+}
+
+/// The shared engine, loading it if it is not resident. Built without the slot
+/// locked: loading takes seconds, and blocking every other speaker on it is
+/// worse than the rare double build, where the engine already stored wins so
+/// callers still share one.
+fn engine_handle() -> Result<Arc<Mutex<TtsEngine>>, Box<dyn std::error::Error + Send + Sync>> {
+  if let Some(e) = KOKORO_ENGINE
+    .lock()
+    .unwrap_or_else(|e| e.into_inner())
+    .as_ref()
+  {
+    return Ok(e.clone());
+  }
+  let engine = Arc::new(Mutex::new(load_engine()?));
+  let mut slot = KOKORO_ENGINE.lock().unwrap_or_else(|e| e.into_inner());
+  if let Some(e) = slot.as_ref() {
+    return Ok(e.clone());
+  }
+  *slot = Some(engine.clone());
+  Ok(engine)
+}
+
+/// Load the engine if it is not loaded already.
+pub fn ensure_loaded() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  engine_handle().map(|_| ())
+}
+
+/// Release this module's handle on the engine. Returns whether one was held.
+/// A thread still speaking keeps its own clone alive until the phrase ends.
+pub fn unload() -> bool {
+  KOKORO_ENGINE
+    .lock()
+    .unwrap_or_else(|e| e.into_inner())
+    .take()
+    .is_some()
 }
 
 // Speak via Kokoro
@@ -55,7 +124,7 @@ pub fn speak_via_kokoro(
   interrupt_counter: Arc<AtomicU64>,
   expected_interrupt: u64,
 ) -> Result<SpeakOutcome, Box<dyn std::error::Error + Send + Sync>> {
-  let engine = KOKORO_ENGINE.get_or_init(|| Arc::new(Mutex::new(load_engine().unwrap())));
+  let engine = engine_handle()?;
 
   let mut streaming = StreamingTts::new(engine.clone());
   streaming.set_voice(voice);
@@ -89,6 +158,7 @@ pub fn speak_via_kokoro(
   // Synthesis finished (normally or interrupted) - stop the monitor thread so it doesn't leak
   stop_monitor.store(true, Ordering::Relaxed);
   let _ = monitor_handle.join();
+  note_backend(&engine);
 
   match res {
     Ok(_) => Ok(SpeakOutcome::Completed),

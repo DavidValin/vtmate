@@ -44,11 +44,40 @@ pub struct StreamingTts {
   gain: f32,
 }
 
-// Engine initialization
-pub fn start_supertonic2_engine() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-  let engine = load_engine()?;
-  SUPERTONIC2_ENGINE.set(Arc::new(Mutex::new(engine))).ok();
-  Ok(())
+/// The shared engine, loading it if it is not resident. Built without the slot
+/// locked: loading takes seconds, and blocking every other speaker on it is
+/// worse than the rare double build, where the engine already stored wins so
+/// callers still share one.
+fn engine_handle() -> Result<Arc<Mutex<TtsEngine>>, Box<dyn std::error::Error + Send + Sync>> {
+  if let Some(e) = SUPERTONIC2_ENGINE
+    .lock()
+    .unwrap_or_else(|e| e.into_inner())
+    .as_ref()
+  {
+    return Ok(e.clone());
+  }
+  let engine = Arc::new(Mutex::new(load_engine()?));
+  let mut slot = SUPERTONIC2_ENGINE.lock().unwrap_or_else(|e| e.into_inner());
+  if let Some(e) = slot.as_ref() {
+    return Ok(e.clone());
+  }
+  *slot = Some(engine.clone());
+  Ok(engine)
+}
+
+/// Load the engine if it is not loaded already.
+pub fn ensure_loaded() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  engine_handle().map(|_| ())
+}
+
+/// Release this module's handle on the engine. Returns whether one was held.
+/// A thread still speaking keeps its own clone alive until the phrase ends.
+pub fn unload() -> bool {
+  SUPERTONIC2_ENGINE
+    .lock()
+    .unwrap_or_else(|e| e.into_inner())
+    .take()
+    .is_some()
 }
 
 /// Set once the GPU has failed during synthesis: engines built afterwards go
@@ -131,14 +160,7 @@ pub fn speak_via_supertonic2(
   if text.is_empty() {
     return Ok(SpeakOutcome::Completed);
   }
-  let engine = match SUPERTONIC2_ENGINE.get() {
-    Some(e) => e.clone(),
-    None => {
-      let e = Arc::new(Mutex::new(load_engine()?));
-      let _ = SUPERTONIC2_ENGINE.set(e);
-      SUPERTONIC2_ENGINE.get().expect("engine just set").clone()
-    }
-  };
+  let engine = engine_handle()?;
 
   // Check early interrupt
 

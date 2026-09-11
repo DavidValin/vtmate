@@ -389,6 +389,8 @@ impl Controller {
       state.debate_turn.store(0, Ordering::SeqCst);
       *state.debate_subject.lock().unwrap() = String::new();
       state.debate_paused.store(false, Ordering::SeqCst);
+      // Back to the selected agent alone; free the debate-only engines.
+      crate::tts::apply_residency(state);
     }
     state.reset_conversation();
     self.ui_line("");
