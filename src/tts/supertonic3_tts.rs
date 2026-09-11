@@ -694,6 +694,24 @@ fn get_or_init_engine() -> Result<Arc<TtsEngine>, Box<dyn std::error::Error + Se
   Ok(engine)
 }
 
+/// Load the engine if it is not loaded already.
+pub fn ensure_loaded() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  get_or_init_engine().map(|_| ())
+}
+
+/// Release this module's handle on the engine. Returns whether one was held.
+/// A thread still speaking keeps its own clone alive until the phrase ends.
+///
+/// FORCE_CPU is deliberately left set: an unload says no agent needs this
+/// engine right now, not that the card that refused has recovered.
+pub fn unload() -> bool {
+  SUPERTONIC3_ENGINE
+    .lock()
+    .unwrap_or_else(|e| e.into_inner())
+    .take()
+    .is_some()
+}
+
 static STYLE_CACHE: OnceLock<Mutex<HashMap<String, Arc<Style>>>> = OnceLock::new();
 
 fn get_or_load_style(voice: &str) -> Result<Arc<Style>, Box<dyn std::error::Error + Send + Sync>> {

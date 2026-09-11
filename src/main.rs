@@ -192,15 +192,12 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Read the filename or stdin
     let content = util::read_file(filename);
 
-    // Initialize TTS engines only if needed
-    let use_supertonic2 = agents.iter().any(|a| a.tts == "supertonic2");
-    let use_kokoro = agents.iter().any(|a| a.tts == "kokoro");
-    if use_supertonic2 {
-      tts::supertonic2_tts::start_supertonic2_engine()?;
-    }
-    if use_kokoro {
-      tts::kokoro_tts::start_kokoro_engine()?;
-    }
+    // Read-file mode speaks as one agent for the whole run and cannot switch,
+    // so its engine is loaded here, up front, and the first phrase does not
+    // pay for it. Conversation mode instead follows the agents in play - see
+    // tts::apply_residency. This used to load an engine for every agent in the
+    // settings file, including agents that were never selected.
+    tts::load_engine_named(&settings.tts)?;
 
     // Initialize global state for TTS thread
     let app_state = Arc::new(state::AppState::with_agent(
@@ -787,6 +784,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     *state.debate_subject.lock().unwrap() = subject;
     *state.debate_agents.lock().unwrap() = vec![agent1, agent2];
     state.debate_turn.store(0, Ordering::SeqCst);
+    tts::apply_residency(&state);
   }
 
   // If running in interactive terminal, block until keyboard thread exits.

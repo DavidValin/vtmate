@@ -334,6 +334,8 @@ fn save(state: &AppState) -> Vec<String> {
     .unwrap_or(selected);
   *state.agents.lock().unwrap() = reloaded;
   state.apply_agent(&active);
+  // Saving can change the active agent's tts, not just pick another agent.
+  crate::tts::apply_residency(state);
 
   state.settings_ui.lock().unwrap().open = false;
   vec![

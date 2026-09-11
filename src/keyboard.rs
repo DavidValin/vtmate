@@ -278,6 +278,9 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
           state.debate_agents.lock().unwrap().clear();
           state.debate_turn.store(0, Ordering::SeqCst);
           *state.debate_subject.lock().unwrap() = String::new();
+          // Back to the selected agent alone. An engine it shares with one of
+          // the debate agents is kept, not torn down and loaded again.
+          crate::tts::apply_residency(state);
           // Interrupt any ongoing TTS playback
           ctx.interrupt_counter.fetch_add(1, Ordering::SeqCst);
           state
@@ -352,6 +355,8 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
           *state.debate_subject.lock().unwrap() =
             "Let's debate. What should we discuss?".to_string();
           state.debate_enabled.store(true, Ordering::SeqCst);
+          // Both debate agents speak from here on, so both engines are wanted.
+          crate::tts::apply_residency(state);
           state.reset_conversation();
           state.debate_modal_visible.store(false, Ordering::SeqCst);
 
@@ -533,6 +538,9 @@ pub fn switch_agent(
   tx_ui: &Sender<String>,
 ) {
   state.apply_agent(new_agent);
+  // The new agent may speak through a different engine than the old one: load
+  // what it needs and free what nothing needs any more.
+  crate::tts::apply_residency(state);
   // Reset conversation history when changing agents
   state.reset_conversation();
   let settings_path = state.settings_path.lock().unwrap().clone();

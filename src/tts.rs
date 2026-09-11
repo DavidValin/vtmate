@@ -17,7 +17,6 @@ pub mod opentts_tts;
 pub mod supertonic2_tts;
 pub mod supertonic3_tts;
 
-use std::sync::OnceLock;
 use std::sync::{Arc, Mutex, atomic::AtomicU64};
 
 // API
@@ -39,11 +38,112 @@ pub enum SpeakOutcome {
   Interrupted,
 }
 
-static KOKORO_ENGINE: OnceLock<Arc<Mutex<TtsEngine>>> = OnceLock::new();
-static SUPERTONIC2_ENGINE: OnceLock<Arc<Mutex<Supertonic2TtsEngine>>> = OnceLock::new();
-/// Replaceable, unlike the two above: when the GPU refuses mid-synthesis the
-/// engine is rebuilt on the CPU in place (supertonic3_tts::rebuild_on_cpu).
+// All three share one shape: `None` when the engine is not loaded, and
+// replaceable, so an engine can be dropped when no agent needs it and rebuilt
+// on the CPU when the GPU refuses (supertonic3_tts::rebuild_on_cpu). They were
+// `OnceLock` before, which is a one-way door - once set it can never be
+// cleared, so every engine ever spoken through stayed resident for the run.
+static KOKORO_ENGINE: Mutex<Option<Arc<Mutex<TtsEngine>>>> = Mutex::new(None);
+static SUPERTONIC2_ENGINE: Mutex<Option<Arc<Mutex<Supertonic2TtsEngine>>>> = Mutex::new(None);
 static SUPERTONIC3_ENGINE: Mutex<Option<Arc<supertonic3_tts_crate::TtsEngine>>> = Mutex::new(None);
+
+// Engine residency
+// ------------------------------------------------------------------
+// Model weights are the largest thing vtmate holds, and on a CUDA build they
+// sit on the card: supertonic3 is ~400 MB of ONNX sessions, supertonic2 ~260.
+// Which engines are *needed* changes as agents are switched and debates begin
+// and end, so what stays loaded follows that set instead of accumulating every
+// engine ever spoken through. A card that fills up mid-synthesis is a real
+// failure, not a theoretical one - see `util::describe_gpu_failure`.
+//
+// "opentts" is absent on purpose: it is a network service that holds nothing
+// locally, so there is nothing to load or free.
+const LOADABLE_ENGINES: [&str; 3] = ["kokoro", "supertonic2", "supertonic3"];
+
+/// Held across a whole residency change, so two of them (an agent switch
+/// racing a debate ending, say) cannot interleave and leave an engine both
+/// wanted and unloaded.
+static RESIDENCY: Mutex<()> = Mutex::new(());
+
+/// The engines the current mode needs: both debate agents while a debate runs,
+/// otherwise the selected agent alone.
+pub fn wanted_engines(state: &crate::state::AppState) -> Vec<String> {
+  use std::sync::atomic::Ordering;
+  if state.debate_enabled.load(Ordering::SeqCst) {
+    let agents = state.debate_agents.lock().unwrap_or_else(|e| e.into_inner());
+    if !agents.is_empty() {
+      let mut wanted: Vec<String> = agents.iter().map(|a| a.tts.clone()).collect();
+      wanted.sort();
+      wanted.dedup();
+      return wanted;
+    }
+  }
+  vec![state.tts.lock().unwrap_or_else(|e| e.into_inner()).clone()]
+}
+
+/// Make the set of loaded engines match what the current mode needs. Call it
+/// after anything that changes which agents can speak: switching agent,
+/// entering or leaving a debate.
+///
+/// The work happens on its own thread. Callers are the keyboard and daemon
+/// threads, and loading a model takes seconds - long enough that doing it
+/// inline would freeze the UI on every agent switch.
+pub fn apply_residency(state: &crate::state::AppState) {
+  let wanted = wanted_engines(state);
+  std::thread::spawn(move || apply_residency_set(&wanted));
+}
+
+/// Load what is missing, drop what is not wanted. An engine wanted both before
+/// and after a transition is left alone: leaving a debate for an agent that
+/// shares one of its engines must not tear down a model that is already there.
+///
+/// Dropping is releasing this module's handle, not a guarantee the memory is
+/// back - a thread still speaking holds its own `Arc` and frees when it
+/// finishes its phrase.
+fn apply_residency_set(wanted: &[String]) {
+  let _guard = RESIDENCY.lock().unwrap_or_else(|e| e.into_inner());
+  // Free before loading: on a card that is already tight, the other order
+  // needs room for both at once, which is the situation being avoided.
+  for name in LOADABLE_ENGINES {
+    if !wanted.iter().any(|w| w == name) {
+      let dropped = match name {
+        "kokoro" => kokoro_tts::unload(),
+        "supertonic2" => supertonic2_tts::unload(),
+        _ => supertonic3_tts::unload(),
+      };
+      if dropped {
+        crate::log::log(
+          "info",
+          &format!("[tts] unloaded {}: no active agent uses it", name),
+        );
+      }
+    }
+  }
+  for name in LOADABLE_ENGINES {
+    if wanted.iter().any(|w| w == name) {
+      if let Err(e) = load_engine_named(name) {
+        // Not fatal: the engine stays unloaded and the next phrase tries again
+        // on the speaking thread, where the failure reaches the user.
+        crate::log::log(
+          "warning",
+          &format!("[tts] could not preload {}: {}", name, e),
+        );
+      }
+    }
+  }
+}
+
+/// Load one engine by name if it is not loaded already. Used both by the
+/// residency pass and by read-file mode, which loads its one engine up front.
+pub fn load_engine_named(name: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  match name {
+    "kokoro" => kokoro_tts::ensure_loaded(),
+    "supertonic2" => supertonic2_tts::ensure_loaded(),
+    "supertonic3" => supertonic3_tts::ensure_loaded(),
+    // opentts, and anything unrecognised, holds nothing to load
+    _ => Ok(()),
+  }
+}
 
 // Supported languages for Supertonic2 TTS
 static SUPERTONIC2_LANGS: &[&str] = &["en", "es", "fr", "ko", "pt"];
