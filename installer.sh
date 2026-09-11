@@ -389,14 +389,30 @@ detect_vulkan() {
   command -v vulkaninfo >/dev/null 2>&1 && return 0
   [ -f "/c/Windows/System32/vulkaninfo.exe" ] && return 0
   ls "/c/Program Files/Vulkan SDK/"*/Bin/vulkaninfo.exe >/dev/null 2>&1 && return 0
-  [ "$OS_NAME" = "linux" ] && ls /usr/lib/libvulkan.so.1 /usr/lib/*/libvulkan.so.1 /usr/lib64/libvulkan.so.1 >/dev/null 2>&1 && return 0
+  # One ls with several operands exits non-zero when ANY of them is missing, so
+  # test the paths one at a time - the loader lives in exactly one of them, and
+  # the multi-operand form made this check fail on every normal Linux system.
+  if [ "$OS_NAME" = "linux" ]; then
+    for f in /usr/lib/libvulkan.so.1 /usr/lib/*/libvulkan.so.1 /usr/lib64/libvulkan.so.1; do
+      [ -e "$f" ] && return 0
+    done
+  fi
   command -v vulkaninfo.exe >/dev/null 2>&1 && vulkaninfo.exe >/dev/null 2>&1 && return 0
   return 1
 }
 # have_so libcudart.so.12 -> found through ldconfig, LD_LIBRARY_PATH or the usual CUDA dirs
 have_so() {
   ldconfig -p 2>/dev/null | grep -q "$1" && return 0
-  dirs="$(printf '%s' "${LD_LIBRARY_PATH:-}" | tr ':' ' ') /usr/local/cuda/lib64 /opt/cuda/lib64 /opt/cuda/targets/x86_64-linux/lib /usr/lib/x86_64-linux-gnu /usr/lib64 /usr/lib $LIB_DIR"
+  # Unquoted in the for below, so the globs expand; an unmatched glob stays
+  # literal and simply fails the -e test. cuda-13.0 without the /usr/local/cuda
+  # symlink, and the targets/<arch>/lib layout the symlink usually hides, both
+  # need naming explicitly.
+  dirs="$(printf '%s' "${LD_LIBRARY_PATH:-}" | tr ':' ' ')
+    /usr/local/cuda/lib64 /usr/local/cuda/targets/*/lib
+    /usr/local/cuda-*/lib64 /usr/local/cuda-*/targets/*/lib
+    /opt/cuda/lib64 /opt/cuda/targets/*/lib
+    /opt/cuda-*/lib64 /opt/cuda-*/targets/*/lib
+    /usr/lib/x86_64-linux-gnu /usr/lib64 /usr/lib $LIB_DIR"
   for d in $dirs; do [ -e "$d/$1" ] && return 0; done
   return 1
 }
@@ -436,6 +452,28 @@ cuda_runtime_missing() { # MAJOR -> prints what is missing for the cudaMAJOR var
     else have_dll "$l" || printf '%s ' "$l"; fi
   done
 }
+# cuda_unreachable_dirs "LIB..." -> directories holding one of LIB that the
+# dynamic loader does not search: pip wheels (nvidia-*-cu13) and conda envs.
+# vtmate loads CUDA through the loader, not through its own rpath, so a library
+# found only here does NOT count as present - installing the cuda build would
+# just fail the smoke test. Naming the directory turns "missing libcudnn.so.9"
+# into something the user can act on.
+cuda_unreachable_dirs() {
+  found=""
+  for l in $1; do
+    for d in \
+      "${VIRTUAL_ENV:-/nonexistent}"/lib/python*/site-packages/nvidia/*/lib \
+      "${CONDA_PREFIX:-/nonexistent}"/lib \
+      "${HOME:-/nonexistent}"/.local/lib/python*/site-packages/nvidia/*/lib \
+      /usr/lib/python*/site-packages/nvidia/*/lib \
+      /usr/lib/python*/dist-packages/nvidia/*/lib; do
+      [ -e "$d/$l" ] || continue
+      case " $found " in *" $d "*) ;; *) found="$found $d" ;; esac
+    done
+  done
+  printf '%s' "${found# }"
+}
+
 # driver_cuda_max -> the newest CUDA major the driver can run (nvidia-smi's
 # header line); empty when there is no nvidia-smi to ask. A CUDA 13 runtime
 # on a driver that stops at 12.x fails at load, so that major is skipped.
@@ -530,7 +568,10 @@ else
         if [ -n "$drv" ] && [ "$drv" -lt "$m" ]; then
           warn "cuda$m: the NVIDIA driver goes up to CUDA $drv.x only"
         else
-          warn "cuda$m: NVIDIA driver found, but the build also needs: $(cuda_runtime_missing "$m")"
+          miss="$(cuda_runtime_missing "$m")"
+          warn "cuda$m: NVIDIA driver found, but the build also needs: $miss"
+          reach="$(cuda_unreachable_dirs "$miss")"
+          [ -n "$reach" ] && warn "  some of those are under: $reach - the loader does not search there. Put the directory in /etc/ld.so.conf.d/ and run ldconfig (or export LD_LIBRARY_PATH), then rerun."
         fi
       done
       warn "Install the CUDA Toolkit 12.x or 13.x and cuDNN 9 and rerun, or force one with --variant cuda12|cuda13. Falling back to vulkan/cpu."
