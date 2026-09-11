@@ -1,10 +1,10 @@
 // ------------------------------------------------------------------
-//  Supertonic TTS (Supertonic 3, multilingual)
+//  Supertonic3 TTS (Supertonic 3, multilingual)
 // ------------------------------------------------------------------
 //
 // Thin wrapper around the `supertonic3-tts` crate. The model files are
 // embedded in the binary at build time (see build.rs / assets.rs) and
-// extracted to ~/.vtmate/tts/supertonic-model/{onnx,voice_styles} on first
+// extracted to ~/.vtmate/tts/supertonic3-model/{onnx,voice_styles} on first
 // run.
 
 use crate::audio::AudioChunk;
@@ -21,14 +21,14 @@ use supertonic3_tts::device::Device;
 use supertonic3_tts::helper::{Style, chunk_text, load_voice_style, max_chunk_length};
 use tokio::runtime::Runtime;
 
-use super::{SUPERTONIC_ENGINE, SpeakOutcome};
+use super::{SUPERTONIC3_ENGINE, SpeakOutcome};
 
 // API
 // ------------------------------------------------------------------
 
-pub const SUPERTONIC_VOICE_STYLES: [&str; 10] = supertonic3_tts::VOICE_STYLES;
+pub const SUPERTONIC3_VOICE_STYLES: [&str; 10] = supertonic3_tts::VOICE_STYLES;
 
-/// Languages selectable from vtmate settings for the 'supertonic' tts
+/// Languages selectable from vtmate settings for the 'supertonic3' tts
 /// (the model also accepts "na", language agnostic, but STT needs a
 /// concrete language so it is not offered).
 pub const SUPPORTED_LANGS: &[&str] = supertonic3_tts::SUPPORTED_LANGS;
@@ -38,8 +38,8 @@ pub const SUPPORTED_LANGS: &[&str] = supertonic3_tts::SUPPORTED_LANGS;
 /// vector-estimator time.
 const VOICE_QUALITY: usize = 5;
 
-// Speak via Supertonic
-pub fn speak_via_supertonic(
+// Speak via Supertonic3
+pub fn speak_via_supertonic3(
   text: &str,
   voice: &str,
   speed: f32,
@@ -87,7 +87,7 @@ pub fn speak_via_supertonic(
         crate::log::log(
           "warning",
           &format!(
-            "[supertonic_tts] GPU synthesis failed ({}); falling back to the CPU for the rest of this run",
+            "[supertonic3_tts] GPU synthesis failed ({}); falling back to the CPU for the rest of this run",
             e
           ),
         );
@@ -106,11 +106,11 @@ pub fn speak_via_supertonic(
             crate::log::log(
               "error",
               &format!(
-                "[supertonic_tts] synthesis failed on the CPU too for chunk '{}': {}",
+                "[supertonic3_tts] synthesis failed on the CPU too for chunk '{}': {}",
                 chunk, e
               ),
             );
-            return Err(format!("supertonic synthesis failed: {}", e).into());
+            return Err(format!("supertonic3 synthesis failed: {}", e).into());
           }
         }
       }
@@ -118,11 +118,11 @@ pub fn speak_via_supertonic(
         crate::log::log(
           "error",
           &format!(
-            "[supertonic_tts] synthesis failed for chunk '{}': {}",
+            "[supertonic3_tts] synthesis failed for chunk '{}': {}",
             chunk, e
           ),
         );
-        return Err(format!("supertonic synthesis failed: {}", e).into());
+        return Err(format!("supertonic3 synthesis failed: {}", e).into());
       }
     };
     if samples.is_empty() {
@@ -140,7 +140,7 @@ pub fn speak_via_supertonic(
     if interrupt_counter.load(Ordering::SeqCst) != expected_interrupt {
       crate::log::log(
         "debug",
-        "[supertonic_tts] interrupted during synthesis: chunk discarded, not played",
+        "[supertonic3_tts] interrupted during synthesis: chunk discarded, not played",
       );
       return Ok(SpeakOutcome::Interrupted);
     }
@@ -372,7 +372,7 @@ fn run_voice_search(
   // (spectral envelope, pitch, tempo), not who it sounds like. It is bundled
   // and extracted alongside the rest of the Supertonic 3 model (see
   // build.rs / assets.rs), so it should always be there - the check is just
-  // defensive (e.g. a custom SUPERTONIC_DATA_DIRECTORY override).
+  // defensive (e.g. a custom SUPERTONIC3_DATA_DIRECTORY override).
   let speaker_model = model_root().join("speaker_encoder.onnx");
   let speaker_model = if speaker_model.is_file() {
     Some(speaker_model)
@@ -380,7 +380,7 @@ fn run_voice_search(
     crate::log::log(
       "warning",
       &format!(
-        "[supertonic_tts] speaker embedding model not found at {}; cloning without the speaker identity term, which will sound a lot less like the reference",
+        "[supertonic3_tts] speaker embedding model not found at {}; cloning without the speaker identity term, which will sound a lot less like the reference",
         speaker_model.display()
       ),
     );
@@ -398,7 +398,7 @@ fn run_voice_search(
   crate::log::log(
     "info",
     &format!(
-      "[supertonic_tts] {} voice \"{}\" ({}) from {}",
+      "[supertonic3_tts] {} voice \"{}\" ({}) from {}",
       log_verb, voice_name, language, wav_file
     ),
   );
@@ -453,7 +453,7 @@ fn run_voice_search(
   let cloned = rt
     .block_on(engine.clone_voice_with_progress(&reference, &options, progress))
     .map_err(|e| {
-      let msg = format!("[supertonic_tts] voice cloning failed: {}", e);
+      let msg = format!("[supertonic3_tts] voice cloning failed: {}", e);
       crate::log::log("error", &msg);
       msg
     })?;
@@ -562,7 +562,7 @@ fn validate_and_load_reference(
   crate::log::log(
     "warning",
     &format!(
-      "[supertonic_tts] '{}' has a broken wav header (data chunk declares {} bytes, {} available); repairing a temporary copy",
+      "[supertonic3_tts] '{}' has a broken wav header (data chunk declares {} bytes, {} available); repairing a temporary copy",
       wav_file, declared_len, available
     ),
   );
@@ -610,11 +610,11 @@ fn locate_data_chunk(bytes: &[u8]) -> Option<(usize, usize)> {
 
 /// Root of the extracted model: <root>/onnx/*.onnx and <root>/voice_styles/*.json
 pub fn model_root() -> PathBuf {
-  if let Some(dir) = std::env::var_os("SUPERTONIC_DATA_DIRECTORY") {
+  if let Some(dir) = std::env::var_os("SUPERTONIC3_DATA_DIRECTORY") {
     return PathBuf::from(dir);
   }
   let home = crate::util::get_user_home_path().expect("Could not determine home directory");
-  home.join(".vtmate").join("tts").join("supertonic-model")
+  home.join(".vtmate").join("tts").join("supertonic3-model")
 }
 
 /// Directory holding one `<voice>.json` per voice.
@@ -642,14 +642,14 @@ static FORCE_CPU: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool:
 /// Drop the shared engine and build it again pinned to the CPU.
 fn rebuild_on_cpu() -> Result<Arc<TtsEngine>, Box<dyn std::error::Error + Send + Sync>> {
   FORCE_CPU.store(true, Ordering::SeqCst);
-  if let Ok(mut slot) = SUPERTONIC_ENGINE.lock() {
+  if let Ok(mut slot) = SUPERTONIC3_ENGINE.lock() {
     *slot = None;
   }
   get_or_init_engine()
 }
 
 fn get_or_init_engine() -> Result<Arc<TtsEngine>, Box<dyn std::error::Error + Send + Sync>> {
-  if let Ok(slot) = SUPERTONIC_ENGINE.lock() {
+  if let Ok(slot) = SUPERTONIC3_ENGINE.lock() {
     if let Some(e) = slot.as_ref() {
       return Ok(e.clone());
     }
@@ -671,7 +671,7 @@ fn get_or_init_engine() -> Result<Arc<TtsEngine>, Box<dyn std::error::Error + Se
     .block_on(TtsEngine::on_device(onnx_dir.clone(), base, false, device))
     .map_err(|e| {
       let msg = format!(
-        "[supertonic_tts] failed to load model from {}: {}",
+        "[supertonic3_tts] failed to load model from {}: {}",
         onnx_dir.display(),
         e
       );
@@ -680,10 +680,10 @@ fn get_or_init_engine() -> Result<Arc<TtsEngine>, Box<dyn std::error::Error + Se
     })?;
   crate::log::log(
     "info",
-    &format!("[supertonic_tts] running on {}", engine.backend()),
+    &format!("[supertonic3_tts] running on {}", engine.backend()),
   );
   let engine = Arc::new(engine);
-  if let Ok(mut slot) = SUPERTONIC_ENGINE.lock() {
+  if let Ok(mut slot) = SUPERTONIC3_ENGINE.lock() {
     *slot = Some(engine.clone());
   }
   Ok(engine)
@@ -704,7 +704,7 @@ fn get_or_load_style(voice: &str) -> Result<Arc<Style>, Box<dyn std::error::Erro
   let style =
     load_voice_style(&[style_path.to_string_lossy().to_string()], false).map_err(|e| {
       let msg = format!(
-        "[supertonic_tts] failed to load voice style {}: {}",
+        "[supertonic3_tts] failed to load voice style {}: {}",
         style_path.display(),
         e
       );
@@ -731,17 +731,17 @@ mod tests {
   }
 
   // End-to-end synthesis against the real model. Needs the Supertonic 3 model
-  // extracted at ~/.vtmate/tts/supertonic-model (build.rs puts it there), so
+  // extracted at ~/.vtmate/tts/supertonic3-model (build.rs puts it there), so
   // it is ignored by default:
-  //   SUPERTONIC_TEST_OUT=/tmp cargo test --release -- --ignored supertonic
+  //   SUPERTONIC3_TEST_OUT=/tmp cargo test --release -- --ignored supertonic3
   #[test]
   #[ignore]
   fn synthesize_samples_to_wav() {
-    let engine = get_or_init_engine().expect("load supertonic model");
+    let engine = get_or_init_engine().expect("load supertonic3 model");
     let style = get_or_load_style("M1").expect("load voice style");
     let rt = runtime().expect("tokio runtime");
     let sample_rate = rt.block_on(engine.sample_rate()) as u32;
-    let out_dir = std::env::var("SUPERTONIC_TEST_OUT")
+    let out_dir = std::env::var("SUPERTONIC3_TEST_OUT")
       .map(PathBuf::from)
       .unwrap_or_else(|_| std::env::temp_dir());
 
@@ -781,7 +781,7 @@ mod tests {
         bits_per_sample: 16,
         sample_format: hound::SampleFormat::Int,
       };
-      let path = out_dir.join(format!("supertonic_{}.wav", lang));
+      let path = out_dir.join(format!("supertonic3_{}.wav", lang));
       let mut w = hound::WavWriter::create(&path, spec).unwrap();
       for s in &samples {
         w.write_sample((s.clamp(-1.0, 1.0) * 32767.0) as i16)
