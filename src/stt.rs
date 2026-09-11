@@ -144,8 +144,13 @@ impl Whisper {
       }
       crate::log::log(
         "warning",
-        &format!("Whisper GPU inference failed ({}); rebuilding on the CPU", err),
+        &format!(
+          "Whisper: {}; rebuilding on the CPU",
+          crate::util::describe_gpu_failure(&err)
+        ),
       );
+      // The unabridged thing, for whoever is actually debugging the card.
+      crate::log::log("info", &format!("Whisper GPU error in full: {}", err));
       *state = Self::build_state(&self.model_path, false)?;
       self.on_gpu.store(false, Ordering::SeqCst);
       state

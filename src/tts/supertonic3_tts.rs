@@ -87,9 +87,14 @@ pub fn speak_via_supertonic3(
         crate::log::log(
           "warning",
           &format!(
-            "[supertonic3_tts] GPU synthesis failed ({}); falling back to the CPU for the rest of this run",
-            e
+            "[supertonic3_tts] {}; falling back to the CPU for the rest of this run",
+            crate::util::describe_gpu_failure(&e.to_string())
           ),
+        );
+        // The unabridged thing, for whoever is actually debugging the card.
+        crate::log::log(
+          "info",
+          &format!("[supertonic3_tts] GPU error in full: {}", e),
         );
         engine = rebuild_on_cpu()?;
         sample_rate = rt.block_on(engine.sample_rate()) as u32;
