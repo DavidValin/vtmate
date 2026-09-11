@@ -423,7 +423,16 @@ have_so() {
 # bin directory to PATH, so a cuDNN that is installed but unreachable counts
 # as missing here - it would be missing for vtmate.exe too.
 have_dll() {
-  for d in $(printf '%s' "$PATH" | tr ':' ' ') "$(winpath "${CUDA_PATH:-}")/bin" "$LIB_DIR"; do
+  for d in $(printf '%s' "$PATH" | tr ':' ' ') "$LIB_DIR"; do
+    [ -n "$d" ] && ls "$d"/$1 >/dev/null 2>&1 && return 0
+  done
+  # Quoted separately from the loop above, which splits PATH on spaces and so
+  # cannot carry "Program Files". CUDA_PATH points at one major; the glob
+  # catches a toolkit whose installer ran after this shell started, and the
+  # versioned directory a second major leaves beside it. Both are on PATH for
+  # a normal login, which is why they may be counted as reachable at all.
+  for d in "$(winpath "${CUDA_PATH:-}")/bin" \
+    "$(winpath "${ProgramFiles:-C:\\Program Files}")/NVIDIA GPU Computing Toolkit/CUDA"/v*/bin; do
     [ -n "$d" ] && ls "$d"/$1 >/dev/null 2>&1 && return 0
   done
   return 1
@@ -459,19 +468,32 @@ cuda_runtime_missing() { # MAJOR -> prints what is missing for the cudaMAJOR var
 # just fail the smoke test. Naming the directory turns "missing libcudnn.so.9"
 # into something the user can act on.
 cuda_unreachable_dirs() {
-  found=""
-  for l in $1; do
-    for d in \
-      "${VIRTUAL_ENV:-/nonexistent}"/lib/python*/site-packages/nvidia/*/lib \
+  libs="$1"
+  # Held in the positional parameters so directories with spaces survive:
+  # "Program Files" would be two words in any unquoted list.
+  if [ "$OS_NAME" = "windows" ]; then
+    # cuDNN's installer does not put its bin on PATH (see the warning further
+    # down), so this is where an otherwise complete CUDA 13 usually hides.
+    set -- "${VIRTUAL_ENV:-/nonexistent}"/Lib/site-packages/nvidia/*/bin \
+      "${CONDA_PREFIX:-/nonexistent}"/Library/bin \
+      "$(winpath "${ProgramFiles:-C:\\Program Files}")/NVIDIA/CUDNN"/v*/bin \
+      "$(winpath "${ProgramFiles:-C:\\Program Files}")/NVIDIA/CUDNN"/v*/bin/*
+  else
+    set -- "${VIRTUAL_ENV:-/nonexistent}"/lib/python*/site-packages/nvidia/*/lib \
       "${CONDA_PREFIX:-/nonexistent}"/lib \
       "${HOME:-/nonexistent}"/.local/lib/python*/site-packages/nvidia/*/lib \
       /usr/lib/python*/site-packages/nvidia/*/lib \
-      /usr/lib/python*/dist-packages/nvidia/*/lib; do
+      /usr/lib/python*/dist-packages/nvidia/*/lib
+  fi
+  # One line per directory: a path with spaces cannot be split back out of a
+  # single space-separated string.
+  for d in "$@"; do
+    for l in $libs; do
       [ -e "$d/$l" ] || continue
-      case " $found " in *" $d "*) ;; *) found="$found $d" ;; esac
+      printf '%s\n' "$d"
+      break
     done
   done
-  printf '%s' "${found# }"
 }
 
 # driver_cuda_max -> the newest CUDA major the driver can run (nvidia-smi's
@@ -570,8 +592,17 @@ else
         else
           miss="$(cuda_runtime_missing "$m")"
           warn "cuda$m: NVIDIA driver found, but the build also needs: $miss"
-          reach="$(cuda_unreachable_dirs "$miss")"
-          [ -n "$reach" ] && warn "  some of those are under: $reach - the loader does not search there. Put the directory in /etc/ld.so.conf.d/ and run ldconfig (or export LD_LIBRARY_PATH), then rerun."
+          unreach="$(cuda_unreachable_dirs "$miss")"
+          if [ -n "$unreach" ]; then
+            printf '%s\n' "$unreach" | while IFS= read -r d; do
+              [ -n "$d" ] && warn "  some of those are in: $d"
+            done
+            if [ "$OS_NAME" = "windows" ]; then
+              warn "  ...but not on PATH, so vtmate.exe could not load them either. Add that directory to PATH, or copy the DLLs into $LIB_DIR, then rerun."
+            else
+              warn "  ...but not on the loader's path. Put that directory in /etc/ld.so.conf.d/ and run ldconfig (or export LD_LIBRARY_PATH), then rerun."
+            fi
+          fi
         fi
       done
       warn "Install the CUDA Toolkit 12.x or 13.x and cuDNN 9 and rerun, or force one with --variant cuda12|cuda13. Falling back to vulkan/cpu."
