@@ -23,7 +23,13 @@ pub fn ensure_piper_espeak_env() {
   let espeak_dir = base.join("espeak-ng-data");
   let marker = base.join(".espeak_extracted");
   if !(marker.exists() && espeak_dir.is_dir()) {
-    let _ = fs::remove_dir_all(&base);
+    // Only the espeak data is stale, so only it goes: `base` is ~/.vtmate,
+    // which also holds the user's settings, their settings backups,
+    // read-files and conversations. The archive unpacks a single top-level
+    // espeak-ng-data/ into `base`, so dropping that directory and the marker
+    // is the same fresh start without the collateral damage.
+    let _ = fs::remove_dir_all(&espeak_dir);
+    let _ = fs::remove_file(&marker);
     if fs::create_dir_all(&base).is_ok() {
       let gz = GzDecoder::new(Cursor::new(embedded_espeak_archive()));
       let mut ar = Archive::new(gz);
