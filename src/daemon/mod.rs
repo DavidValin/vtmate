@@ -379,8 +379,8 @@ pub fn run_foreground(args: &Args) -> ! {
   // ---------------------------------------------------
   crate::assets::ensure_piper_espeak_env();
   crate::assets::ensure_assets_env();
-  crate::assets::ensure_supersonic2_assets();
-  crate::assets::ensure_supertonic_assets();
+  crate::assets::ensure_supertonic2_assets();
+  crate::assets::ensure_supertonic3_assets();
 
   let channels = engine::Channels::new();
   crate::log::set_tx_ui_sender(channels.tx_ui.clone());

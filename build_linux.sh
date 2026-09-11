@@ -1788,7 +1788,7 @@ DOCKERFILE
     -f "$df" -t "$img" "$tmp"
 
   # cuda keeps ort-cuda: ORT is built with its CUDA execution provider (see
-  # the Dockerfile), so the Rust side (ort, and the supertonic3 / supersonic2
+  # the Dockerfile), so the Rust side (ort, and the supertonic3 / supertonic2
   # TTS crates through it) can register it. whisper/ggml gets its CUDA
   # acceleration via whisper-cuda either way.
   local feats

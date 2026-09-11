@@ -19,20 +19,57 @@ use llm::providers::openai_compatible::{OpenAICompatibleProvider, OpenAIProvider
 use std::sync::{Arc, atomic::AtomicU64};
 use std::time::Duration;
 
-/// Providers served by a user supplied host through an OpenAI-compatible endpoint.
-pub const LOCAL_PROVIDERS: &[&str] = &["ollama", "llama-server", "openai-compatible"];
+/// Providers served by a user supplied host through an OpenAI-compatible
+/// endpoint - `openai-compatible-api` is the general case: any server or
+/// hosted endpoint that speaks the OpenAI protocol, local (LM Studio,
+/// vLLM, ...) or remote (Azure OpenAI, a proxy, LiteLLM, ...); it always
+/// needs a baseurl, there being no sensible default for "somewhere else
+/// that speaks this protocol". `openai-api` (in `CLOUD_PROVIDERS`) is the
+/// unrelated, actual OpenAI hosted api and has no baseurl of its own.
+pub const LOCAL_PROVIDERS: &[&str] = &["ollama", "llama-server", "openai-compatible-api"];
 
-/// Hosted providers handled by the `llm` crate backends (an api key is needed).
+/// Hosted providers handled by the `llm` crate backends (an api key is
+/// needed). Named with an `-api` suffix so they read clearly next to their
+/// cli-subscription counterpart in the settings picker (`anthropic-api` /
+/// `claude-cli`). None of these take a custom baseurl - see
+/// `openai-compatible-api` above for that.
 pub const CLOUD_PROVIDERS: &[&str] = &[
-  "openai",
-  "anthropic",
-  "google",
-  "groq",
-  "mistral",
-  "openrouter",
-  "deepseek",
-  "xai",
+  "openai-api",
+  "anthropic-api",
+  "google-api",
+  "groq-api",
+  "mistral-api",
+  "openrouter-api",
+  "deepseek-api",
+  "xai-api",
 ];
+
+/// `(canonical, legacy bare form, the `llm` crate's own backend name)` for
+/// every hosted provider. `is_cloud_provider`, `api_key_env_var` and
+/// `build_provider` all resolve through this, so a settings file written
+/// before the `-api` rename (`provider = openai`) keeps working.
+const CLOUD_PROVIDER_ALIASES: &[(&str, &str, &str)] = &[
+  ("openai-api", "openai", "openai"),
+  ("anthropic-api", "anthropic", "anthropic"),
+  ("google-api", "google", "google"),
+  ("groq-api", "groq", "groq"),
+  ("mistral-api", "mistral", "mistral"),
+  ("openrouter-api", "openrouter", "openrouter"),
+  ("deepseek-api", "deepseek", "deepseek"),
+  ("xai-api", "xai", "xai"),
+];
+
+/// The `llm` crate's own backend name for `provider` (a canonical `-api`
+/// name or the legacy bare form), or `provider` itself if it matches
+/// neither table - callers that only reach here for an already-confirmed
+/// cloud provider never hit that fallback.
+fn cloud_backend_name(provider: &str) -> &str {
+  CLOUD_PROVIDER_ALIASES
+    .iter()
+    .find(|(canonical, legacy, _)| provider == *canonical || provider == *legacy)
+    .map(|(_, _, backend)| *backend)
+    .unwrap_or(provider)
+}
 
 /// Where a request goes: provider name plus the connection details of one agent.
 #[derive(Clone, Debug)]
@@ -64,7 +101,11 @@ impl LlmTarget {
 
   /// Human hint appended to error logs
   pub fn hint(&self) -> String {
-    match self.provider.trim().to_lowercase().as_str() {
+    let provider = self.provider.trim().to_lowercase();
+    if crate::llm_cli::is_cli_provider(&provider) {
+      return crate::llm_cli::cli_hint(&provider);
+    }
+    match provider.as_str() {
       "ollama" => format!(
         "Make sure ollama (0.13 or newer) is running at {} and model '{}' is pulled",
         self.baseurl, self.model
@@ -73,7 +114,7 @@ impl LlmTarget {
         "Make sure llama-server / llamafile is running at {}",
         self.baseurl
       ),
-      "openai-compatible" => format!("Make sure the server is running at {}", self.baseurl),
+      "openai-compatible-api" => format!("Make sure the server is running at {}", self.baseurl),
       _ => "Check the api_key, the model name and your network connection".to_string(),
     }
   }
@@ -84,17 +125,21 @@ pub fn is_local_provider(provider: &str) -> bool {
 }
 
 pub fn is_cloud_provider(provider: &str) -> bool {
-  CLOUD_PROVIDERS.contains(&provider.trim().to_lowercase().as_str())
+  let p = provider.trim().to_lowercase();
+  CLOUD_PROVIDER_ALIASES
+    .iter()
+    .any(|(canonical, legacy, _)| p == *canonical || p == *legacy)
 }
 
 pub fn is_supported_provider(provider: &str) -> bool {
-  is_local_provider(provider) || is_cloud_provider(provider)
+  is_local_provider(provider) || is_cloud_provider(provider) || crate::llm_cli::is_cli_provider(provider)
 }
 
 pub fn supported_providers_list() -> String {
   LOCAL_PROVIDERS
     .iter()
     .chain(CLOUD_PROVIDERS.iter())
+    .chain(crate::llm_cli::CLI_PROVIDERS.iter())
     .map(|p| format!("'{}'", p))
     .collect::<Vec<_>>()
     .join(", ")
@@ -102,7 +147,8 @@ pub fn supported_providers_list() -> String {
 
 /// Environment variable consulted when `api_key` is empty in the settings
 pub fn api_key_env_var(provider: &str) -> Option<&'static str> {
-  match provider.trim().to_lowercase().as_str() {
+  let p = provider.trim().to_lowercase();
+  match cloud_backend_name(&p) {
     "openai" => Some("OPENAI_API_KEY"),
     "anthropic" => Some("ANTHROPIC_API_KEY"),
     "google" => Some("GOOGLE_API_KEY"),
@@ -141,6 +187,30 @@ pub async fn stream_response_into(
 
   if interrupted() {
     return Ok(());
+  }
+
+  if crate::llm_cli::is_cli_provider(&target.provider) {
+    crate::log::log(
+      "info",
+      &format!(
+        "Requesting provider '{}' model '{}' at {}",
+        target.provider,
+        target.model,
+        describe_endpoint(target)
+      ),
+    );
+    let result = crate::llm_cli::stream_cli_response_into(
+      messages,
+      target,
+      interrupt_counter,
+      expected_interrupt,
+      on_piece,
+    )
+    .await;
+    if let Ok(()) = &result {
+      crate::log::log("info", &format!("Streaming response from: {}", describe_endpoint(target)));
+    }
+    return result;
   }
 
   let (system_prompt, chat) = split_messages(messages);
@@ -228,14 +298,22 @@ impl OpenAIProviderConfig for LocalOpenAiCompatible {
   const SUPPORTS_REASONING_EFFORT: bool = true;
 }
 
-/// Turn the configured `host[:port]` into the `/v1` root the local server exposes
-fn local_base_url(baseurl: &str) -> String {
+/// Add a scheme to a bare `host[:port]` and drop a trailing slash, without
+/// the `/v1` suffix `local_base_url` adds - used wherever something other
+/// than the OpenAI-compatible chat path is being addressed (e.g. ollama's
+/// native `/api/tags`).
+pub(crate) fn base_url_with_scheme(baseurl: &str) -> String {
   let trimmed = baseurl.trim().trim_end_matches('/');
-  let with_scheme = if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+  if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
     trimmed.to_string()
   } else {
     format!("http://{}", trimmed)
-  };
+  }
+}
+
+/// Turn the configured `host[:port]` into the `/v1` root the local server exposes
+fn local_base_url(baseurl: &str) -> String {
+  let with_scheme = base_url_with_scheme(baseurl);
   if with_scheme.ends_with("/v1") {
     with_scheme
   } else {
@@ -244,12 +322,13 @@ fn local_base_url(baseurl: &str) -> String {
 }
 
 fn describe_endpoint(target: &LlmTarget) -> String {
-  if is_local_provider(&target.provider) {
+  let provider = target.provider.trim().to_lowercase();
+  if crate::llm_cli::is_cli_provider(&provider) {
+    format!("the '{}' cli (model: {})", target.provider, target.model)
+  } else if is_local_provider(&provider) {
     format!("{}/chat/completions", local_base_url(&target.baseurl))
-  } else if target.baseurl.trim().is_empty() {
-    format!("{} (default endpoint)", target.provider)
   } else {
-    target.baseurl.trim().to_string()
+    format!("{} (default endpoint)", target.provider)
   }
 }
 
@@ -334,7 +413,7 @@ fn build_provider(
     ));
   }
 
-  let backend: LLMBackend = provider
+  let backend: LLMBackend = cloud_backend_name(&provider)
     .parse()
     .map_err(|e| format!("Unsupported provider '{}': {}", target.provider, e))?;
   let api_key = resolve_api_key(&provider, &target.api_key).ok_or_else(|| {
@@ -353,9 +432,9 @@ fn build_provider(
   if let Some(system) = system_prompt {
     builder = builder.system(system);
   }
-  if !target.baseurl.trim().is_empty() {
-    builder = builder.base_url(target.baseurl.trim().to_string());
-  }
+  // no cloud provider takes a custom endpoint - that is what the local
+  // openai-compatible-api provider is for; validate_baseurl already rejects
+  // setting one here in the first place, baseurl is simply never read
   let p = builder
     .build()
     .map_err(|e| format!("Failed to initialise provider '{}': {}", provider, e))?;
@@ -413,26 +492,39 @@ mod tests {
   fn provider_classification() {
     assert!(is_local_provider("ollama"));
     assert!(is_local_provider("Llama-Server"));
+    assert!(is_cloud_provider("anthropic-api"));
+    // a settings file written before the `-api` rename still works
     assert!(is_cloud_provider("anthropic"));
     assert!(!is_supported_provider("foo"));
+    assert_eq!(api_key_env_var("openai-api"), Some("OPENAI_API_KEY"));
     assert_eq!(api_key_env_var("openai"), Some("OPENAI_API_KEY"));
     assert_eq!(api_key_env_var("ollama"), None);
+    // openai-api (the actual hosted OpenAI api) and openai-compatible-api
+    // (a self-hosted or otherwise custom server speaking that protocol)
+    // must never collide, and only the local one takes a baseurl
+    assert!(is_cloud_provider("openai-api"));
+    assert!(!is_local_provider("openai-api"));
+    assert!(is_local_provider("openai-compatible-api"));
+    assert!(!is_cloud_provider("openai-compatible-api"));
+    assert_eq!(api_key_env_var("openai-compatible-api"), None);
   }
 
   #[test]
   fn cloud_provider_without_key_is_an_error() {
-    let target = LlmTarget {
-      provider: "anthropic".into(),
-      baseurl: String::new(),
-      model: "claude-sonnet-5".into(),
-      api_key: String::new(),
-    };
-    // make sure the env fallback does not kick in
-    unsafe { std::env::remove_var("ANTHROPIC_API_KEY") };
-    let err = build_provider(&target, None)
-      .err()
-      .expect("must fail without key");
-    assert!(err.contains("ANTHROPIC_API_KEY"), "{err}");
+    for provider in ["anthropic-api", "anthropic"] {
+      let target = LlmTarget {
+        provider: provider.into(),
+        baseurl: String::new(),
+        model: "claude-sonnet-5".into(),
+        api_key: String::new(),
+      };
+      // make sure the env fallback does not kick in
+      unsafe { std::env::remove_var("ANTHROPIC_API_KEY") };
+      let err = build_provider(&target, None)
+        .err()
+        .expect("must fail without key");
+      assert!(err.contains("ANTHROPIC_API_KEY"), "{err}");
+    }
   }
 
   fn test_target() -> LlmTarget {

@@ -71,12 +71,12 @@ pub fn ensure_assets_env() {
       let _ = fs::write(onnx_path, embedded_kokoro_0_onnx());
       let _ = fs::write(whisper_small_path, embedded_whisper_small());
       let _ = fs::write(whisper_tiny_path, embedded_whisper_tiny());
-      // extract supersonic2 files
+      // extract supertonic2 files
       let sup_dir = home.join(".vtmate").join("tts");
       if fs::create_dir_all(&sup_dir).is_ok() {
-        for rel in SUPERSONIC2_FILES {
+        for rel in SUPERTONIC2_FILES {
           let path = sup_dir.join(rel);
-          let _ = fs::write(path, embedded_supersonic2_file(rel));
+          let _ = fs::write(path, embedded_supertonic2_file(rel));
         }
       }
     }
@@ -90,10 +90,10 @@ pub fn ensure_assets_env() {
 // PRIVATE
 // ------------------------------------------------------------------
 
-// SUPERSONIC2
+// SUPERTONIC2
 // ------------------------------------------------------------------
 
-const SUPERSONIC2_FILES: &[&str] = &[
+const SUPERTONIC2_FILES: &[&str] = &[
   "onnx/vector_estimator.onnx",
   "onnx/duration_predictor.onnx",
   "onnx/tts.json",
@@ -113,9 +113,9 @@ const SUPERSONIC2_FILES: &[&str] = &[
   "voice_styles/M3.json",
 ];
 
-pub fn ensure_supersonic2_assets() {
+pub fn ensure_supertonic2_assets() {
   // Respect user override
-  if std::env::var_os("SUPERSONIC2_DATA_DIRECTORY").is_some() {
+  if std::env::var_os("SUPERTONIC2_DATA_DIRECTORY").is_some() {
     return;
   }
   let home = match get_user_home_path() {
@@ -123,10 +123,10 @@ pub fn ensure_supersonic2_assets() {
     None => return,
   };
   let base = home.join(".vtmate");
-  let sup_dir = base.join("tts/supersonic2-model");
+  let sup_dir = base.join("tts/supertonic2-model");
 
   let mut all_exist = true;
-  for rel in SUPERSONIC2_FILES {
+  for rel in SUPERTONIC2_FILES {
     let path = sup_dir.join(rel);
     if !path.exists() {
       all_exist = false;
@@ -134,155 +134,155 @@ pub fn ensure_supersonic2_assets() {
     }
   }
   if !all_exist {
-    // Extract supersonic2 files from embedded binary
+    // Extract supertonic2 files from embedded binary
     let _ = fs::remove_dir_all(&sup_dir);
     if fs::create_dir_all(&sup_dir).is_ok() {
-      for rel in SUPERSONIC2_FILES {
+      for rel in SUPERTONIC2_FILES {
         let path = sup_dir.join(rel);
         if let Some(parent) = path.parent() {
           let _ = fs::create_dir_all(parent);
         }
-        let _ = fs::write(path, embedded_supersonic2_file(rel));
+        let _ = fs::write(path, embedded_supertonic2_file(rel));
       }
     }
   }
 
   unsafe {
-    std::env::set_var("SUPERSONIC2_DATA_DIRECTORY", sup_dir.as_os_str());
+    std::env::set_var("SUPERTONIC2_DATA_DIRECTORY", sup_dir.as_os_str());
   }
 }
 
-// Embedded supersonic2 functions
-fn embedded_supersonic2_vector_estimator_onnx() -> &'static [u8] {
+// Embedded supertonic2 functions
+fn embedded_supertonic2_vector_estimator_onnx() -> &'static [u8] {
   include_bytes!(concat!(
     env!("OUT_DIR"),
-    "/embedded/supersonic2-model/onnx/vector_estimator.onnx"
+    "/embedded/supertonic2-model/onnx/vector_estimator.onnx"
   ))
 }
-fn embedded_supersonic2_duration_predictor_onnx() -> &'static [u8] {
+fn embedded_supertonic2_duration_predictor_onnx() -> &'static [u8] {
   include_bytes!(concat!(
     env!("OUT_DIR"),
-    "/embedded/supersonic2-model/onnx/duration_predictor.onnx"
+    "/embedded/supertonic2-model/onnx/duration_predictor.onnx"
   ))
 }
-fn embedded_supersonic2_tts_json() -> &'static [u8] {
+fn embedded_supertonic2_tts_json() -> &'static [u8] {
   include_bytes!(concat!(
     env!("OUT_DIR"),
-    "/embedded/supersonic2-model/onnx/tts.json"
+    "/embedded/supertonic2-model/onnx/tts.json"
   ))
 }
-fn embedded_supersonic2_text_encoder_onnx() -> &'static [u8] {
+fn embedded_supertonic2_text_encoder_onnx() -> &'static [u8] {
   include_bytes!(concat!(
     env!("OUT_DIR"),
-    "/embedded/supersonic2-model/onnx/text_encoder.onnx"
+    "/embedded/supertonic2-model/onnx/text_encoder.onnx"
   ))
 }
-fn embedded_supersonic2_vocoder_onnx() -> &'static [u8] {
+fn embedded_supertonic2_vocoder_onnx() -> &'static [u8] {
   include_bytes!(concat!(
     env!("OUT_DIR"),
-    "/embedded/supersonic2-model/onnx/vocoder.onnx"
+    "/embedded/supertonic2-model/onnx/vocoder.onnx"
   ))
 }
-fn embedded_supersonic2_unicode_indexer_json() -> &'static [u8] {
+fn embedded_supertonic2_unicode_indexer_json() -> &'static [u8] {
   include_bytes!(concat!(
     env!("OUT_DIR"),
-    "/embedded/supersonic2-model/onnx/unicode_indexer.json"
+    "/embedded/supertonic2-model/onnx/unicode_indexer.json"
   ))
 }
-fn embedded_supersonic2_config_json() -> &'static [u8] {
+fn embedded_supertonic2_config_json() -> &'static [u8] {
   include_bytes!(concat!(
     env!("OUT_DIR"),
-    "/embedded/supersonic2-model/config.json"
+    "/embedded/supertonic2-model/config.json"
   ))
 }
-fn embedded_supersonic2_voice_m1_json() -> &'static [u8] {
+fn embedded_supertonic2_voice_m1_json() -> &'static [u8] {
   include_bytes!(concat!(
     env!("OUT_DIR"),
-    "/embedded/supersonic2-model/voice_styles/M1.json"
+    "/embedded/supertonic2-model/voice_styles/M1.json"
   ))
 }
-fn embedded_supersonic2_voice_m2_json() -> &'static [u8] {
+fn embedded_supertonic2_voice_m2_json() -> &'static [u8] {
   include_bytes!(concat!(
     env!("OUT_DIR"),
-    "/embedded/supersonic2-model/voice_styles/M2.json"
+    "/embedded/supertonic2-model/voice_styles/M2.json"
   ))
 }
-fn embedded_supersonic2_voice_m3_json() -> &'static [u8] {
+fn embedded_supertonic2_voice_m3_json() -> &'static [u8] {
   include_bytes!(concat!(
     env!("OUT_DIR"),
-    "/embedded/supersonic2-model/voice_styles/M3.json"
+    "/embedded/supertonic2-model/voice_styles/M3.json"
   ))
 }
-fn embedded_supersonic2_voice_m4_json() -> &'static [u8] {
+fn embedded_supertonic2_voice_m4_json() -> &'static [u8] {
   include_bytes!(concat!(
     env!("OUT_DIR"),
-    "/embedded/supersonic2-model/voice_styles/M4.json"
+    "/embedded/supertonic2-model/voice_styles/M4.json"
   ))
 }
-fn embedded_supersonic2_voice_m5_json() -> &'static [u8] {
+fn embedded_supertonic2_voice_m5_json() -> &'static [u8] {
   include_bytes!(concat!(
     env!("OUT_DIR"),
-    "/embedded/supersonic2-model/voice_styles/M5.json"
+    "/embedded/supertonic2-model/voice_styles/M5.json"
   ))
 }
-fn embedded_supersonic2_voice_f1_json() -> &'static [u8] {
+fn embedded_supertonic2_voice_f1_json() -> &'static [u8] {
   include_bytes!(concat!(
     env!("OUT_DIR"),
-    "/embedded/supersonic2-model/voice_styles/F1.json"
+    "/embedded/supertonic2-model/voice_styles/F1.json"
   ))
 }
-fn embedded_supersonic2_voice_f2_json() -> &'static [u8] {
+fn embedded_supertonic2_voice_f2_json() -> &'static [u8] {
   include_bytes!(concat!(
     env!("OUT_DIR"),
-    "/embedded/supersonic2-model/voice_styles/F2.json"
+    "/embedded/supertonic2-model/voice_styles/F2.json"
   ))
 }
-fn embedded_supersonic2_voice_f3_json() -> &'static [u8] {
+fn embedded_supertonic2_voice_f3_json() -> &'static [u8] {
   include_bytes!(concat!(
     env!("OUT_DIR"),
-    "/embedded/supersonic2-model/voice_styles/F3.json"
+    "/embedded/supertonic2-model/voice_styles/F3.json"
   ))
 }
-fn embedded_supersonic2_voice_f4_json() -> &'static [u8] {
+fn embedded_supertonic2_voice_f4_json() -> &'static [u8] {
   include_bytes!(concat!(
     env!("OUT_DIR"),
-    "/embedded/supersonic2-model/voice_styles/F4.json"
+    "/embedded/supertonic2-model/voice_styles/F4.json"
   ))
 }
-fn embedded_supersonic2_voice_f5_json() -> &'static [u8] {
+fn embedded_supertonic2_voice_f5_json() -> &'static [u8] {
   include_bytes!(concat!(
     env!("OUT_DIR"),
-    "/embedded/supersonic2-model/voice_styles/F5.json"
+    "/embedded/supertonic2-model/voice_styles/F5.json"
   ))
 }
 
-fn embedded_supersonic2_file(rel: &str) -> &'static [u8] {
+fn embedded_supertonic2_file(rel: &str) -> &'static [u8] {
   match rel {
-    "onnx/vector_estimator.onnx" => embedded_supersonic2_vector_estimator_onnx(),
-    "onnx/duration_predictor.onnx" => embedded_supersonic2_duration_predictor_onnx(),
-    "onnx/tts.json" => embedded_supersonic2_tts_json(),
-    "onnx/text_encoder.onnx" => embedded_supersonic2_text_encoder_onnx(),
-    "onnx/vocoder.onnx" => embedded_supersonic2_vocoder_onnx(),
-    "onnx/unicode_indexer.json" => embedded_supersonic2_unicode_indexer_json(),
-    "config.json" => embedded_supersonic2_config_json(),
-    "voice_styles/M1.json" => embedded_supersonic2_voice_m1_json(),
-    "voice_styles/M2.json" => embedded_supersonic2_voice_m2_json(),
-    "voice_styles/M3.json" => embedded_supersonic2_voice_m3_json(),
-    "voice_styles/M4.json" => embedded_supersonic2_voice_m4_json(),
-    "voice_styles/M5.json" => embedded_supersonic2_voice_m5_json(),
-    "voice_styles/F1.json" => embedded_supersonic2_voice_f1_json(),
-    "voice_styles/F2.json" => embedded_supersonic2_voice_f2_json(),
-    "voice_styles/F3.json" => embedded_supersonic2_voice_f3_json(),
-    "voice_styles/F4.json" => embedded_supersonic2_voice_f4_json(),
-    "voice_styles/F5.json" => embedded_supersonic2_voice_f5_json(),
-    _ => panic!("Unknown supersonic2 file {}", rel),
+    "onnx/vector_estimator.onnx" => embedded_supertonic2_vector_estimator_onnx(),
+    "onnx/duration_predictor.onnx" => embedded_supertonic2_duration_predictor_onnx(),
+    "onnx/tts.json" => embedded_supertonic2_tts_json(),
+    "onnx/text_encoder.onnx" => embedded_supertonic2_text_encoder_onnx(),
+    "onnx/vocoder.onnx" => embedded_supertonic2_vocoder_onnx(),
+    "onnx/unicode_indexer.json" => embedded_supertonic2_unicode_indexer_json(),
+    "config.json" => embedded_supertonic2_config_json(),
+    "voice_styles/M1.json" => embedded_supertonic2_voice_m1_json(),
+    "voice_styles/M2.json" => embedded_supertonic2_voice_m2_json(),
+    "voice_styles/M3.json" => embedded_supertonic2_voice_m3_json(),
+    "voice_styles/M4.json" => embedded_supertonic2_voice_m4_json(),
+    "voice_styles/M5.json" => embedded_supertonic2_voice_m5_json(),
+    "voice_styles/F1.json" => embedded_supertonic2_voice_f1_json(),
+    "voice_styles/F2.json" => embedded_supertonic2_voice_f2_json(),
+    "voice_styles/F3.json" => embedded_supertonic2_voice_f3_json(),
+    "voice_styles/F4.json" => embedded_supertonic2_voice_f4_json(),
+    "voice_styles/F5.json" => embedded_supertonic2_voice_f5_json(),
+    _ => panic!("Unknown supertonic2 file {}", rel),
   }
 }
 
-// SUPERTONIC (Supertonic 3, multilingual)
+// SUPERTONIC3 (Supertonic 3, multilingual)
 // ------------------------------------------------------------------
 
-const SUPERTONIC_FILES: &[&str] = &[
+const SUPERTONIC3_FILES: &[&str] = &[
   "onnx/duration_predictor.onnx",
   "onnx/text_encoder.onnx",
   "onnx/tts.json",
@@ -303,114 +303,114 @@ const SUPERTONIC_FILES: &[&str] = &[
   "speaker_encoder.onnx",
 ];
 
-pub fn ensure_supertonic_assets() {
+pub fn ensure_supertonic3_assets() {
   // Respect user override
-  if std::env::var_os("SUPERTONIC_DATA_DIRECTORY").is_some() {
+  if std::env::var_os("SUPERTONIC3_DATA_DIRECTORY").is_some() {
     return;
   }
   let home = match get_user_home_path() {
     Some(h) => h,
     None => return,
   };
-  let model_dir = home.join(".vtmate").join("tts").join("supertonic-model");
+  let model_dir = home.join(".vtmate").join("tts").join("supertonic3-model");
 
-  let all_exist = SUPERTONIC_FILES
+  let all_exist = SUPERTONIC3_FILES
     .iter()
     .all(|rel| model_dir.join(rel).exists());
   if !all_exist {
-    // Extract supertonic files from the embedded binary
+    // Extract supertonic3 files from the embedded binary
     let _ = fs::remove_dir_all(&model_dir);
     if fs::create_dir_all(&model_dir).is_ok() {
-      for rel in SUPERTONIC_FILES {
+      for rel in SUPERTONIC3_FILES {
         let path = model_dir.join(rel);
         if let Some(parent) = path.parent() {
           let _ = fs::create_dir_all(parent);
         }
-        let _ = fs::write(path, embedded_supertonic_file(rel));
+        let _ = fs::write(path, embedded_supertonic3_file(rel));
       }
     }
   }
 
   unsafe {
-    std::env::set_var("SUPERTONIC_DATA_DIRECTORY", model_dir.as_os_str());
+    std::env::set_var("SUPERTONIC3_DATA_DIRECTORY", model_dir.as_os_str());
   }
 }
 
-fn embedded_supertonic_file(rel: &str) -> &'static [u8] {
+fn embedded_supertonic3_file(rel: &str) -> &'static [u8] {
   match rel {
     "onnx/duration_predictor.onnx" => include_bytes!(concat!(
       env!("OUT_DIR"),
-      "/embedded/supertonic-model/onnx/duration_predictor.onnx"
+      "/embedded/supertonic3-model/onnx/duration_predictor.onnx"
     )),
     "onnx/text_encoder.onnx" => include_bytes!(concat!(
       env!("OUT_DIR"),
-      "/embedded/supertonic-model/onnx/text_encoder.onnx"
+      "/embedded/supertonic3-model/onnx/text_encoder.onnx"
     )),
     "onnx/tts.json" => include_bytes!(concat!(
       env!("OUT_DIR"),
-      "/embedded/supertonic-model/onnx/tts.json"
+      "/embedded/supertonic3-model/onnx/tts.json"
     )),
     "onnx/unicode_indexer.json" => include_bytes!(concat!(
       env!("OUT_DIR"),
-      "/embedded/supertonic-model/onnx/unicode_indexer.json"
+      "/embedded/supertonic3-model/onnx/unicode_indexer.json"
     )),
     "onnx/vector_estimator.onnx" => include_bytes!(concat!(
       env!("OUT_DIR"),
-      "/embedded/supertonic-model/onnx/vector_estimator.onnx"
+      "/embedded/supertonic3-model/onnx/vector_estimator.onnx"
     )),
     "onnx/vocoder.onnx" => include_bytes!(concat!(
       env!("OUT_DIR"),
-      "/embedded/supertonic-model/onnx/vocoder.onnx"
+      "/embedded/supertonic3-model/onnx/vocoder.onnx"
     )),
     "config.json" => include_bytes!(concat!(
       env!("OUT_DIR"),
-      "/embedded/supertonic-model/config.json"
+      "/embedded/supertonic3-model/config.json"
     )),
     "voice_styles/F1.json" => include_bytes!(concat!(
       env!("OUT_DIR"),
-      "/embedded/supertonic-model/voice_styles/F1.json"
+      "/embedded/supertonic3-model/voice_styles/F1.json"
     )),
     "voice_styles/F2.json" => include_bytes!(concat!(
       env!("OUT_DIR"),
-      "/embedded/supertonic-model/voice_styles/F2.json"
+      "/embedded/supertonic3-model/voice_styles/F2.json"
     )),
     "voice_styles/F3.json" => include_bytes!(concat!(
       env!("OUT_DIR"),
-      "/embedded/supertonic-model/voice_styles/F3.json"
+      "/embedded/supertonic3-model/voice_styles/F3.json"
     )),
     "voice_styles/F4.json" => include_bytes!(concat!(
       env!("OUT_DIR"),
-      "/embedded/supertonic-model/voice_styles/F4.json"
+      "/embedded/supertonic3-model/voice_styles/F4.json"
     )),
     "voice_styles/F5.json" => include_bytes!(concat!(
       env!("OUT_DIR"),
-      "/embedded/supertonic-model/voice_styles/F5.json"
+      "/embedded/supertonic3-model/voice_styles/F5.json"
     )),
     "voice_styles/M1.json" => include_bytes!(concat!(
       env!("OUT_DIR"),
-      "/embedded/supertonic-model/voice_styles/M1.json"
+      "/embedded/supertonic3-model/voice_styles/M1.json"
     )),
     "voice_styles/M2.json" => include_bytes!(concat!(
       env!("OUT_DIR"),
-      "/embedded/supertonic-model/voice_styles/M2.json"
+      "/embedded/supertonic3-model/voice_styles/M2.json"
     )),
     "voice_styles/M3.json" => include_bytes!(concat!(
       env!("OUT_DIR"),
-      "/embedded/supertonic-model/voice_styles/M3.json"
+      "/embedded/supertonic3-model/voice_styles/M3.json"
     )),
     "voice_styles/M4.json" => include_bytes!(concat!(
       env!("OUT_DIR"),
-      "/embedded/supertonic-model/voice_styles/M4.json"
+      "/embedded/supertonic3-model/voice_styles/M4.json"
     )),
     "voice_styles/M5.json" => include_bytes!(concat!(
       env!("OUT_DIR"),
-      "/embedded/supertonic-model/voice_styles/M5.json"
+      "/embedded/supertonic3-model/voice_styles/M5.json"
     )),
     "speaker_encoder.onnx" => include_bytes!(concat!(
       env!("OUT_DIR"),
-      "/embedded/supertonic-model/speaker_encoder.onnx"
+      "/embedded/supertonic3-model/speaker_encoder.onnx"
     )),
-    _ => panic!("Unknown supertonic file {}", rel),
+    _ => panic!("Unknown supertonic3 file {}", rel),
   }
 }
 

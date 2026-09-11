@@ -135,21 +135,40 @@ Explanation on the [agent] fields:
                           Local servers (no api key needed):
                             'ollama' (0.13 or newer),
                             'llama-server',
-                            'openai-compatible' (LM Studio,
-                            vLLM or any server exposing
-                            /v1/chat/completions)
+                            'openai-compatible-api' (LM Studio,
+                            vLLM, or any local or remote server
+                            exposing /v1/chat/completions -
+                            Azure OpenAI, a proxy, LiteLLM, ...
+                            included; the baseurl is where it
+                            has to point)
 
                           Hosted providers (api key needed):
-                            'openai', 'anthropic', 'google',
-                            'groq', 'mistral', 'openrouter',
-                            'deepseek', 'xai'
+                            'openai-api', 'anthropic-api',
+                            'google-api', 'groq-api',
+                            'mistral-api', 'openrouter-api',
+                            'deepseek-api', 'xai-api'
+
+                          Subscription clis (no api key, use
+                          whatever the cli is logged into; no
+                          baseurl either - model is passed to
+                          the cli directly):
+                            'claude-cli', 'codex-cli',
+                            'gemini-cli', 'copilot-cli',
+                            'kiro-cli', 'vibe-cli',
+                            'hermes-cli', 'opencode-cli',
+                            'pi-cli', 'aichat-cli', 'grok-cli'
   ------------------------------------------------------------
   * baseurl:              the base url used to contact the
-                          provider. For local servers it is
+                          provider. Required for local servers -
                           the host and port without path, e.g.
-                          http://127.0.0.1:11434
-                          For hosted providers leave it empty
-                          to use the provider's default url.
+                          http://127.0.0.1:11434 for ollama, or
+                          wherever an openai-compatible-api
+                          endpoint actually is, local or remote.
+
+                          Every hosted provider (including
+                          openai-api) and every subscription cli
+                          ignores it - set it there and it is
+                          rejected.
   ------------------------------------------------------------
   * model:                the model name to use
                           (some llama-server versions will
@@ -186,8 +205,8 @@ Explanation on the [agent] fields:
                           to be released to submit the audio.
   ------------------------------------------------------------
   * tts:                  the tts system to use, it can be
-                          'supertonic' (default, 31 languages),
-                          'supersonic2', 'kokoro' or 'opentts'.
+                          'supertonic3' (default, 31 languages),
+                          'supertonic2', 'kokoro' or 'opentts'.
 
                             - opentts requires opentts docker
                             container to be running:
@@ -971,6 +990,34 @@ pub fn resolved_whisper_model_path(whisper_model_path: &str) -> String {
   }
 }
 
+/// Every whisper model (a `.bin` file) sitting in `~/.whisper-models`, in
+/// the `~/...` style `whisper_model_path` is normally written in. Empty
+/// when the directory does not exist or is empty - the settings field
+/// stays a plain editable input either way, this only seeds what ←/→
+/// cycles through.
+pub fn whisper_models_available() -> Vec<String> {
+  let Some(home) = get_user_home_path() else {
+    return Vec::new();
+  };
+  let dir = home.join(".whisper-models");
+  let Ok(entries) = std::fs::read_dir(&dir) else {
+    return Vec::new();
+  };
+  let mut models: Vec<String> = entries
+    .filter_map(|e| e.ok())
+    .filter(|e| {
+      e.path()
+        .extension()
+        .map(|ext| ext.eq_ignore_ascii_case("bin"))
+        .unwrap_or(false)
+    })
+    .filter_map(|e| e.file_name().into_string().ok())
+    .map(|name| format!("~/.whisper-models/{}", name))
+    .collect();
+  models.sort();
+  models
+}
+
 /// Why a settings file could not be turned into a list of agents.
 #[derive(Debug)]
 pub enum LoadError {
@@ -1164,7 +1211,7 @@ Rules:
 [agent]
 name = main agent
 language = en
-tts = supertonic
+tts = supertonic3
 voice = M1
 voice_speed = 1.1
 provider = ollama
@@ -1179,7 +1226,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 [agent]
 name = explainer
 language = en
-tts = supertonic
+tts = supertonic3
 voice = F1
 voice_speed = 1.1
 provider = ollama
@@ -1194,7 +1241,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 [agent]
 name = planner
 language = en
-tts = supertonic
+tts = supertonic3
 voice = F3
 voice_speed = 1.1
 provider = ollama
@@ -1209,7 +1256,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 [agent]
 name = Ptahhotep
 language = en
-tts = supertonic
+tts = supertonic3
 voice = M2
 voice_speed = 1.1
 provider = ollama
@@ -1224,7 +1271,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 [agent]
 name = Aristoteles
 language = en
-tts = supertonic
+tts = supertonic3
 voice = M3
 voice_speed = 1.1
 provider = ollama
@@ -1239,7 +1286,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 [agent]
 name = Budda
 language = en
-tts = supertonic
+tts = supertonic3
 voice = M4
 voice_speed = 1.1
 provider = ollama
@@ -1254,7 +1301,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 [agent]
 name = Jesus Christ
 language = en
-tts = supertonic
+tts = supertonic3
 voice = M5
 voice_speed = 1.1
 provider = ollama
@@ -1638,11 +1685,11 @@ fn validate_voice(voice: &str, language: &str, tts: &str) -> Result<(), std::io:
 }
 
 fn validate_tts(tts: &str) -> Result<(), std::io::Error> {
-  if tts != "kokoro" && tts != "opentts" && tts != "supersonic2" && tts != "supertonic" {
+  if tts != "kokoro" && tts != "opentts" && tts != "supertonic2" && tts != "supertonic3" {
     return Err(std::io::Error::new(
       std::io::ErrorKind::Other,
       format!(
-        "Invalid tts '{}' . Must be 'kokoro', 'opentts', 'supersonic2', or 'supertonic'",
+        "Invalid tts '{}' . Must be 'kokoro', 'opentts', 'supertonic2', or 'supertonic3'",
         tts
       ),
     ));
@@ -1742,9 +1789,26 @@ fn validate_api_key(api_key: &str, provider: &str) -> Result<(), std::io::Error>
 }
 
 fn validate_baseurl(baseurl: &str, provider: &str) -> Result<(), std::io::Error> {
+  let p = provider.trim().to_lowercase();
+  // cli providers never use it - the field is hidden in the settings form
+  if crate::llm_cli::is_cli_provider(&p) {
+    return Ok(());
+  }
+  // no hosted provider takes a custom endpoint - that is what the local
+  // openai-compatible-api provider is for; a value left over for a hosted
+  // provider would silently go unused, so it is rejected here instead
+  if crate::llm::is_cloud_provider(&p) && !baseurl.trim().is_empty() {
+    return Err(std::io::Error::new(
+      std::io::ErrorKind::Other,
+      format!(
+        "baseurl is not used for provider '{}' (use openai-compatible-api for a custom endpoint); leave it empty",
+        provider
+      ),
+    ));
+  }
   if baseurl.trim().is_empty() {
     // hosted providers have a default endpoint, local servers must be addressed
-    if crate::llm::is_cloud_provider(provider) {
+    if crate::llm::is_cloud_provider(&p) {
       return Ok(());
     }
     return Err(std::io::Error::new(

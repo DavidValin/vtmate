@@ -78,7 +78,7 @@ https://github.com/user-attachments/assets/8b9e982c-ba97-4aeb-8e55-1db6a92bc164
 - 📌 Save audio speech of a text file or STDIN content
 - 📌 Load separate settings file with different agents
 - 📌 Integrated `whisper` speech recognition system (no external intallation required)
-- 📌 Integrated `kokoro TTS`, `supersonic 2 TTS` and `supertonic TTS` systems (no external intallation required)
+- 📌 Integrated `kokoro TTS`, `supertonic2 TTS` and `supertonic3 TTS` systems (no external intallation required)
 - 📌 Interface with `OpenTTS` system (requires external docker service)
 - 📌 Source code in the replies (text inside ``` blocks) is shown on screen but never spoken
 - 📌 Use any gguf model from huggingface.com (using llama-server), any ollama model, or a hosted provider (OpenAI, Anthropic, Google, Groq, Mistral, OpenRouter, DeepSeek, xAI)
@@ -119,7 +119,7 @@ Thinking / reasoning is disabled on local servers so replies start speaking righ
 ## TTS engine support
 
 - ✅ Kokoro (integrated)
-- ✅ Supersonic 2 (integrated)
+- ✅ Supertonic 2 (integrated)
 - ✅ Supertonic 3 (integrated)
 - ✅ OpenTTS (requires external docker service)
 
@@ -175,8 +175,8 @@ The quickest way is to press `Control+S` while vtmate is running: a popup opens 
 ┌ Settings - 2 agents ────────────────────────────────────────────────────────────────────┐
 │ NAME        LANG  MODE  TTS         VOICE   SPD   PROVIDER    MODEL          PROMPT     │
 │                                                                                         │
-│ main agent  en    PTT   supertonic  M1      1.1x  ollama      llama3.2:3b    You are... │
-│ explainer   en    LIVE  supertonic  F1      1.1x  ollama      llama3.2:3b    You exp... │
+│ main agent  en    PTT   supertonic3  M1      1.1x  ollama      llama3.2:3b    You are... │
+│ explainer   en    LIVE  supertonic3  F1      1.1x  ollama      llama3.2:3b    You exp... │
 │                                                                                         │
 │ ─────────────────────────────────────────────────────────────────────────────────────── │
 │ n new agent   e edit agent   d delete agent   ↑/↓ move                                  │
@@ -215,7 +215,7 @@ Example of agent definition:
 [agent]
 name = explainer
 language = en
-tts = supertonic
+tts = supertonic3
 voice = F1
 voice_speed = 1.1
 provider = ollama
@@ -521,11 +521,11 @@ vtmate -c philosophers.txt --debate "Aristoteles" "Ptahhotep" "how to achieve ha
 
 ###  Custom voices
 
-`supertonic` and `supersonic2` read their voices from one JSON file per voice:
+`supertonic3` and `supertonic2` read their voices from one JSON file per voice:
 
 ```
-~/.vtmate/tts/supertonic-model/voice_styles/M1.json
-~/.vtmate/tts/supersonic2-model/voice_styles/F3.json
+~/.vtmate/tts/supertonic3-model/voice_styles/M1.json
+~/.vtmate/tts/supertonic2-model/voice_styles/F3.json
 ```
 
 (on Windows `%USERPROFILE%\.vtmate\...`, on macOS `~/.vtmate/...` as well)
@@ -536,7 +536,7 @@ The other engines (`kokoro`, `opentts`) have fixed voice lists.
 
 ###  Voice cloning
 
-Clone a new `supertonic` voice from a short recording, or refine an existing clone further with another one - both run fully offline, no model training knowledge needed.
+Clone a new `supertonic3` voice from a short recording, or refine an existing clone further with another one - both run fully offline, no model training knowledge needed.
 
 **Clone a new voice** from a WAV reference and its transcript:
 
@@ -545,11 +545,11 @@ vtmate --clone-voice <voice_name> <language> <wav_file> <ref_text>
 ```
 
 * `voice_name`: letters, digits and `_` only, and must not already exist.
-* `language`: one of the languages `supertonic` supports (see `vtmate --list-voices`) - only used to train the clone (matches `ref_text` against it, picks built-in probe sentences for `en`/`es`/`fr`/`de`/`it`/`pt`); it does not lock the resulting voice to that language.
+* `language`: one of the languages `supertonic3` supports (see `vtmate --list-voices`) - only used to train the clone (matches `ref_text` against it, picks built-in probe sentences for `en`/`es`/`fr`/`de`/`it`/`pt`); it does not lock the resulting voice to that language.
 * `wav_file`: the reference recording (mono or stereo WAV, ~2-30s, any common sample rate).
 * `ref_text`: the exact words spoken in the recording, quoted - the closer the match, the better the clone. It also sets the tempo: the clone is fitted to say this text in the time the recording takes, so no speed has to be given.
 
-On success it prints `Voice "<voice_name>" ready in supertonic3!` and saves it to `~/.vtmate/tts/supertonic-model/voice_styles/<voice_name>.json`, immediately usable like any other voice: `voice = <voice_name>` in an agent, or `--voice <voice_name>` elsewhere. Like the built-in `M1`-`F5` voices, a cloned voice is multilingual - one file, usable with any of the 31 supported languages regardless of which language it was cloned with.
+On success it prints `Voice "<voice_name>" ready in supertonic3!` and saves it to `~/.vtmate/tts/supertonic3-model/voice_styles/<voice_name>.json`, immediately usable like any other voice: `voice = <voice_name>` in an agent, or `--voice <voice_name>` elsewhere. Like the built-in `M1`-`F5` voices, a cloned voice is multilingual - one file, usable with any of the 31 supported languages regardless of which language it was cloned with.
 
 **Refine an existing voice** further with another recording, without touching the original:
 
@@ -563,18 +563,18 @@ Both commands show a progress popup (current stage, iteration and overall progre
 
 **What to expect from a clone**
 
-Cloning does not train a model on the speaker: it searches for the `supertonic` style vector that best matches the recording, guided mainly by a speaker-embedding similarity. That sets what a clone can and cannot pick up:
+Cloning does not train a model on the speaker: it searches for the `supertonic3` style vector that best matches the recording, guided mainly by a speaker-embedding similarity. That sets what a clone can and cannot pick up:
 
 * **Length**: 10-20 s of one or two natural sentences is the sweet spot. Speaker embeddings saturate at around 5-10 s of clean speech, and the transcript is synthesized as a single utterance, so windows over ~15 s trigger a warning. A longer clip adds little; a cleaner one adds a lot.
 * **Quality over quantity**: a quiet room, no music or reverb, a single speaker, and a `ref_text` that matches the audio word for word matter more than extra seconds.
 * **Timbre, pitch range and rhythm** transfer well - this is what the search fits.
 * **Tempo is detected, not configured**: the speech in the recording is measured and the clone is fitted to speak `ref_text` at that pace (which is why `ref_text` is needed). That pace becomes the voice's `voice_speed = 1.0`; the setting and `ARROW_UP` / `ARROW_DOWN` scale from there.
-* **Accent** transfers only partly. `supertonic` reads raw text with no phoneme layer, so pronunciation (vowel quality, `r`, `th`, ...) comes from the model's own rendering of each language and cannot be changed by the style. The speaker's melody and pacing carry over; their individual sounds do not. Clone from a recording in the language you will mostly synthesize, and the prosody will fit that language best.
+* **Accent** transfers only partly. `supertonic3` reads raw text with no phoneme layer, so pronunciation (vowel quality, `r`, `th`, ...) comes from the model's own rendering of each language and cannot be changed by the style. The speaker's melody and pacing carry over; their individual sounds do not. Clone from a recording in the language you will mostly synthesize, and the prosody will fit that language best.
 * **Expressive range** comes from coverage, not length: one clip pins down one delivery. Use `--refine-voice` with a different sentence (a question, an emphatic line) to widen it.
 
 ###  Model files
 
-vtmate self contains (no need for manual installation) espeak-ng-data, the whisper tiny & small models, kokoro model and voices, supersonic2 model and voices and supertonic (Supertonic 3) model and voices which will be autoextracted from the binary when running vtmate if they are not found in next locations:
+vtmate self contains (no need for manual installation) espeak-ng-data, the whisper tiny & small models, kokoro model and voices, supertonic2 model and voices and supertonic3 (Supertonic 3) model and voices which will be autoextracted from the binary when running vtmate if they are not found in next locations:
 
 whisper models:
 ```
@@ -593,44 +593,44 @@ espeak phonemes (used by kokoro):
 - `~/.vtmate/espeak-ng-data.tar.gz`
 ```
 
-supersonic2 files:
+supertonic2 files:
 ```
-~/.vtmate/tts/supersonic2-model/onnx/duration_predictor.onnx
-~/.vtmate/tts/supersonic2-model/onnx/text_encoder.onnx
-~/.vtmate/tts/supersonic2-model/onnx/tts.json
-~/.vtmate/tts/supersonic2-model/onnx/unicode_indexer.json
-~/.vtmate/tts/supersonic2-model/onnx/vector_estimator.onnx
-~/.vtmate/tts/supersonic2-model/onnx/vocoder.onnx
-~/.vtmate/tts/supersonic2-model/voice_styles/M1.json
-~/.vtmate/tts/supersonic2-model/voice_styles/M2.json
-~/.vtmate/tts/supersonic2-model/voice_styles/M3.json
-~/.vtmate/tts/supersonic2-model/voice_styles/M4.json
-~/.vtmate/tts/supersonic2-model/voice_styles/M5.json
-~/.vtmate/tts/supersonic2-model/voice_styles/F1.json
-~/.vtmate/tts/supersonic2-model/voice_styles/F2.json
-~/.vtmate/tts/supersonic2-model/voice_styles/F3.json
-~/.vtmate/tts/supersonic2-model/voice_styles/F4.json
-~/.vtmate/tts/supersonic2-model/voice_styles/F5.json
+~/.vtmate/tts/supertonic2-model/onnx/duration_predictor.onnx
+~/.vtmate/tts/supertonic2-model/onnx/text_encoder.onnx
+~/.vtmate/tts/supertonic2-model/onnx/tts.json
+~/.vtmate/tts/supertonic2-model/onnx/unicode_indexer.json
+~/.vtmate/tts/supertonic2-model/onnx/vector_estimator.onnx
+~/.vtmate/tts/supertonic2-model/onnx/vocoder.onnx
+~/.vtmate/tts/supertonic2-model/voice_styles/M1.json
+~/.vtmate/tts/supertonic2-model/voice_styles/M2.json
+~/.vtmate/tts/supertonic2-model/voice_styles/M3.json
+~/.vtmate/tts/supertonic2-model/voice_styles/M4.json
+~/.vtmate/tts/supertonic2-model/voice_styles/M5.json
+~/.vtmate/tts/supertonic2-model/voice_styles/F1.json
+~/.vtmate/tts/supertonic2-model/voice_styles/F2.json
+~/.vtmate/tts/supertonic2-model/voice_styles/F3.json
+~/.vtmate/tts/supertonic2-model/voice_styles/F4.json
+~/.vtmate/tts/supertonic2-model/voice_styles/F5.json
 ```
 
-supertonic files (Supertonic 3, https://huggingface.co/Supertone/supertonic-3):
+supertonic3 files (Supertonic 3, https://huggingface.co/Supertone/supertonic-3):
 ```
-~/.vtmate/tts/supertonic-model/onnx/duration_predictor.onnx
-~/.vtmate/tts/supertonic-model/onnx/text_encoder.onnx
-~/.vtmate/tts/supertonic-model/onnx/tts.json
-~/.vtmate/tts/supertonic-model/onnx/unicode_indexer.json
-~/.vtmate/tts/supertonic-model/onnx/vector_estimator.onnx
-~/.vtmate/tts/supertonic-model/onnx/vocoder.onnx
-~/.vtmate/tts/supertonic-model/voice_styles/M1.json
-~/.vtmate/tts/supertonic-model/voice_styles/M2.json
-~/.vtmate/tts/supertonic-model/voice_styles/M3.json
-~/.vtmate/tts/supertonic-model/voice_styles/M4.json
-~/.vtmate/tts/supertonic-model/voice_styles/M5.json
-~/.vtmate/tts/supertonic-model/voice_styles/F1.json
-~/.vtmate/tts/supertonic-model/voice_styles/F2.json
-~/.vtmate/tts/supertonic-model/voice_styles/F3.json
-~/.vtmate/tts/supertonic-model/voice_styles/F4.json
-~/.vtmate/tts/supertonic-model/voice_styles/F5.json
+~/.vtmate/tts/supertonic3-model/onnx/duration_predictor.onnx
+~/.vtmate/tts/supertonic3-model/onnx/text_encoder.onnx
+~/.vtmate/tts/supertonic3-model/onnx/tts.json
+~/.vtmate/tts/supertonic3-model/onnx/unicode_indexer.json
+~/.vtmate/tts/supertonic3-model/onnx/vector_estimator.onnx
+~/.vtmate/tts/supertonic3-model/onnx/vocoder.onnx
+~/.vtmate/tts/supertonic3-model/voice_styles/M1.json
+~/.vtmate/tts/supertonic3-model/voice_styles/M2.json
+~/.vtmate/tts/supertonic3-model/voice_styles/M3.json
+~/.vtmate/tts/supertonic3-model/voice_styles/M4.json
+~/.vtmate/tts/supertonic3-model/voice_styles/M5.json
+~/.vtmate/tts/supertonic3-model/voice_styles/F1.json
+~/.vtmate/tts/supertonic3-model/voice_styles/F2.json
+~/.vtmate/tts/supertonic3-model/voice_styles/F3.json
+~/.vtmate/tts/supertonic3-model/voice_styles/F4.json
+~/.vtmate/tts/supertonic3-model/voice_styles/F5.json
 ```
 
 * If you want to avoid sound interruptions you can use `ptt` mode or increase the `sound_threshold_peak` for your microphone levels.
@@ -646,51 +646,51 @@ vtmate --help
 
 ## Language support
 
-Engines: **SS2** Supersonic 2 (5 languages, 10 voices: M1-M5, F1-F5), **ST3** Supertonic 3 (31 languages, its own 10 voices: M1-M5, F1-F5, usable in every one of its languages), **KK** Kokoro (8 languages), **OpenTTS** (external docker service). Total languages: 41.
+Engines: **ST2** Supertonic 2 (5 languages, 10 voices: M1-M5, F1-F5), **ST3** Supertonic 3 (31 languages, its own 10 voices: M1-M5, F1-F5, usable in every one of its languages), **KK** Kokoro (8 languages), **OpenTTS** (external docker service). Total languages: 41.
 
 | ID |           Language       |      Support       |        TTS supported                          |   Number of voices  |
 |----|--------------------------|--------------------|-----------------------------------------------------------|-------------|
-| en |   🇬🇧  English            |  🏆 Best support   |    ✅ SS2    ✅ ST3    ✅ KK    ✅ OpenTTS     | > 48 voices
-| es |   🇪🇸  Spanish            |  🏆 Best support   |    ✅ SS2    ✅ ST3    ✅ KK    ✅ OpenTTS     | > 24 voices
-| fr |   🇫🇷  French             |  🏆 Best support   |    ✅ SS2    ✅ ST3    ✅ KK    ✅ OpenTTS     | > 22 voices
-| ja |   🇯🇵  Japanese           |  🏆 Best support   |    ❌ SS2    ✅ ST3    ✅ KK    ✅ OpenTTS     | > 16 voices
-| pt |   🇵🇹  Portuguese         |  🏆 Best support   |    ✅ SS2    ✅ ST3    ✅ KK    ❌ OpenTTS     | > 23 voices
-| ko |   🇰🇷  Korean             |  🏆 Best support   |    ✅ SS2    ✅ ST3    ❌ KK    ✅ OpenTTS     | 21 voices
-| it |   🇮🇹  Italian            |  🏆 Best support   |    ❌ SS2    ✅ ST3    ✅ KK    ✅ OpenTTS     | > 13 voices
-| hi |   🇮🇳  Hindi              |  🏆 Best support   |    ❌ SS2    ✅ ST3    ✅ KK    ✅ OpenTTS     | > 14 voices
-| zh |   🇨🇳  Mandarin Chinese   |  🥈 Good support   |    ❌ SS2    ❌ ST3    ✅ KK    ✅ OpenTTS     | > 9 voices
-| ar |   🇸🇦  Arabic             |  🥈 Good support   |    ❌ SS2    ✅ ST3    ❌ KK    ✅ OpenTTS     | 11 voices
-| cs |   🇨🇿  Czech              |  🥈 Good support   |    ❌ SS2    ✅ ST3    ❌ KK    ✅ OpenTTS     | 11 voices
-| de |   🇩🇪  German             |  🥈 Good support   |    ❌ SS2    ✅ ST3    ❌ KK    ✅ OpenTTS     | 11 voices
-| el |   🇬🇷  Greek              |  🥈 Good support   |    ❌ SS2    ✅ ST3    ❌ KK    ✅ OpenTTS     | 11 voices
-| fi |   🇫🇮  Finnish            |  🥈 Good support   |    ❌ SS2    ✅ ST3    ❌ KK    ✅ OpenTTS     | 11 voices
-| hu |   🇭🇺  Hungarian          |  🥈 Good support   |    ❌ SS2    ✅ ST3    ❌ KK    ✅ OpenTTS     | 11 voices
-| nl |   🇳🇱  Dutch              |  🥈 Good support   |    ❌ SS2    ✅ ST3    ❌ KK    ✅ OpenTTS     | 11 voices
-| ru |   🇷🇺  Russian            |  🥈 Good support   |    ❌ SS2    ✅ ST3    ❌ KK    ✅ OpenTTS     | 11 voices
-| sv |   🇸🇪  Swedish            |  🥈 Good support   |    ❌ SS2    ✅ ST3    ❌ KK    ✅ OpenTTS     | 11 voices
-| tr |   🇹🇷  Turkish            |  🥈 Good support   |    ❌ SS2    ✅ ST3    ❌ KK    ✅ OpenTTS     | 11 voices
-| bg |   🇧🇬  Bulgarian          |  Supported         |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
-| hr |   🇭🇷  Croatian           |  Supported         |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
-| da |   🇩🇰  Danish             |  Supported         |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
-| et |   🇪🇪  Estonian           |  Supported         |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
-| id |   🇮🇩  Indonesian         |  Supported         |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
-| lv |   🇱🇻  Latvian            |  Supported         |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
-| lt |   🇱🇹  Lithuanian         |  Supported         |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
-| pl |   🇵🇱  Polish             |  Supported         |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
-| ro |   🇷🇴  Romanian           |  Supported         |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
-| sk |   🇸🇰  Slovak             |  Supported         |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
-| sl |   🇸🇮  Slovenian          |  Supported         |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
-| uk |   🇺🇦  Ukrainian          |  Supported         |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
-| vi |   🇻🇳  Vietnamese         |  Supported         |    ❌ SS2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
-| bn |   🇧🇩  Bengali            |  Supported         |    ❌ SS2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
-| ca |   🇪🇸  Catalan            |  Supported         |    ❌ SS2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
-| gu |   🇮🇳  Gujarati           |  Supported         |    ❌ SS2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
-| kn |   🇮🇳  Kannada            |  Supported         |    ❌ SS2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
-| mr |   🇮🇳  Marathi            |  Supported         |    ❌ SS2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
-| pa |   🇮🇳  Punjabi            |  Supported         |    ❌ SS2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
-| sw |   🇰🇪  Swahili            |  Supported         |    ❌ SS2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
-| ta |   🇮🇳  Tamil              |  Supported         |    ❌ SS2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
-| te |   🇮🇳  Telugu             |  Supported         |    ❌ SS2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
+| en |   🇬🇧  English            |  🏆 Best support   |    ✅ ST2    ✅ ST3    ✅ KK    ✅ OpenTTS     | > 48 voices
+| es |   🇪🇸  Spanish            |  🏆 Best support   |    ✅ ST2    ✅ ST3    ✅ KK    ✅ OpenTTS     | > 24 voices
+| fr |   🇫🇷  French             |  🏆 Best support   |    ✅ ST2    ✅ ST3    ✅ KK    ✅ OpenTTS     | > 22 voices
+| ja |   🇯🇵  Japanese           |  🏆 Best support   |    ❌ ST2    ✅ ST3    ✅ KK    ✅ OpenTTS     | > 16 voices
+| pt |   🇵🇹  Portuguese         |  🏆 Best support   |    ✅ ST2    ✅ ST3    ✅ KK    ❌ OpenTTS     | > 23 voices
+| ko |   🇰🇷  Korean             |  🏆 Best support   |    ✅ ST2    ✅ ST3    ❌ KK    ✅ OpenTTS     | 21 voices
+| it |   🇮🇹  Italian            |  🏆 Best support   |    ❌ ST2    ✅ ST3    ✅ KK    ✅ OpenTTS     | > 13 voices
+| hi |   🇮🇳  Hindi              |  🏆 Best support   |    ❌ ST2    ✅ ST3    ✅ KK    ✅ OpenTTS     | > 14 voices
+| zh |   🇨🇳  Mandarin Chinese   |  🥈 Good support   |    ❌ ST2    ❌ ST3    ✅ KK    ✅ OpenTTS     | > 9 voices
+| ar |   🇸🇦  Arabic             |  🥈 Good support   |    ❌ ST2    ✅ ST3    ❌ KK    ✅ OpenTTS     | 11 voices
+| cs |   🇨🇿  Czech              |  🥈 Good support   |    ❌ ST2    ✅ ST3    ❌ KK    ✅ OpenTTS     | 11 voices
+| de |   🇩🇪  German             |  🥈 Good support   |    ❌ ST2    ✅ ST3    ❌ KK    ✅ OpenTTS     | 11 voices
+| el |   🇬🇷  Greek              |  🥈 Good support   |    ❌ ST2    ✅ ST3    ❌ KK    ✅ OpenTTS     | 11 voices
+| fi |   🇫🇮  Finnish            |  🥈 Good support   |    ❌ ST2    ✅ ST3    ❌ KK    ✅ OpenTTS     | 11 voices
+| hu |   🇭🇺  Hungarian          |  🥈 Good support   |    ❌ ST2    ✅ ST3    ❌ KK    ✅ OpenTTS     | 11 voices
+| nl |   🇳🇱  Dutch              |  🥈 Good support   |    ❌ ST2    ✅ ST3    ❌ KK    ✅ OpenTTS     | 11 voices
+| ru |   🇷🇺  Russian            |  🥈 Good support   |    ❌ ST2    ✅ ST3    ❌ KK    ✅ OpenTTS     | 11 voices
+| sv |   🇸🇪  Swedish            |  🥈 Good support   |    ❌ ST2    ✅ ST3    ❌ KK    ✅ OpenTTS     | 11 voices
+| tr |   🇹🇷  Turkish            |  🥈 Good support   |    ❌ ST2    ✅ ST3    ❌ KK    ✅ OpenTTS     | 11 voices
+| bg |   🇧🇬  Bulgarian          |  Supported         |    ❌ ST2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
+| hr |   🇭🇷  Croatian           |  Supported         |    ❌ ST2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
+| da |   🇩🇰  Danish             |  Supported         |    ❌ ST2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
+| et |   🇪🇪  Estonian           |  Supported         |    ❌ ST2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
+| id |   🇮🇩  Indonesian         |  Supported         |    ❌ ST2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
+| lv |   🇱🇻  Latvian            |  Supported         |    ❌ ST2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
+| lt |   🇱🇹  Lithuanian         |  Supported         |    ❌ ST2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
+| pl |   🇵🇱  Polish             |  Supported         |    ❌ ST2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
+| ro |   🇷🇴  Romanian           |  Supported         |    ❌ ST2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
+| sk |   🇸🇰  Slovak             |  Supported         |    ❌ ST2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
+| sl |   🇸🇮  Slovenian          |  Supported         |    ❌ ST2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
+| uk |   🇺🇦  Ukrainian          |  Supported         |    ❌ ST2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
+| vi |   🇻🇳  Vietnamese         |  Supported         |    ❌ ST2    ✅ ST3    ❌ KK    ❌ OpenTTS     | 10 voices
+| bn |   🇧🇩  Bengali            |  Supported         |    ❌ ST2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
+| ca |   🇪🇸  Catalan            |  Supported         |    ❌ ST2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
+| gu |   🇮🇳  Gujarati           |  Supported         |    ❌ ST2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
+| kn |   🇮🇳  Kannada            |  Supported         |    ❌ ST2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
+| mr |   🇮🇳  Marathi            |  Supported         |    ❌ ST2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
+| pa |   🇮🇳  Punjabi            |  Supported         |    ❌ ST2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
+| sw |   🇰🇪  Swahili            |  Supported         |    ❌ ST2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
+| ta |   🇮🇳  Tamil              |  Supported         |    ❌ ST2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
+| te |   🇮🇳  Telugu             |  Supported         |    ❌ ST2    ❌ ST3    ❌ KK    ✅ OpenTTS     | 1 voice
 
 Run `vtmate --list-voices` to print every voice for every language and TTS system.
 

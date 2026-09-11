@@ -22,6 +22,7 @@ mod engine;
 mod html_export;
 mod keyboard;
 mod llm;
+mod llm_cli;
 mod log;
 mod playback;
 mod record;
@@ -106,8 +107,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   assets::ensure_piper_espeak_env();
   // make sure the user has the whisper + tts models unpacked
   assets::ensure_assets_env();
-  assets::ensure_supersonic2_assets();
-  assets::ensure_supertonic_assets();
+  assets::ensure_supertonic2_assets();
+  assets::ensure_supertonic3_assets();
 
   // ---------------------------------------------------
   // setup thread communication channels
@@ -192,10 +193,10 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let content = util::read_file(filename);
 
     // Initialize TTS engines only if needed
-    let use_supersonic = agents.iter().any(|a| a.tts == "supersonic2");
+    let use_supertonic2 = agents.iter().any(|a| a.tts == "supertonic2");
     let use_kokoro = agents.iter().any(|a| a.tts == "kokoro");
-    if use_supersonic {
-      tts::supersonic2_tts::start_supersonic_engine()?;
+    if use_supertonic2 {
+      tts::supertonic2_tts::start_supertonic2_engine()?;
     }
     if use_kokoro {
       tts::kokoro_tts::start_kokoro_engine()?;
@@ -815,7 +816,7 @@ fn run_clone_voice_cli(voice_name: &str, language: &str, wav_file: &str, ref_tex
   // opened above is always left before this process exits one way or
   // another - otherwise the terminal would be stranded on a blank screen.
   let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-    let render_progress = move |p: tts::supertonic_tts::CloneProgressInfo| {
+    let render_progress = move |p: tts::supertonic3_tts::CloneProgressInfo| {
       ui::render_clone_progress_popup(
         &popup_title,
         &p.stages,
@@ -825,9 +826,9 @@ fn run_clone_voice_cli(voice_name: &str, language: &str, wav_file: &str, ref_tex
       );
     };
     if refine {
-      tts::supertonic_tts::refine_voice(voice_name, language, wav_file, ref_text, render_progress)
+      tts::supertonic3_tts::refine_voice(voice_name, language, wav_file, ref_text, render_progress)
     } else {
-      tts::supertonic_tts::clone_voice(voice_name, language, wav_file, ref_text, render_progress)
+      tts::supertonic3_tts::clone_voice(voice_name, language, wav_file, ref_text, render_progress)
     }
   }));
   ui::close_clone_progress_popup();

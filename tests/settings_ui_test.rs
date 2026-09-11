@@ -10,8 +10,8 @@ mod tts {
   }
   pub fn get_voices_for(tts: &str, lang: &str) -> Vec<String> {
     match (tts, lang) {
-      ("supertonic", "en") => vec!["M1".into(), "M2".into(), "F1".into()],
-      ("supertonic", "es") => vec!["M1".into()],
+      ("supertonic3", "en") => vec!["M1".into(), "M2".into(), "F1".into()],
+      ("supertonic3", "es") => vec!["M1".into()],
       ("kokoro", "en") => vec!["bf_alice".into(), "am_puck".into()],
       _ => vec![],
     }
@@ -102,7 +102,7 @@ llm_background_ptt_combo = ctrl+alt+a
 [agent]
 name = main agent
 language = en
-tts = supertonic
+tts = supertonic3
 voice = M1
 voice_speed = 1.1
 provider = ollama
@@ -271,7 +271,7 @@ fn the_form_edits_an_agent_and_saves_it_to_the_file() {
 
   // TTS, then the language and voice it allows
   press(&state, KeyCode::Down);
-  press(&state, KeyCode::Right); // supertonic -> supersonic2 (no voices)
+  press(&state, KeyCode::Right); // supertonic3 -> supertonic2 (no voices)
   press(&state, KeyCode::Right); // -> kokoro
   let draft = ui(&state).form.draft.clone();
   assert_eq!(draft.tts, "kokoro");
@@ -474,7 +474,7 @@ fn many_agents(n: usize) -> String {
   let mut out = String::new();
   for i in 0..n {
     out.push_str(&format!(
-      "[agent]\nname = agent {:02}\nlanguage = en\ntts = supertonic\nvoice = M1\n\
+      "[agent]\nname = agent {:02}\nlanguage = en\ntts = supertonic3\nvoice = M1\n\
        voice_speed = 1.2\nptt = true\nprovider = ollama\nbaseurl = http://127.0.0.1:11434\n\
        model = llama3.2:3b\nsystem_prompt = you are agent {:02}\nsound_threshold_peak = 0.05\n\
        end_silence_ms = 700\nwhisper_model_path = ~/.whisper-models/ggml-tiny.bin\n\n",

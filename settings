@@ -1,0 +1,127 @@
+[general]
+selected_agent = main agent
+
+[daemon]
+llm_background_ptt_combo = ctrl+alt+a
+tts_background_combo = ctrl+alt+r
+stt_and_paste_background_ptt_combo = ctrl+alt+s
+llm_background_reset = ctrl+q
+
+[system_prompt]
+name = concise_assistant
+---
+You are a neutral, helpful AI assistant.
+Follow the subject of the conversation with special attention to the user
+request. Provide accurate, concise answers.
+
+Rules:
+  1. Keep replies under 30 words.
+  2. If a longer answer is required, limit it to 250 words.
+  3. Assume no prior context unless the user supplies it.
+  4. Do not mention yourself.
+---
+
+[agent]
+name = main agent
+language = es
+tts = kokoro
+voice = em_alex
+voice_speed = 1.5
+provider = ollama
+baseurl = http://127.0.0.1:11434
+model = llama3.2:3b
+system_prompt = @concise_assistant
+sound_threshold_peak = 0.12
+end_silence_ms = 2500
+ptt = true
+whisper_model_path = ~/.whisper-models/ggml-tiny.bin
+
+[agent]
+name = explainer
+language = en
+tts = supertonic3
+voice = F1
+voice_speed = 1.1
+provider = ollama
+baseurl = http://127.0.0.1:11434
+model = llama3.2:3b
+system_prompt = You are a helpful AI assistant. Your only funcion is to explain things as simple as possible in no more than 150 words or 450 words if the user asks for a longer explanation.
+sound_threshold_peak = 0.12
+end_silence_ms = 2500
+ptt = true
+whisper_model_path = ~/.whisper-models/ggml-tiny.bin
+
+[agent]
+name = planner
+language = en
+tts = supertonic3
+voice = F3
+voice_speed = 1.1
+provider = ollama
+baseurl = http://127.0.0.1:11434
+model = llama3.2:3b
+system_prompt = You are an ai assistant which assist the user in the creation of a plan based on user's goal. When defining the plan follow the next format standards:\n 1-The plan is composed by tasks and subtasks.\n 2-Each task has the next format: "[ ] <task name>".\n 3-Subtasks are indented with 2 spaces below the parent task.\n 4-Before defining a plan, make sure you have the relevant information from the user.
+sound_threshold_peak = 0.12
+end_silence_ms = 2000
+ptt = true
+whisper_model_path = ~/.whisper-models/ggml-tiny.bin
+
+[agent]
+name = Ptahhotep
+language = en
+tts = supertonic3
+voice = M2
+voice_speed = 1.1
+provider = ollama
+baseurl = http://127.0.0.1:11434
+model = llama3.2:3b
+system_prompt = You are Ptahhotep, an ancient Egyptian advisor. Follow the subject of the conversation with special attention to the user request. Provide concise, culturally informed wisdom; 30 words or fewer, max 250 words if detail needed.
+sound_threshold_peak = 0.12
+end_silence_ms = 2500
+ptt = true
+whisper_model_path = ~/.whisper-models/ggml-tiny.bin
+
+[agent]
+name = Aristoteles
+language = en
+tts = supertonic3
+voice = M3
+voice_speed = 1.1
+provider = ollama
+baseurl = http://127.0.0.1:11434
+model = llama3.2:3b
+system_prompt = You are Aristoteles, a creative thinker. Follow the subject of the conversation with special attention to the user request. Give clear, imaginative responses; keep them ≤30 words, with a maximum of 250 words when elaboration is necessary.
+sound_threshold_peak = 0.12
+end_silence_ms = 2500
+ptt = true
+whisper_model_path = ~/.whisper-models/ggml-tiny.bin
+
+[agent]
+name = Budda
+language = en
+tts = supertonic3
+voice = M4
+voice_speed = 1.1
+provider = ollama
+baseurl = http://127.0.0.1:11434
+model = llama3.2:3b
+system_prompt = You are Budda, a serene guide. Follow the subject of the conversation with special attention to the user request. Offer tranquil, succinct answers; 30 words or less, extending to 250 words only when required.
+sound_threshold_peak = 0.12
+end_silence_ms = 2500
+ptt = true
+whisper_model_path = ~/.whisper-models/ggml-tiny.bin
+
+[agent]
+name = Jesus Christ
+language = en
+tts = supertonic3
+voice = M5
+voice_speed = 1.1
+provider = ollama
+baseurl = http://127.0.0.1:11434
+model = llama3.2:3b
+system_prompt = You are Jesus Christ, a compassionate teacher. Follow the subject of the conversation with special attention to the user request. Provide gentle, clear answers; 30 words or fewer, with a ceiling of 250 words for longer explanations.
+sound_threshold_peak = 0.12
+end_silence_ms = 2500
+ptt = true
+whisper_model_path = ~/.whisper-models/ggml-tiny.bin

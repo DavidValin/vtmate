@@ -1,5 +1,5 @@
 // ------------------------------------------------------------------
-//  supersonic2 tts
+//  supertonic2 tts
 // ------------------------------------------------------------------
 
 use crate::audio::AudioChunk;
@@ -12,23 +12,23 @@ use std::sync::{
 use std::thread;
 use std::time::Duration;
 use tokio::runtime::Runtime;
-extern crate supersonic2_tts as supersonic2_tts_crate;
-use super::{SUPSONIC_ENGINE, SpeakOutcome};
-use supersonic2_tts_crate::{Device, TtsEngine, gpu_support_compiled};
+extern crate supertonic2_tts as supertonic2_tts_crate;
+use super::{SUPERTONIC2_ENGINE, SpeakOutcome};
+use supertonic2_tts_crate::{Device, TtsEngine, gpu_support_compiled};
 
 // API
 // ------------------------------------------------------------------
 
-pub const SUPERSONIC2_VOICE_STYLES: [&str; 10] =
+pub const SUPERTONIC2_VOICE_STYLES: [&str; 10] =
   ["M1", "M2", "M3", "M4", "M5", "F1", "F2", "F3", "F4", "F5"];
 
 /// Root of the extracted model: <root>/onnx/*.onnx and <root>/voice_styles/*.json
 pub fn model_root() -> std::path::PathBuf {
-  if let Some(dir) = std::env::var_os("SUPERSONIC2_DATA_DIRECTORY") {
+  if let Some(dir) = std::env::var_os("SUPERTONIC2_DATA_DIRECTORY") {
     return std::path::PathBuf::from(dir);
   }
   let home = crate::util::get_user_home_path().expect("Could not determine home directory");
-  home.join(".vtmate").join("tts").join("supersonic2-model")
+  home.join(".vtmate").join("tts").join("supertonic2-model")
 }
 
 /// Directory holding one `<voice>.json` per voice.
@@ -45,9 +45,9 @@ pub struct StreamingTts {
 }
 
 // Engine initialization
-pub fn start_supersonic_engine() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+pub fn start_supertonic2_engine() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let engine = load_engine()?;
-  SUPSONIC_ENGINE.set(Arc::new(Mutex::new(engine))).ok();
+  SUPERTONIC2_ENGINE.set(Arc::new(Mutex::new(engine))).ok();
   Ok(())
 }
 
@@ -67,7 +67,7 @@ fn reload_engine_on_cpu(engine: &Arc<Mutex<TtsEngine>>, rt: &Runtime) -> bool {
     Ok(cpu) => match engine.lock() {
       Ok(mut slot) => {
         *slot = cpu;
-        crate::log::log("info", "[supersonic2_tts] now running on CPU");
+        crate::log::log("info", "[supertonic2_tts] now running on CPU");
         true
       }
       Err(_) => false,
@@ -75,14 +75,14 @@ fn reload_engine_on_cpu(engine: &Arc<Mutex<TtsEngine>>, rt: &Runtime) -> bool {
     Err(e) => {
       crate::log::log(
         "error",
-        &format!("[supersonic2_tts] could not rebuild the engine on the CPU: {}", e),
+        &format!("[supertonic2_tts] could not rebuild the engine on the CPU: {}", e),
       );
       false
     }
   }
 }
 
-/// Load the Supersonic 2 model. Uses the GPU when this build carries a GPU
+/// Load the Supertonic 2 model. Uses the GPU when this build carries a GPU
 /// execution provider (`ort-cuda` feature) and it can be initialised,
 /// otherwise the CPU. `TtsEngine::new` alone is CPU only.
 fn load_engine() -> Result<TtsEngine, Box<dyn std::error::Error + Send + Sync>> {
@@ -100,25 +100,25 @@ fn load_engine() -> Result<TtsEngine, Box<dyn std::error::Error + Send + Sync>> 
       Device::Gpu { device_id: 0 },
     )) {
       Ok(e) => {
-        crate::log::log("info", "[supersonic2_tts] running on GPU");
+        crate::log::log("info", "[supertonic2_tts] running on GPU");
         return Ok(e);
       }
       Err(e) => crate::log::log(
         "warning",
         &format!(
-          "[supersonic2_tts] GPU unavailable, falling back to CPU: {}",
+          "[supertonic2_tts] GPU unavailable, falling back to CPU: {}",
           e
         ),
       ),
     }
   }
   let engine = rt.block_on(TtsEngine::new(onnx, base, false))?;
-  crate::log::log("info", "[supersonic2_tts] running on CPU");
+  crate::log::log("info", "[supertonic2_tts] running on CPU");
   Ok(engine)
 }
 
-// Speak via Supersonic2
-pub fn speak_via_supersonic2(
+// Speak via Supertonic2
+pub fn speak_via_supertonic2(
   text: &str,
   voice: &str,
   speed: f32,
@@ -131,12 +131,12 @@ pub fn speak_via_supersonic2(
   if text.is_empty() {
     return Ok(SpeakOutcome::Completed);
   }
-  let engine = match SUPSONIC_ENGINE.get() {
+  let engine = match SUPERTONIC2_ENGINE.get() {
     Some(e) => e.clone(),
     None => {
       let e = Arc::new(Mutex::new(load_engine()?));
-      let _ = SUPSONIC_ENGINE.set(e);
-      SUPSONIC_ENGINE.get().expect("engine just set").clone()
+      let _ = SUPERTONIC2_ENGINE.set(e);
+      SUPERTONIC2_ENGINE.get().expect("engine just set").clone()
     }
   };
 
@@ -278,7 +278,7 @@ impl StreamingTts {
               crate::log::log(
                 "warning",
                 &format!(
-                  "[supersonic2_tts] GPU synthesis failed ({}); falling back to the CPU for the rest of this run",
+                  "[supertonic2_tts] GPU synthesis failed ({}); falling back to the CPU for the rest of this run",
                   e
                 ),
               );
@@ -326,7 +326,7 @@ impl StreamingTts {
               // nothing said about why.
               crate::log::log(
                 "error",
-                &format!("[supersonic2_tts] synthesis failed for chunk '{}': {}", chunk, e),
+                &format!("[supertonic2_tts] synthesis failed for chunk '{}': {}", chunk, e),
               );
               break;
             }
