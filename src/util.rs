@@ -18,28 +18,22 @@ pub fn looks_like_gpu_failure(msg: &str) -> bool {
     .any(|needle| msg.contains(needle))
 }
 
-/// What to *tell someone* about a GPU failure, as one short phrase.
+/// A GPU failure as one short phrase, for the line on screen.
 ///
-/// `looks_like_gpu_failure` decides whether to fall back; this decides what
-/// the line on screen says while it happens. The raw text is not fit to show:
-/// ONNX Runtime reports a full card as around fifteen lines of C++ template
-/// signatures, absolute paths from the machine it was built on, and the
-/// `cublasCreate` call site - inside which the only word that matters to
-/// anyone is "memory". Printing that mid-conversation buries the one thing
-/// the user can act on, so the detail goes to the log at a level only
-/// `--verbose` shows and the screen gets the sentence.
+/// ONNX Runtime reports a full card as fifteen lines of C++ template
+/// signatures and build paths, in which the only word that matters is
+/// "memory". The screen gets the sentence; the raw text goes to the log,
+/// which only `--verbose` shows.
 ///
-/// Unrecognised trouble deliberately gets a vague phrase rather than a guess:
-/// the fallback happens either way, and being wrong about *why* is worse than
-/// admitting the card simply refused.
+/// Unrecognised trouble gets a vague phrase rather than a guess: the fallback
+/// happens either way, and being wrong about why is worse than saying little.
 pub fn describe_gpu_failure(msg: &str) -> &'static str {
   let msg = msg.to_ascii_lowercase();
   let has = |needles: &[&str]| needles.iter().any(|needle| msg.contains(needle));
 
-  // Checked before the initialisation cases below: a card that is merely full
-  // often reports it *as* a failure to initialise something (cuBLAS cannot
-  // create its handle without a workspace), and "out of memory" is both the
-  // likelier cause and the more useful thing to be told.
+  // Before the initialisation cases: a full card often reports itself as a
+  // failure to initialise (cuBLAS needs a workspace for its handle), and out
+  // of memory is both likelier and more useful to say.
   if has(&[
     "alloc_failed",
     "out of memory",
@@ -102,10 +96,10 @@ pub fn read_file(path: &str) -> String {
       Err(_) => {
         let (decoded, _encoding, had_errors) = WINDOWS_1252.decode(&stdin_bytes);
         if !had_errors {
-          // eprintln!("⚠️  Stdin encoded as Windows-1252/Latin-1, converting to UTF-8");
+          // eprintln!("▲  Stdin encoded as Windows-1252/Latin-1, converting to UTF-8");
           decoded.to_string()
         } else {
-          // eprintln!("⚠️  Stdin encoding unknown, using lossy UTF-8 conversion");
+          // eprintln!("▲  Stdin encoding unknown, using lossy UTF-8 conversion");
           String::from_utf8_lossy(&stdin_bytes).to_string()
         }
       }
@@ -120,10 +114,10 @@ pub fn read_file(path: &str) -> String {
           } else {
             let (decoded, _encoding, had_errors) = WINDOWS_1252.decode(&bytes);
             if !had_errors {
-              // eprintln!("⚠️  File encoded as Windows-1252/Latin-1, converting to UTF-8");
+              // eprintln!("▲  File encoded as Windows-1252/Latin-1, converting to UTF-8");
               decoded.to_string()
             } else {
-              // eprintln!("⚠️  File encoding unknown, using lossy UTF-8 conversion");
+              // eprintln!("▲  File encoding unknown, using lossy UTF-8 conversion");
               String::from_utf8_lossy(&bytes).to_string()
             }
           }
@@ -161,51 +155,19 @@ pub fn env_u64(name: &str, default: u64) -> u64 {
     .unwrap_or(default)
 }
 
-pub fn get_flag(lang: &str) -> &str {
-  match lang {
-    "en" => "🇬🇧",
-    "es" => "🇪🇸",
-    "zh" => "🇨🇳",
-    "ja" => "🇯🇵",
-    "pt" => "🇵🇹",
-    "it" => "🇮🇹",
-    "hi" => "🇮🇳",
-    "fr" => "🇫🇷",
-    "ar" => "🇸🇦",
-    "bn" => "🇧🇩",
-    "ca" => "🇪🇸",
-    "cs" => "🇨🇿",
-    "de" => "🇩🇪",
-    "el" => "🇬🇷",
-    "fi" => "🇫🇮",
-    "gu" => "🇮🇳",
-    "hu" => "🇭🇺",
-    "kn" => "🇮🇳",
-    "ko" => "🇰🇷",
-    "mr" => "🇮🇳",
-    "nl" => "🇳🇱",
-    "pa" => "🇮🇳",
-    "ru" => "🇷🇺",
-    "sv" => "🇸🇪",
-    "sw" => "🇰🇪",
-    "ta" => "🇮🇳",
-    "te" => "🇮🇳",
-    "tr" => "🇹🇷",
-    "bg" => "🇧🇬",
-    "hr" => "🇭🇷",
-    "da" => "🇩🇰",
-    "et" => "🇪🇪",
-    "id" => "🇮🇩",
-    "lt" => "🇱🇹",
-    "lv" => "🇱🇻",
-    "pl" => "🇵🇱",
-    "ro" => "🇷🇴",
-    "sk" => "🇸🇰",
-    "sl" => "🇸🇮",
-    "uk" => "🇺🇦",
-    "vi" => "🇻🇳",
-    _ => "",
-  }
+/// The language as a two-letter code, upper case.
+///
+/// Two columns on every terminal, which a flag is not: a flag is a pair of
+/// regional indicators, drawn as one two-column glyph where there is a font
+/// for it and as two letters in four columns where there is not, so nothing
+/// laying out a line can rely on its width.
+pub fn lang_code(lang: &str) -> String {
+  lang
+    .chars()
+    .filter(|c| c.is_ascii_alphabetic())
+    .take(2)
+    .collect::<String>()
+    .to_ascii_uppercase()
 }
 
 pub fn terminal_supported() -> bool {
@@ -272,6 +234,32 @@ pub fn strip_special_chars(s: &str) -> String {
 /// phrases through `in_code`), then special characters stripped.
 pub fn tts_text(phrase: &str, in_code: &mut bool) -> String {
   strip_special_chars(&strip_code_blocks(phrase, in_code))
+}
+
+#[cfg(test)]
+mod lang_code_tests {
+  use super::lang_code;
+
+  #[test]
+  fn every_language_is_two_columns() {
+    for lang in [
+      "en", "es", "zh", "ja", "pt", "it", "hi", "fr", "ar", "bn", "ca", "cs", "de", "el", "fi",
+      "gu", "hu", "kn", "ko", "mr", "nl", "pa", "ru", "sv", "sw", "ta", "te", "tr", "bg", "hr",
+      "da", "et", "id", "lt", "lv", "pl", "ro", "sk", "sl", "uk", "vi",
+    ] {
+      assert_eq!(lang_code(lang).chars().count(), 2, "{}", lang);
+    }
+  }
+
+  #[test]
+  fn codes_are_upper_case_and_ascii() {
+    assert_eq!(lang_code("es"), "ES");
+    assert_eq!(lang_code("EN"), "EN");
+    // A longer tag keeps its first two letters; a region suffix is dropped.
+    assert_eq!(lang_code("cmn"), "CM");
+    assert_eq!(lang_code("pt-BR"), "PT");
+    assert_eq!(lang_code(""), "");
+  }
 }
 
 #[cfg(test)]
@@ -470,18 +458,29 @@ pub fn run_exit_hook() {
 pub fn terminate(code: i32) -> ! {
   // no more bottom bars: whatever is on screen now is the last thing shown
   crate::ui::UI_SHUTDOWN.store(true, std::sync::atomic::Ordering::Relaxed);
+  // Bounded wait: a daemon-attach reader thread keeps feeding the UI thread
+  // regardless of this call, so it can still be writing after the flag above
+  // is set. A stuck UI thread must not hang the exit.
+  crate::ui::wait_for_ui_stopped(std::time::Duration::from_millis(200));
   // close the wav of the turn --save-html was still recording
   crate::html_export::finish();
   run_exit_hook();
    // Disable raw mode if enabled, to restore terminal state
    let _ = crossterm::terminal::disable_raw_mode();
-  // Leave the alternate screen if something (e.g. --clone-voice's progress
-  // popup) switched to it - a no-op on the primary screen, but mandatory
-  // here since this is the only exit path every close, Ctrl-C included,
-  // funnels through, and never leaving would strand the terminal on a blank
-  // alternate screen after the process is gone.
+  // Leave the alternate screen only if something (e.g. --clone-voice's
+  // progress popup, or the settings/debate popup) actually switched to it -
+  // this is the only exit path every close, Ctrl-C included, funnels
+  // through, so never leaving would strand the terminal on a blank alternate
+  // screen after the process is gone. But sending this unconditionally is
+  // not the harmless no-op it looks like on the primary screen: CSI ?1049l
+  // restores whatever cursor position a terminal last saved for CSI ?1049h,
+  // even with no matching enter this session, which can snap the cursor to
+  // an unrelated, stale position instead of leaving it where the very last
+  // thing this process printed put it.
   let mut stdout = std::io::stdout();
-  let _ = execute!(stdout, LeaveAlternateScreen);
+  if crate::ui::ON_ALT_SCREEN.load(std::sync::atomic::Ordering::Relaxed) {
+    let _ = execute!(stdout, LeaveAlternateScreen);
+  }
   // show cursor and clear bottom line before exiting
   let (_cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
   if EXIT_LINE_PRINTED.load(std::sync::atomic::Ordering::Relaxed) {

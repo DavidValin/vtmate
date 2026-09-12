@@ -37,6 +37,9 @@ hound = "3"
 crossterm = { version = "0.27", features = ["serde"] }
 tokio = { version = "1", features = ["rt", "macros", "process", "io-util", "time"] }
 ctrlc = { version = "3", features = ["termination"] }
+# UAX #11 character widths, the table terminals themselves use, so the bottom
+# bar measures a glyph the same way the terminal draws it.
+unicode-width = "0.2"
 kokoro-micro = "1.2.0"
 supertonic2-tts = "1.2.0"
 supertonic3-tts = "1.3.0"

@@ -163,7 +163,7 @@ pub fn playback_thread(
               Ordering::Relaxed,
             );
 
-            // ✅ FIX: silence
+            // ✓ FIX: silence
             for s in out.iter_mut() {
               *s = 0;
             }
@@ -234,7 +234,7 @@ pub fn playback_thread(
               Ordering::Relaxed,
             );
 
-            // ✅ FIX: silence for unsigned (midpoint)
+            // ✓ FIX: silence for unsigned (midpoint)
             for s in out.iter_mut() {
               *s = u16::MAX / 2;
             }

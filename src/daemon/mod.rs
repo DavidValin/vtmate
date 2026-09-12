@@ -52,7 +52,7 @@ pub fn spawn_detached(args: &Args) -> ! {
   let settings_path = match config::resolve_settings_path(args) {
     Ok(p) => p,
     Err(e) => {
-      println!("❌ {}", e);
+      println!("✗ {}", e);
       plain_exit(1);
     }
   };
@@ -61,19 +61,19 @@ pub fn spawn_detached(args: &Args) -> ! {
   let agents = match config::load_settings(&settings_path, &check_args) {
     Ok(a) => a,
     Err(e) => {
-      println!("❌ Failed to load settings: {}", e);
+      println!("✗ Failed to load settings: {}", e);
       plain_exit(1);
     }
   };
   let general = config::load_general_settings(&settings_path).unwrap_or_default();
   if let Err(e) = config::select_agent(&agents, args.agent.as_deref(), &general) {
-    println!("❌ {}", e);
+    println!("✗ {}", e);
     plain_exit(1);
   }
   let daemon_settings = match config::load_daemon_settings(&settings_path) {
     Ok(d) => d,
     Err(e) => {
-      println!("❌ {}", e);
+      println!("✗ {}", e);
       plain_exit(1);
     }
   };
@@ -81,7 +81,7 @@ pub fn spawn_detached(args: &Args) -> ! {
   let exe = match std::env::current_exe() {
     Ok(p) => p,
     Err(e) => {
-      println!("❌ cannot locate the vtmate executable: {}", e);
+      println!("✗ cannot locate the vtmate executable: {}", e);
       plain_exit(1);
     }
   };
@@ -128,12 +128,12 @@ pub fn spawn_detached(args: &Args) -> ! {
   let mut child = match cmd.spawn() {
     Ok(c) => c,
     Err(e) => {
-      println!("❌ cannot start the daemon: {}", e);
+      println!("✗ cannot start the daemon: {}", e);
       plain_exit(1);
     }
   };
 
-  print!("⏳ starting vtmate daemon...");
+  print!("⋯ starting vtmate daemon...");
   let _ = std::io::Write::flush(&mut std::io::stdout());
   let deadline = Instant::now() + Duration::from_secs(60);
   loop {
@@ -142,7 +142,7 @@ pub fn spawn_detached(args: &Args) -> ! {
       match std::fs::read_to_string(paths::start_error_file()) {
         Ok(err) if status.code() == Some(EXIT_HOTKEYS_TAKEN) => {
           println!(
-            "❌ vtmate daemon not started: these shortcuts are already taken by another application:"
+            "✗ vtmate daemon not started: these shortcuts are already taken by another application:"
           );
           for line in err.lines().filter(|l| !l.trim().is_empty()) {
             println!("   {}", line);
@@ -153,14 +153,14 @@ pub fn spawn_detached(args: &Args) -> ! {
           );
         }
         Ok(err) => {
-          println!("❌ vtmate daemon not started:");
+          println!("✗ vtmate daemon not started:");
           for line in err.lines().filter(|l| !l.trim().is_empty()) {
             println!("   {}", line);
           }
         }
         Err(_) => {
           println!(
-            "❌ vtmate daemon failed to start (exit {}), see {}",
+            "✗ vtmate daemon failed to start (exit {}), see {}",
             status.code().unwrap_or(-1),
             paths::log_file().display()
           );
@@ -171,7 +171,7 @@ pub fn spawn_detached(args: &Args) -> ! {
     }
     if let Some(status) = ipc::probe(Duration::from_millis(300)) {
       println!(
-        "\r\x1b[K✅ vtmate daemon started (pid {}), agent '{}'",
+        "\r\x1b[K✓ vtmate daemon started (pid {}), agent '{}'",
         status.pid, status.agent
       );
       for (setting, combo) in daemon_settings.combos() {
@@ -182,7 +182,7 @@ pub fn spawn_detached(args: &Args) -> ! {
     }
     if Instant::now() >= deadline {
       println!(
-        "\r\x1b[K⚠️  daemon did not answer within 60s; it may still be loading models. See {}",
+        "\r\x1b[K▲  daemon did not answer within 60s; it may still be loading models. See {}",
         paths::log_file().display()
       );
       plain_exit(1);
@@ -210,11 +210,11 @@ pub fn stop_running() -> ! {
     thread::sleep(Duration::from_millis(100));
   }
   if paths::pid_alive(pid) {
-    println!("⚠️  vtmate daemon (pid {}) did not stop in time.", pid);
+    println!("▲  vtmate daemon (pid {}) did not stop in time.", pid);
     plain_exit(1);
   }
   paths::remove_runtime_files();
-  println!("✅ vtmate daemon stopped (pid {}).", pid);
+  println!("✓ vtmate daemon stopped (pid {}).", pid);
   plain_exit(0);
 }
 

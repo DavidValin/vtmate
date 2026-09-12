@@ -26,22 +26,17 @@ pub struct StreamingTts {
 /// Set once kokoro-micro has fallen back to the CPU, so later loads go
 /// straight there instead of probing a card that is already refusing.
 ///
-/// kokoro-micro remembers a failed GPU *inside* the engine it rebuilds
-/// (`TtsEngine::fallback_to_cpu`), which is the right place for it right up
-/// until the engine is unloaded - then the memory of it goes too, and the next
-/// load would start on the dead card again. This flag outlives the engine so
-/// it does not. The other two engines keep their own `FORCE_CPU` for the same
-/// reason.
+/// kokoro-micro keeps that state inside the engine, which does not survive an
+/// unload; this flag does.
 static FORCE_CPU: AtomicBool = AtomicBool::new(false);
 
-/// Load the Kokoro model. Device::Auto is the GPU when this build carries a
-/// GPU execution provider (`ort-cuda`) and it comes up, the CPU otherwise;
-/// FORCE_CPU is the stronger statement made after a GPU failure that Auto
-/// cannot see, because it happened past initialisation.
+/// Load the Kokoro model. Device::Auto takes the GPU when this build carries
+/// a GPU execution provider (`ort-cuda`) and it comes up; FORCE_CPU is the
+/// stronger statement made after a failure past initialisation, which Auto
+/// cannot see.
 ///
-/// Unlike the other two engines this needs no per-phrase fallback of ours:
-/// kokoro-micro retries on the CPU itself when inference fails on the GPU, and
-/// a second layer here would only synthesize every failed chunk twice.
+/// Needs no per-phrase fallback of ours: kokoro-micro retries on the CPU
+/// itself, and a second layer would synthesize every failed chunk twice.
 fn load_engine() -> Result<TtsEngine, Box<dyn std::error::Error + Send + Sync>> {
   let rt = tokio::runtime::Builder::new_current_thread()
     .enable_all()
@@ -59,9 +54,8 @@ fn load_engine() -> Result<TtsEngine, Box<dyn std::error::Error + Send + Sync>> 
   Ok(engine)
 }
 
-/// Notice kokoro-micro's own GPU -> CPU fallback and record it in FORCE_CPU,
-/// so an engine loaded again after an unload does not start on the GPU that
-/// just failed. Called after each phrase; the check is a cheap field read.
+/// Record kokoro-micro's own GPU -> CPU fallback in FORCE_CPU, so a later load
+/// skips the card. Called after each phrase; a cheap field read.
 fn note_backend(engine: &Arc<Mutex<TtsEngine>>) {
   if FORCE_CPU.load(Ordering::SeqCst) {
     return;
@@ -80,9 +74,8 @@ fn note_backend(engine: &Arc<Mutex<TtsEngine>>) {
 }
 
 /// The shared engine, loading it if it is not resident. Built without the slot
-/// locked: loading takes seconds, and blocking every other speaker on it is
-/// worse than the rare double build, where the engine already stored wins so
-/// callers still share one.
+/// locked: loading takes seconds, and a rare double build - the stored engine
+/// wins, so callers still share one - beats blocking every other speaker.
 fn engine_handle() -> Result<Arc<Mutex<TtsEngine>>, Box<dyn std::error::Error + Send + Sync>> {
   if let Some(e) = KOKORO_ENGINE
     .lock()

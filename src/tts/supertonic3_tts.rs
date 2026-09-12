@@ -702,8 +702,8 @@ pub fn ensure_loaded() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 /// Release this module's handle on the engine. Returns whether one was held.
 /// A thread still speaking keeps its own clone alive until the phrase ends.
 ///
-/// FORCE_CPU is deliberately left set: an unload says no agent needs this
-/// engine right now, not that the card that refused has recovered.
+/// FORCE_CPU stays set: an unload means no agent needs this engine, not that
+/// the card recovered.
 pub fn unload() -> bool {
   SUPERTONIC3_ENGINE
     .lock()

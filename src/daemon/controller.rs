@@ -268,7 +268,7 @@ impl Controller {
       return;
     }
     self.ui_line(&format!(
-      "\n\x1b[36m📖 Reading selection ({} phrases)\x1b[0m",
+      "\n\x1b[36m≡ Reading selection ({} phrases)\x1b[0m",
       phrases.len()
     ));
     if let Some(job) = self.tts_job.take() {
@@ -362,7 +362,7 @@ impl Controller {
     let state = &self.state;
     if state.debate_enabled.load(Ordering::SeqCst) && !state.debate_paused.load(Ordering::SeqCst) {
       state.debate_paused.store(true, Ordering::SeqCst);
-      self.ui_line("\n\x1b[32m🚩 Debate paused, speak again to continue \x1b[0m\n");
+      self.ui_line("\n\x1b[32m▮▮ Debate paused, speak again to continue \x1b[0m\n");
     }
     crate::log::log("debug", "speech stopped by hotkey (press again to reset)");
   }
@@ -394,7 +394,7 @@ impl Controller {
     }
     state.reset_conversation();
     self.ui_line("");
-    self.ui_line("\n\x1b[32m✨ Session restarted (history reset) \x1b[0m\n");
+    self.ui_line("\n\x1b[32m↻ Session restarted (history reset) \x1b[0m\n");
     crate::log::log("info", "conversation reset by hotkey");
     super::desktop::notify("vtmate", "Conversation restarted!");
   }
@@ -408,7 +408,7 @@ impl Controller {
         );
         self.desktop.paste_text(&text);
         self.ui_line(&format!(
-          "\n\x1b[36m📋 Pasted: \x1b[0m{}",
+          "\n\x1b[36m▤ Pasted: \x1b[0m{}",
           text.chars().take(80).collect::<String>()
         ));
       }

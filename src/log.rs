@@ -46,7 +46,8 @@ pub fn set_file_sink(path: &std::path::Path) -> std::io::Result<()> {
 
 /// A line that answers a command rather than reporting a diagnostic ("you are
 /// now detached"): same look as the log, always shown, and printed straight to
-/// the terminal because it is written while the UI is being torn down.
+/// the terminal because it is written before any interactive UI exists to
+/// queue it through.
 pub fn notice(msg_type: &str, msg: &str) {
   if let Some(sink) = FILE_SINK.get() {
     if let Ok(mut f) = sink.lock() {
@@ -54,16 +55,30 @@ pub fn notice(msg_type: &str, msg: &str) {
       let _ = writeln!(f, "{} [{}] {}", ts, msg_type, msg);
     }
   }
-  print!("\r\x1b[K{}  \x1b[90m{}\x1b[0m\r\n", emoji_for(msg_type), msg);
+  print!("\r\x1b[K{}\r\n", marked_line(msg_type, msg));
   let _ = std::io::Write::flush(&mut std::io::stdout());
 }
 
-fn emoji_for(msg_type: &str) -> &'static str {
+/// A notice line's content with no cursor control around it - `notice` wraps
+/// this for a raw terminal write; a caller with an interactive UI running
+/// sends it as a normal "line" message instead, so the UI's own viewport
+/// tracking places it rather than a `\r\n` racing whatever that UI draws next.
+pub fn marked_line(msg_type: &str, msg: &str) -> String {
+  format!("{}  \x1b[90m{}\x1b[0m", marker_for(msg_type), msg)
+}
+
+/// The marker a log line opens with, coloured by severity.
+///
+/// Geometric and mathematical characters, not emoji: every terminal font has
+/// them, so the severity still reads on a machine with no colour emoji font,
+/// and each is one column wide. The colour is in the escape rather than in the
+/// glyph for the same reason.
+fn marker_for(msg_type: &str) -> &'static str {
   match msg_type {
-    "debug" => "🐛",
-    "info" => "ℹ️",
-    "warning" => "⚠️",
-    "error" => "❌",
+    "debug" => "\x1b[90m∘\x1b[0m",
+    "info" => "\x1b[36m•\x1b[0m",
+    "warning" => "\x1b[33m▲\x1b[0m",
+    "error" => "\x1b[31m✗\x1b[0m",
     _ => "",
   }
 }
@@ -78,7 +93,7 @@ pub fn log(msg_type: &str, msg: &str) {
       let _ = writeln!(f, "{} [{}] {}", ts, msg_type, msg);
     }
   }
-  let formatted = format!("\r\x1b[K{}  \x1b[90m{}\x1b[0m\n", emoji_for(msg_type), msg);
+  let formatted = format!("\r\x1b[K{}  \x1b[90m{}\x1b[0m\n", marker_for(msg_type), msg);
   if let Some(sender) = TX_UI.get() {
     // The UI channel is bounded(1) and is drained only by the conversation-mode
     // UI loop, so in read-file mode or while the UI is busy the line may not be
