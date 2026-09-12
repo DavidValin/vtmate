@@ -3,7 +3,6 @@ use clap::Parser;
 use cpal::traits::DeviceTrait;
 use crossbeam_channel::{bounded, unbounded};
 use crossterm::terminal::{self};
-use std::path::Path;
 
 use ctrlc;
 use std::io::IsTerminal;
@@ -267,17 +266,21 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     };
 
     // Setup WAV writer and txt export for read mode, same as conversation
-    // mode: only when `-s` asks for it, not unconditionally.
+    // mode: only when `-s` asks for it, not unconditionally, and named the
+    // same way (`<localtime>_<uuid>`) rather than after the file being read,
+    // so a second read of the same file never collides with the first.
     let home_dir = get_user_home_path().unwrap();
     let read_dir = home_dir.join(".vtmate").join("read-files");
-    let base_name = Path::new(filename)
-      .file_stem()
-      .unwrap_or_else(|| std::ffi::OsStr::new("output"))
-      .to_string_lossy();
-    let txt_path = read_dir.join(format!("{}.txt", base_name));
+    let mut txt_path: Option<std::path::PathBuf> = None;
     if args.save {
       std::fs::create_dir_all(&read_dir).ok();
-      let wav_path = read_dir.join(format!("{}.wav", base_name));
+      let stem = format!(
+        "{}_{}",
+        chrono::Local::now().format("%Y-%m-%d_%H-%M-%S"),
+        &uuid::Uuid::new_v4().to_string()[..8]
+      );
+      let wav_path = read_dir.join(format!("{}.wav", stem));
+      txt_path = Some(read_dir.join(format!("{}.txt", stem)));
       let wav_tx = audio::init_wav_writer(&wav_path, 0);
       playback::set_wav_tx(wav_tx);
     }
@@ -617,8 +620,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     print!("\r✓ All phrases completed\n\r");
-    if args.save {
-      if let Err(e) = audio::write_txt(&txt_path, &content) {
+    if let Some(txt_path) = &txt_path {
+      if let Err(e) = audio::write_txt(txt_path, &content) {
         eprintln!("Failed to write txt: {}", e);
       }
     }
