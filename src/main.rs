@@ -387,6 +387,21 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .collect()
     };
 
+    // A block can hold several source lines (see `split_text_for_tts`), so
+    // the column has to be reset before each of them: raw mode does not
+    // translate a bare '\n' into a carriage return, and without one every
+    // line after the first keeps whatever column the previous line ended on.
+    fn print_block(out: &mut std::io::Stdout, block: &str, highlight: bool) {
+      for line in block.split('\n') {
+        execute!(out, cursor::MoveToColumn(0)).unwrap();
+        if highlight {
+          println!("\x1b[33m{}\x1b[0m", line);
+        } else {
+          println!("{}", line);
+        }
+      }
+    }
+
     // Helper function to update display
     let update_display =
       |out: &mut std::io::Stdout, completed: &[String], current: Option<&str>| {
@@ -394,14 +409,12 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         // Show all completed phrases (unhighlighted)
         for phrase in completed {
-          execute!(out, cursor::MoveToColumn(0)).unwrap();
-          println!("{}", phrase);
+          print_block(out, phrase, false);
         }
 
         // Show current phrase with highlight (yellow background, black text)
         if let Some(curr) = current {
-          execute!(out, cursor::MoveToColumn(0)).unwrap();
-          println!("\x1b[33m{}\x1b[0m", curr);
+          print_block(out, curr, true);
         }
 
         out.flush().unwrap();
