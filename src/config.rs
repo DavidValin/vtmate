@@ -50,14 +50,11 @@ pub struct AgentSettings {
 
 #[derive(Parser, Debug, Clone)]
 #[clap(version = env!("CARGO_PKG_VERSION"))]
-// The header is baked straight into the template rather than passed through
-// `before_help`: clap pads that placeholder with blank lines of its own no
-// matter what the string ends in, which left extra gaps before "Usage:". A
-// literal segment in the template is rendered exactly as written.
-#[clap(help_template = concat!(
-  "\n vtmate v", env!("CARGO_PKG_VERSION"), " - https://github.com/DavidValin/vtmate\n\n",
-  "{usage-heading} {usage}\n\n{all-args}{after-help}"
-))]
+// The banner is printed directly by `print_help`, not through this template:
+// `print_help` also boxes the usage/options block that `{all-args}` renders
+// here, so it needs that block on its own, without the banner glued in front
+// of it.
+#[clap(help_template = "{usage-heading} {usage}\n\n{all-args}{after-help}")]
 #[command(group(clap::ArgGroup::new("daemon_cmd").multiple(false)))]
 #[command(group(clap::ArgGroup::new("voice_clone_cmd").multiple(false)))]
 #[clap(after_help = "")]
@@ -776,6 +773,13 @@ const DAEMON_BODY: &str = "  llm_background_ptt_combo (\x1b[90m%PTT_COMBO%\x1b[0
       within a second to reset the conversation (this also
       stops saving, if the session was being saved).";
 
+const EXPORTED_FILES_HEADER: &str = "\nExported files:\n";
+const EXPORTED_FILES_BODY: &str = "  \x1b[90m~/.vtmate/conversations\x1b[0m
+    Exported conversations and debates: .txt, .wav and
+      .html (-s / --save-html).
+  \x1b[90m~/.vtmate/read-files\x1b[0m
+    Exported voice read files (-r <FILE> -s).";
+
 /// Wraps `content` (one shortcut/description block, already colored) in a
 /// box drawn to fit its widest line - measured with ANSI codes stripped so a
 /// user's own (possibly long) combo text never overflows the border.
@@ -797,11 +801,20 @@ fn wrap_in_box(content: &str) -> String {
   out
 }
 
+const BANNER: &str = concat!(
+  "\n vtmate v",
+  env!("CARGO_PKG_VERSION"),
+  " - https://github.com/DavidValin/vtmate\n\n"
+);
+
 /// `--help`/`-h`: the compiled-in help text names the daemon combos with
 /// `%..._COMBO%` placeholders instead of literal defaults, filled in here
 /// with whatever `[daemon]` actually holds (or the defaults, when there is
 /// no settings file yet) - so the help someone reads matches the shortcuts
-/// that are actually live, not the values vtmate shipped with.
+/// that are actually live, not the values vtmate shipped with. Every
+/// constant that can carry a placeholder gets the same substitution -
+/// `AFTER_HELP_PRE` names them too (in the `[daemon]` field explanations),
+/// not just `DAEMON_BODY`.
 ///
 /// The colored/boxed text lives in plain `&str` constants above, never
 /// passed through `#[clap(after_help = ...)]`: clap converts anything handed
@@ -814,18 +827,30 @@ pub fn print_help(_args_os: &[std::ffi::OsString]) {
     .ok()
     .and_then(|p| load_daemon_settings(&p).ok())
     .unwrap_or_default();
-  let daemon_body = DAEMON_BODY
-    .replace("%PTT_COMBO%", &d.llm_background_ptt_combo)
-    .replace("%TTS_COMBO%", &d.tts_background_combo)
-    .replace("%STT_COMBO%", &d.stt_and_paste_background_ptt_combo)
-    .replace("%RESET_COMBO%", &d.llm_background_reset);
-  let mut cmd = Args::command();
-  print!("{}", cmd.render_help());
-  print!("{}", AFTER_HELP_PRE);
+  let fill_combos = |s: &str| {
+    s.replace("%PTT_COMBO%", &d.llm_background_ptt_combo)
+      .replace("%TTS_COMBO%", &d.tts_background_combo)
+      .replace("%STT_COMBO%", &d.stt_and_paste_background_ptt_combo)
+      .replace("%RESET_COMBO%", &d.llm_background_reset)
+  };
+  let after_help_pre = fill_combos(AFTER_HELP_PRE);
+  let daemon_body = fill_combos(DAEMON_BODY);
+  // Forced rather than left to the real terminal width: the rest of this
+  // help text is hand-wrapped at a fixed compact width (see AFTER_HELP_PRE
+  // and the shortcut bodies above), and boxing the options list at whatever
+  // width the terminal happens to be would make it the only part that does
+  // not match that style.
+  let mut cmd = Args::command().term_width(68);
+  let usage_and_options = cmd.render_help().to_string();
+  print!("{}", BANNER);
+  print!("{}", wrap_in_box(&usage_and_options));
+  print!("{}", after_help_pre);
   print!("{}", SHORTCUTS_HEADER);
   print!("{}", wrap_in_box(SHORTCUTS_BODY));
   print!("{}", DAEMON_HEADER);
   print!("{}", wrap_in_box(&daemon_body));
+  print!("{}", EXPORTED_FILES_HEADER);
+  print!("{}", wrap_in_box(EXPORTED_FILES_BODY));
   std::process::exit(0);
 }
 
