@@ -332,6 +332,11 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
   // Handle modal keyboard navigation
   let modal_visible = state.debate_modal_visible.load(Ordering::SeqCst);
   if modal_visible {
+    // A terminal reporting the Kitty keyboard protocol sends a Release event
+    // too; without this, every key here would also fire again on release.
+    if k.kind != KeyEventKind::Press {
+      return KeyOutcome::Continue;
+    }
     match k.code {
       KeyCode::Esc => {
         // Close modal without starting debate
