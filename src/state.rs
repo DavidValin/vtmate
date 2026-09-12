@@ -104,6 +104,12 @@ pub struct AppState {
   pub debate_modal_selected_agent2: Arc<Mutex<usize>>,
   pub debate_modal_focus: Arc<Mutex<u8>>, // 0 = agent1, 1 = agent2, 2 = confirm
   pub save_path: Arc<Mutex<Option<std::path::PathBuf>>>,
+  /// `-s`/`--save`, live for the process: starts true when given on the
+  /// command line, and can also be flipped on later by an attach client
+  /// sending `ClientMsg::StartSave` to an already-running daemon.
+  pub save_enabled: Arc<AtomicBool>,
+  /// `--save-html`, same lifecycle as `save_enabled`.
+  pub save_html_enabled: Arc<AtomicBool>,
   pub start_date: Arc<Mutex<String>>,
   pub undo_pending: Arc<AtomicBool>,
   /// Settings file in use ([general]/[daemon]); `selected_agent` is written
@@ -178,6 +184,8 @@ impl AppState {
       debate_modal_selected_agent2: Arc::new(Mutex::new(1)),
       debate_modal_focus: Arc::new(Mutex::new(0)),
       save_path: Arc::new(Mutex::new(None)),
+      save_enabled: Arc::new(AtomicBool::new(false)),
+      save_html_enabled: Arc::new(AtomicBool::new(false)),
       start_date: Arc::new(Mutex::new(String::new())),
       undo_pending: Arc::new(AtomicBool::new(false)),
       settings_path: Arc::new(Mutex::new(PathBuf::new())),

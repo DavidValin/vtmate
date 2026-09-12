@@ -44,6 +44,18 @@ pub fn run(args: &crate::config::Args) -> ! {
     println!("✗ daemon connection failed: {}", e);
     util::terminate(1);
   }
+  if args.save || args.save_html {
+    // -s/--save-html against an already-running daemon: turn saving on for
+    // the rest of this daemon session instead of silently doing nothing,
+    // since this client's own Args/AppState are just a throwaway mirror.
+    let _ = ipc::write_msg(
+      &mut writer,
+      &ClientMsg::StartSave {
+        save: args.save,
+        save_html: args.save_html,
+      },
+    );
+  }
   let (status, agents, history, view) = match ipc::read_msg::<_, ServerMsg>(&mut reader) {
     Ok(Some(ServerMsg::Snapshot {
       status,
@@ -198,11 +210,15 @@ fn finish(tx_ui: &crossbeam_channel::Sender<String>, level: &str, msg: &str) -> 
   // reply builds it up that way, one chunk at a time - so this would
   // otherwise land glued onto the tail of the last thing the assistant said.
   //
-  // Nothing is cleared: the history stays exactly as it printed, the same as
-  // a non-daemon exit. What made that look wrong before was an unconditional
-  // LeaveAlternateScreen restoring a stale cursor position afterwards (see
-  // ON_ALT_SCREEN); once that stopped happening, this needed no help from a
-  // screen clear it was never really about.
+  // The history stays exactly as it printed, the same as a non-daemon exit.
+  // What made that look wrong before was an unconditional LeaveAlternateScreen
+  // restoring a stale cursor position afterwards (see ON_ALT_SCREEN); once
+  // that stopped happening, this needed no help from a screen clear it was
+  // never really about. EXIT_LINE_PRINTED is deliberately left unset here:
+  // the viewport always reserves the bottom row for the status bar (see
+  // viewport()), so this final line never lands there, and terminate() still
+  // needs to run its normal clear on that row - otherwise the bar's last
+  // frame is left painted on screen after the process exits.
   let _ = tx_ui.send(format!(
     "final_line|\n\n{}",
     crate::log::marked_line(level, msg)
@@ -212,7 +228,6 @@ fn finish(tx_ui: &crossbeam_channel::Sender<String>, level: &str, msg: &str) -> 
   let mut out = std::io::stdout();
   let _ = crossterm::execute!(out, crossterm::cursor::Show);
   let _ = std::io::Write::flush(&mut out);
-  util::EXIT_LINE_PRINTED.store(true, Ordering::Relaxed);
   thread::sleep(Duration::from_millis(50));
   util::terminate(0);
 }

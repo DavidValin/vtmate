@@ -419,6 +419,20 @@ impl Controller {
     match ev {
       ClientEvent::Key(k) => self.on_client_key(k),
       ClientEvent::Say { text, kind } => self.say(text, kind),
+      ClientEvent::StartSave { save, save_html } => self.start_save(save, save_html),
+    }
+  }
+
+  /// An attach client asked (via `-s`/`--save-html`) for saving to start on
+  /// this already-running daemon. The conversation thread's loop notices
+  /// these flags on its next turn and does the actual setup lazily, the same
+  /// way it would if they had been given at daemon startup.
+  fn start_save(&mut self, save: bool, save_html: bool) {
+    if save {
+      self.state.save_enabled.store(true, Ordering::Relaxed);
+    }
+    if save_html {
+      self.state.save_html_enabled.store(true, Ordering::Relaxed);
     }
   }
 

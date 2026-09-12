@@ -167,6 +167,16 @@ pub fn conversation_thread(
   let mut prev_debate_enabled = false;
 
   let state = GLOBAL_STATE.get().expect("AppState not initialized");
+  // Seed the live flags from the CLI switches; a daemon-attach client can
+  // also flip these on later (ClientMsg::StartSave) once the daemon is
+  // already running, which is why the loop below re-reads them each turn
+  // instead of trusting the `save`/`save_html` parameters directly.
+  if save {
+    state.save_enabled.store(true, Ordering::Relaxed);
+  }
+  if save_html {
+    state.save_html_enabled.store(true, Ordering::Relaxed);
+  }
   if state.debate_enabled.load(Ordering::SeqCst) {
     // render the initial user message for the debate
     if let Some(msg) = &pending_user_msg {
@@ -202,15 +212,17 @@ pub fn conversation_thread(
     }
     prev_debate_enabled = current_debate_enabled;
 
-    let needs_setup = (save && state.save_path.lock().unwrap().is_none())
-      || (save_html && !crate::html_export::is_active());
+    let save_now = state.save_enabled.load(Ordering::Relaxed);
+    let save_html_now = state.save_html_enabled.load(Ordering::Relaxed);
+    let needs_setup = (save_now && state.save_path.lock().unwrap().is_none())
+      || (save_html_now && !crate::html_export::is_active());
     if needs_setup {
       maybe_setup_and_save(
         &mut wav_tx_opt,
         &conversation_history,
         &settings_clone,
-        save,
-        save_html,
+        save_now,
+        save_html_now,
       )?;
     }
 

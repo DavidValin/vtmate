@@ -27,6 +27,10 @@ pub enum ClientMsg {
   Key(crossterm::event::KeyEvent),
   /// Leave; the daemon keeps running.
   Detach,
+  /// `-s`/`--save-html` given to an attach-client while the daemon was
+  /// already running: turn saving on for the rest of this daemon session.
+  /// Only ever turns a flag on, never off.
+  StartSave { save: bool, save_html: bool },
   /// Testing without a microphone: process `text` as if it had been
   /// transcribed from a hotkey utterance of this kind. Hidden.
   Say { text: String, kind: UtteranceKind },
