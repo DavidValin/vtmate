@@ -790,27 +790,44 @@ fn maybe_setup_and_save(
         started
       }
     };
-    // -s and --save-html name their output after the same session, so
-    // `<stem>.txt`, `<stem>.wav` and `<stem>/` sit together in the folder
-    let stem = state
+    // -s and --save-html name their output after the same session, so both
+    // sit in one `CONVERSATION-<stem>/` (or `DEBATE-<stem>/`) folder: reuse
+    // whichever of the two is already running rather than starting a second
+    // folder for it.
+    let folder_name = state
       .save_path
       .lock()
       .unwrap()
       .as_ref()
-      .and_then(|p| p.file_stem())
+      .and_then(|p| p.parent())
+      .and_then(|p| p.file_name())
       .map(|s| s.to_string_lossy().to_string())
       .or_else(crate::html_export::dir_name)
-      .unwrap_or_else(|| format!("{}_{}", date_str, &Uuid::new_v4().to_string()[..8]));
+      .unwrap_or_else(|| {
+        let kind = if state.debate_enabled.load(Ordering::SeqCst) {
+          "DEBATE"
+        } else {
+          "CONVERSATION"
+        };
+        format!(
+          "{}-{}_{}",
+          kind,
+          date_str,
+          &Uuid::new_v4().to_string()[..8]
+        )
+      });
+    let session_dir = conv_dir.join(&folder_name);
 
     if need_txt {
-      let path = conv_dir.join(format!("{}.txt", stem));
+      fs::create_dir_all(&session_dir)?;
+      let path = session_dir.join("conversation.txt");
       *state.save_path.lock().unwrap() = Some(path.clone());
-      let wav_tx = crate::audio::init_wav_writer(&path.with_extension("wav"), 500);
+      let wav_tx = crate::audio::init_wav_writer(&session_dir.join("conversation.wav"), 500);
       set_wav_tx(wav_tx);
     }
     if need_html {
       let start_idx = conversation_history.lock().unwrap().len();
-      crate::html_export::init(&conv_dir.join(&stem), start_idx)?;
+      crate::html_export::init(&session_dir, start_idx)?;
     }
     *state.start_date.lock().unwrap() = date_str;
   }

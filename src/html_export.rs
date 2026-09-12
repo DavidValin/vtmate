@@ -3,7 +3,7 @@
 //
 //  Writes a self-contained folder per conversation:
 //
-//    2026-09-09_12-00-00_ab12cd34/
+//    CONVERSATION-2026-09-09_12-00-00_ab12cd34/   (or DEBATE-... for a debate)
 //      index.html          the player: every turn, playable in order
 //      turn-001-user.wav   one file per turn that produced audio
 //      turn-002-nova.wav
@@ -14,8 +14,9 @@
 //  is re-rendered after each turn from the conversation history, so the folder
 //  is valid (and playable) mid-conversation, not only once vtmate exits.
 //
-//  This is independent from `-s`, which writes a single .txt plus one .wav for
-//  the whole session; both options can be used at the same time.
+//  This is independent from `-s`, which writes conversation.txt plus
+//  conversation.wav for the whole session into that same folder; both
+//  options can be used at the same time (see conversation::maybe_setup_and_save).
 // ------------------------------------------------------------------
 
 use crate::audio::AudioChunk;
