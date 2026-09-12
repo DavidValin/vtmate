@@ -3,7 +3,6 @@ use clap::Parser;
 use cpal::traits::DeviceTrait;
 use crossbeam_channel::{bounded, unbounded};
 use crossterm::terminal::{self};
-use std::path::Path;
 
 use ctrlc;
 use std::io::IsTerminal;
@@ -40,8 +39,11 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   crate::audio::install_alsa_error_handler();
   crate::audio::ensure_alsa_plugin_dir();
 
-  let mut args =
-    crate::config::Args::parse_from(crate::config::normalize_argv(std::env::args_os()));
+  let argv = crate::config::normalize_argv(std::env::args_os());
+  if argv.iter().any(|a| a == "--help" || a == "-h") {
+    crate::config::print_help(&argv);
+  }
+  let mut args = crate::config::Args::parse_from(argv);
 
   // Force quiet mode if stdin is not a terminal and input is read from pipe
   let stdin_is_tty = std::io::stdin().is_terminal();
@@ -266,18 +268,25 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       quiet: args.quiet,
     };
 
-    // Setup WAV writer and txt export for read mode
+    // Setup WAV writer and txt export for read mode, same as conversation
+    // mode: only when `-s` asks for it, not unconditionally, and named the
+    // same way (`<localtime>_<uuid>`) rather than after the file being read,
+    // so a second read of the same file never collides with the first.
     let home_dir = get_user_home_path().unwrap();
     let read_dir = home_dir.join(".vtmate").join("read-files");
-    std::fs::create_dir_all(&read_dir).ok();
-    let base_name = Path::new(filename)
-      .file_stem()
-      .unwrap_or_else(|| std::ffi::OsStr::new("output"))
-      .to_string_lossy();
-    let wav_path = read_dir.join(format!("{}.wav", base_name));
-    let txt_path = read_dir.join(format!("{}.txt", base_name));
-    let wav_tx = audio::init_wav_writer(&wav_path, 0);
-    playback::set_wav_tx(wav_tx.clone());
+    let mut txt_path: Option<std::path::PathBuf> = None;
+    if args.save {
+      std::fs::create_dir_all(&read_dir).ok();
+      let stem = format!(
+        "{}_{}",
+        chrono::Local::now().format("%Y-%m-%d_%H-%M-%S"),
+        &uuid::Uuid::new_v4().to_string()[..8]
+      );
+      let wav_path = read_dir.join(format!("{}.wav", stem));
+      txt_path = Some(read_dir.join(format!("{}.txt", stem)));
+      let wav_tx = audio::init_wav_writer(&wav_path, 0);
+      playback::set_wav_tx(wav_tx);
+    }
 
     let _play_handle = thread::spawn({
       let playback_active = playback_active.clone();
@@ -381,6 +390,21 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .collect()
     };
 
+    // A block can hold several source lines (see `split_text_for_tts`), so
+    // the column has to be reset before each of them: raw mode does not
+    // translate a bare '\n' into a carriage return, and without one every
+    // line after the first keeps whatever column the previous line ended on.
+    fn print_block(out: &mut std::io::Stdout, block: &str, highlight: bool) {
+      for line in block.split('\n') {
+        execute!(out, cursor::MoveToColumn(0)).unwrap();
+        if highlight {
+          println!("\x1b[33m{}\x1b[0m", line);
+        } else {
+          println!("{}", line);
+        }
+      }
+    }
+
     // Helper function to update display
     let update_display =
       |out: &mut std::io::Stdout, completed: &[String], current: Option<&str>| {
@@ -388,14 +412,12 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         // Show all completed phrases (unhighlighted)
         for phrase in completed {
-          execute!(out, cursor::MoveToColumn(0)).unwrap();
-          println!("{}", phrase);
+          print_block(out, phrase, false);
         }
 
         // Show current phrase with highlight (yellow background, black text)
         if let Some(curr) = current {
-          execute!(out, cursor::MoveToColumn(0)).unwrap();
-          println!("\x1b[33m{}\x1b[0m", curr);
+          print_block(out, curr, true);
         }
 
         out.flush().unwrap();
@@ -614,9 +636,10 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     print!("\r✓ All phrases completed\n\r");
-    // Export txt content
-    if let Err(e) = audio::write_txt(&txt_path, &content) {
-      eprintln!("Failed to write txt: {}", e);
+    if let Some(txt_path) = &txt_path {
+      if let Err(e) = audio::write_txt(txt_path, &content) {
+        eprintln!("Failed to write txt: {}", e);
+      }
     }
 
     execute!(out, cursor::Show).unwrap();
@@ -676,6 +699,16 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     .max_turns
     .store(args.max_turns.unwrap_or(0), Ordering::SeqCst);
   state::GLOBAL_STATE.set(state.clone()).unwrap();
+  // Set here rather than left for conversation_thread's own seeding: that
+  // only runs after crate::stt::init loads the Whisper model, which can take
+  // a few seconds, and the bottom bar (started right below) would otherwise
+  // render without the SAVING tag until it does.
+  if args.save {
+    state.save_enabled.store(true, Ordering::Relaxed);
+  }
+  if args.save_html {
+    state.save_html_enabled.store(true, Ordering::Relaxed);
+  }
 
   // If initial prompt provided, process it before starting conversation thread
   // (initial prompt handling moved after TTS thread starts to avoid deadlock)

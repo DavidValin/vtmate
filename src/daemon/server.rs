@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 pub enum ClientEvent {
   Key(KeyEvent),
   Say { text: String, kind: UtteranceKind },
+  StartSave { save: bool, save_html: bool },
 }
 
 struct Client {
@@ -242,6 +243,9 @@ fn handle_connection(stream: interprocess::local_socket::Stream, tx_client: Send
           Ok(Some(ClientMsg::Say { text, kind })) => {
             let _ = tx_client.send(ClientEvent::Say { text, kind });
           }
+          Ok(Some(ClientMsg::StartSave { save, save_html })) => {
+            let _ = tx_client.send(ClientEvent::StartSave { save, save_html });
+          }
           Ok(Some(ClientMsg::Stop)) => {
             super::request_stop();
             break;
@@ -257,6 +261,6 @@ fn handle_connection(stream: interprocess::local_socket::Stream, tx_client: Send
       crate::log::log("info", &format!("client {} detached", id));
       let _ = writer_handle.join();
     }
-    ClientMsg::Key(_) | ClientMsg::Detach => {}
+    ClientMsg::Key(_) | ClientMsg::Detach | ClientMsg::StartSave { .. } => {}
   }
 }

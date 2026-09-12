@@ -321,6 +321,177 @@ mod tts_text_tests {
   }
 
   #[test]
+  fn a_hard_wrapped_paragraph_is_one_block_split_into_its_sentences() {
+    // Four source lines, none ending its own paragraph until the last:
+    // wrapped mid-sentence at every line break except the final one.
+    let text = "Logic is founded on certain thought, which\n\
+                were first formulated by a philosopher, an ancient\n\
+                thinker. We shall describe them separately here, and\n\
+                later consider their collective significance.";
+    let out = split_text_for_tts(text, false);
+    // One block: every phrase points at the same (line, text).
+    assert!(out.iter().all(|p| p.line == 0 && p.text == text));
+    // Split into its two sentences for speech, each keeping its full stop.
+    assert_eq!(
+      out.iter().map(|p| p.tts.as_str()).collect::<Vec<_>>(),
+      [
+        "Logic is founded on certain thought, which were first formulated by a philosopher, an ancient thinker.",
+        "We shall describe them separately here, and later consider their collective significance."
+      ]
+    );
+
+    // A blank line still ends the paragraph even without a full stop, and a
+    // list item is always its own block.
+    let with_break_and_list = "No stop here\nand still none\n\n- item one\n- item two";
+    let shape = |t: &str| -> Vec<(usize, String, String)> {
+      split_text_for_tts(t, false)
+        .into_iter()
+        .map(|p| (p.line, p.text, p.tts))
+        .collect()
+    };
+    assert_eq!(shape(with_break_and_list), [
+      (0, "No stop here\nand still none".to_string(), "No stop here and still none".to_string()),
+      (1, "- item one".to_string(), "item one".to_string()),
+      (2, "- item two".to_string(), "item two".to_string()),
+    ]);
+  }
+
+  #[test]
+  fn every_numbered_list_style_is_its_own_item() {
+    let shape = |t: &str| -> Vec<String> {
+      split_text_for_tts(t, false).into_iter().map(|p| p.tts).collect()
+    };
+    for text in [
+      "1. First phrase\n2. Second phrase",
+      "1- First phrase\n2- Second phrase",
+      "1 First phrase\n2 Second phrase",
+    ] {
+      assert_eq!(shape(text), ["First phrase", "Second phrase"], "{}", text);
+    }
+  }
+
+  #[test]
+  fn every_bullet_glyph_is_its_own_item() {
+    let shape = |t: &str| -> Vec<String> {
+      split_text_for_tts(t, false).into_iter().map(|p| p.tts).collect()
+    };
+    for text in [
+      "- First phrase\n- Second phrase",
+      "* First phrase\n* Second phrase",
+      "\u{2022} First phrase\n\u{2022} Second phrase", // •
+      "\u{25e6} First phrase\n\u{25e6} Second phrase", // ◦
+      "\u{2023} First phrase\n\u{2023} Second phrase", // ‣
+      "\u{25aa} First phrase\n\u{25aa} Second phrase", // ▪
+    ] {
+      assert_eq!(shape(text), ["First phrase", "Second phrase"], "{}", text);
+    }
+  }
+
+  #[test]
+  fn a_line_starting_with_a_number_is_its_own_item_regardless_of_neighbours() {
+    // Every one judged only on itself - no relation between the two numbers,
+    // no run to confirm, each still gets its bare "N " marker stripped.
+    let shape = |t: &str| -> Vec<String> {
+      split_text_for_tts(t, false).into_iter().map(|p| p.tts).collect()
+    };
+    assert_eq!(
+      shape("1 First phrase\n2 Second phrase"),
+      ["First phrase", "Second phrase"]
+    );
+    assert_eq!(
+      shape("3 apples were bought.\nThey were eaten."),
+      ["apples were bought.", "They were eaten."]
+    );
+    assert_eq!(
+      shape("5 widgets shipped.\n7 more were ordered."),
+      ["widgets shipped.", "more were ordered."]
+    );
+    // A year opening a list entry, the case that motivated this: judged on
+    // its own line, not on whether another entry happens to share the year.
+    assert_eq!(
+      shape("1926 something happened.\n1926 something else happened."),
+      ["something happened.", "something else happened."]
+    );
+  }
+
+  #[test]
+  fn an_indented_line_is_its_own_item_even_with_no_bullet() {
+    // What a browser hands back for a rendered `<li>` list copied to plain
+    // text: no bullet character at all, just a few spaces of indentation
+    // per entry - real text copied from a Wikipedia portal page.
+    let text = "Actualidad\n\n    Guerras y conflictos: Estados Unidos-Ir\u{e1}n\n    13-26 de septiembre: WXV Global Series Challenger\n    12-26 de septiembre: Juegos Suramericanos";
+    let shape = |t: &str| -> Vec<(usize, String)> {
+      split_text_for_tts(t, false)
+        .into_iter()
+        .map(|p| (p.line, p.tts))
+        .collect()
+    };
+    // strip_special_chars drops '-' along with the other punctuation it
+    // filters out; unrelated to indentation, just how any hyphen is spoken.
+    assert_eq!(shape(text), [
+      (0, "Actualidad".to_string()),
+      (1, "Guerras y conflictos: Estados UnidosIr\u{e1}n".to_string()),
+      (2, "1326 de septiembre: WXV Global Series Challenger".to_string()),
+      (3, "1226 de septiembre: Juegos Suramericanos".to_string()),
+    ]);
+  }
+
+  #[test]
+  fn a_heading_ends_its_own_block_even_without_a_blank_line() {
+    let shape = |t: &str| -> Vec<(usize, String, String)> {
+      split_text_for_tts(t, false)
+        .into_iter()
+        .map(|p| (p.line, p.text, p.tts))
+        .collect()
+    };
+    assert_eq!(
+      shape("THE LAWS OF THOUGHT\nThis is a second phrase."),
+      [
+        (0, "THE LAWS OF THOUGHT".to_string(), "THE LAWS OF THOUGHT".to_string()),
+        (1, "This is a second phrase.".to_string(), "This is a second phrase.".to_string()),
+      ]
+    );
+
+    // A heading opening the text splits off on its own, even though nothing
+    // came before it to flush.
+    let title_then_paragraph = "THE FOUNDATIONS OF LOGIC\n\
+                                 Logic is founded on certain laws of thought, which\n\
+                                 were first formulated by Aristotle, an ancient Greek\n\
+                                 philosopher. We shall describe them separately here, and\n\
+                                 later consider their collective significance.";
+    let out = split_text_for_tts(title_then_paragraph, false);
+    let blocks: Vec<usize> = out.iter().map(|p| p.line).collect();
+    assert_eq!(blocks, [0, 1, 1], "expected a title block plus two sentences in the paragraph block");
+    assert_eq!(out[0].text, "THE FOUNDATIONS OF LOGIC");
+    assert!(out[1].text.starts_with("Logic is founded") && out[1].text == out[2].text);
+
+    // A heading in the middle of running prose splits the prose around it
+    // into three blocks, instead of trailing onto whatever came before it.
+    let heading_mid_paragraph = "Every appearance as such is objectively given and has a\n\
+                                  certain content or specificity. We can and should and\n\
+                                  commonly do initially regard it with a simple attitude of8\n\
+                                  THE LAWS OF THOUGHT\n\
+                                  receptiveness and attention to detail. Every appearance is\n\
+                                  in itself neutral; the qualification of an appearance (thus\n\
+                                  broadly defined) as a reality or an illusion, is a\n\
+                                  subsequent issue.";
+    let out = split_text_for_tts(heading_mid_paragraph, false);
+    let block_texts: Vec<&str> = {
+      let mut seen = Vec::new();
+      for p in &out {
+        if !seen.contains(&p.text.as_str()) {
+          seen.push(p.text.as_str());
+        }
+      }
+      seen
+    };
+    assert_eq!(block_texts.len(), 3, "{:?}", block_texts);
+    assert!(block_texts[0].starts_with("Every appearance"));
+    assert_eq!(block_texts[1], "THE LAWS OF THOUGHT");
+    assert!(block_texts[2].starts_with("receptiveness"));
+  }
+
+  #[test]
   fn special_chars_stripped_but_punctuation_kept() {
     let mut in_code = false;
     assert_eq!(tts_text("Hola, ¿qué tal? *bien* (ok)!", &mut in_code), "Hola, ¿qué tal? bien ok!");
@@ -351,84 +522,197 @@ pub fn _strip_ansi(s: &str) -> String {
 /// so a question keeps its rise and a sentence its fall.
 const TTS_DELIMITERS: [char; 4] = ['.', '!', '?', ';'];
 
-/// Split free text for reading aloud. Returns `(display_line, tts_text)` pairs.
+/// Split free text for reading aloud. Returns `(display_block, tts_text)`
+/// pairs.
 ///
-/// The two are split differently on purpose. Speaking breaks at every line and
-/// at every `. ! ? ;` inside one, because each phrase is synthesized on its own
-/// and that is what gives the reading its pauses. Displaying breaks at lines
-/// only: a line split into several spoken phrases is shown once, as it was
-/// written, so the text on screen still looks like the text that was selected.
+/// The two are split differently on purpose. Speaking breaks at every
+/// `. ! ? ;`, because each phrase is synthesized on its own and that is what
+/// gives the reading its pauses. Displaying breaks at paragraphs instead: a
+/// hard-wrapped source line only ends its block when it reads as a genuine
+/// paragraph boundary - the line itself ends with '.', a blank line follows,
+/// it is a list item (a bullet, a numbered entry, or just indented - a
+/// browser copying a rendered `<li>` often does that with no marker at all -
+/// always its own block so a list still highlights item by item), or it is a
+/// heading (every letter in it uppercase, so whatever follows starts a fresh
+/// block instead of trailing on from it) - so a paragraph wrapped across
+/// several source lines still highlights, and is navigated, as one.
 ///
-/// `tts_text` has special characters stripped and can be empty, for a line with
-/// nothing to say (a rule, a row of dashes, code that is being skipped); such a
-/// line is still returned so it can be shown and stepped over.
+/// `tts_text` has special characters stripped and can be empty, for a block
+/// with nothing to say (a rule, a row of dashes, code that is being skipped);
+/// such a block is still returned so it can be shown and stepped over.
 ///
 /// `skip_code` decides whether fenced ``` code is spoken. An agent's reply
 /// skips it, since hearing brackets and punctuation read out is useless. Text
 /// you asked to have read, with `-r` or the read-aloud shortcut, keeps it: the
 /// code is part of what you asked for.
 pub struct SpokenPhrase {
-  /// Which display line this phrase belongs to. Several phrases share a line
-  /// when it holds more than one sentence.
+  /// Which display block this phrase belongs to. Several phrases share a
+  /// block when it holds more than one sentence.
   pub line: usize,
-  /// The line as written: what gets displayed and navigated through.
+  /// The block as written (its source lines joined by '\n'): what gets
+  /// displayed and navigated through.
   pub text: String,
-  /// What to speak; empty for a line with nothing to say.
+  /// What to speak; empty for a block with nothing to say.
   pub tts: String,
+}
+
+/// Bullet glyphs a browser's plain-text list markup might use: the plain
+/// `-`/`*` a person types, plus the common Unicode bullets a browser emits
+/// for a rendered `<li>` (a filled, ring, or triangular bullet, or a small
+/// square) instead of leaving it to indentation alone.
+const BULLET_CHARS: [char; 6] = ['-', '*', '•', '◦', '‣', '▪'];
+
+/// A bullet, or a numbered entry - "1.", "1)", "1-" or a bare "1 " - each
+/// followed by a space: always its own block, whatever it ends with, so a
+/// list still highlights and is spoken item by item. A line starting with a
+/// number is judged entirely on its own; nothing here looks at neighbouring
+/// lines to decide.
+fn is_list_line(line: &str) -> bool {
+  if let Some(rest) = line.strip_prefix(BULLET_CHARS.as_slice()) {
+    return rest.starts_with(' ');
+  }
+  let digits = line.len() - line.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+  if digits == 0 {
+    return false;
+  }
+  let rest = &line[digits..];
+  if rest.starts_with(' ') {
+    return true;
+  }
+  let mut chars = rest.chars();
+  matches!(chars.next(), Some('.') | Some(')') | Some('-')) && chars.as_str().starts_with(' ')
+}
+
+/// The text of a list line after its marker - the bullet or the numbering
+/// and whatever separates it from the text are for layout, not for the ear,
+/// so a numbered item is spoken as "First phrase", never "one dot First
+/// phrase".
+fn strip_list_marker(line: &str) -> &str {
+  if let Some(rest) = line.strip_prefix(BULLET_CHARS.as_slice()) {
+    return rest.trim_start();
+  }
+  let digits = line.len() - line.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+  line[digits..].trim_start_matches(['.', ')', '-']).trim_start()
+}
+
+/// A heading: has at least one letter, and every letter in it is uppercase.
+/// Always ends its own block, so whatever follows starts a fresh one instead
+/// of trailing on from the heading.
+fn is_all_caps_line(line: &str) -> bool {
+  let mut has_letter = false;
+  for c in line.chars() {
+    if c.is_alphabetic() {
+      has_letter = true;
+      if !c.is_uppercase() {
+        return false;
+      }
+    }
+  }
+  has_letter
+}
+
+/// Turn everything collected in `block_display`/`block_spoken` into phrases
+/// of `block_no`, splitting the spoken text at every delimiter, then reset
+/// both for the next block.
+fn flush_block(
+  phrases: &mut Vec<SpokenPhrase>,
+  block_no: &mut usize,
+  block_display: &mut Vec<&str>,
+  block_spoken: &mut String,
+) {
+  let display = block_display.join("\n");
+  let before = phrases.len();
+  let mut current = String::new();
+  for ch in block_spoken.chars() {
+    current.push(ch);
+    if TTS_DELIMITERS.contains(&ch) {
+      push_spoken(phrases, *block_no, &display, &mut current);
+    }
+  }
+  push_spoken(phrases, *block_no, &display, &mut current);
+  if phrases.len() == before {
+    phrases.push(SpokenPhrase {
+      line: *block_no,
+      text: display,
+      tts: String::new(),
+    });
+  }
+  *block_no += 1;
+  block_display.clear();
+  block_spoken.clear();
 }
 
 pub fn split_text_for_tts(content: &str, skip_code: bool) -> Vec<SpokenPhrase> {
   let mut phrases: Vec<SpokenPhrase> = Vec::new();
-  let mut line_no = 0usize;
+  let mut block_no = 0usize;
   // Fence state carries across lines, in order.
   let mut in_code = false;
-  for line in content.lines() {
-    let line = line.trim();
+
+  let raw_lines: Vec<&str> = content.lines().collect();
+  let mut block_display: Vec<&str> = Vec::new();
+  let mut block_spoken = String::new();
+
+  for (i, &raw) in raw_lines.iter().enumerate() {
+    // A browser copying a rendered `<li>` to plain text commonly indents it
+    // a few spaces instead of (or as well as) giving it a bullet character,
+    // so indentation is its own "this is a list entry" signal, same as a
+    // leading `-`/`*`/number.
+    let is_indented = raw.starts_with(' ') || raw.starts_with('\t');
+    let line = raw.trim();
     if line.is_empty() {
       continue;
     }
-    // Cleaned a whole line at a time, so the fence state stays in step however
-    // the line is broken up afterwards.
-    let spoken = if skip_code {
-      tts_text(line, &mut in_code)
+    let is_list = is_list_line(line);
+    let is_standalone = is_list || is_all_caps_line(line) || is_indented;
+
+    // A list item or a heading is always its own block: flush whatever was
+    // accumulating before it first, so it splits off instead of trailing on
+    // whatever precedes it.
+    if is_standalone && !block_display.is_empty() {
+      flush_block(&mut phrases, &mut block_no, &mut block_display, &mut block_spoken);
+    }
+
+    let to_speak = if is_list { strip_list_marker(line) } else { line };
+    // Cleaned a whole source line at a time, so the fence state stays in step
+    // however the line is broken up afterwards.
+    let cleaned = if skip_code {
+      tts_text(to_speak, &mut in_code)
     } else {
       // keep the code, only drop the fence markers themselves
-      strip_special_chars(&line.replace("```", " "))
+      strip_special_chars(&to_speak.replace("```", " "))
     };
-    let before = phrases.len();
-    let mut current = String::new();
-    for ch in spoken.chars() {
-      current.push(ch);
-      if TTS_DELIMITERS.contains(&ch) {
-        push_spoken(&mut phrases, line_no, line, &mut current);
-      }
+
+    block_display.push(line);
+    if !block_spoken.is_empty() && !cleaned.is_empty() {
+      block_spoken.push(' ');
     }
-    push_spoken(&mut phrases, line_no, line, &mut current);
-    if phrases.len() == before {
-      phrases.push(SpokenPhrase {
-        line: line_no,
-        text: line.to_string(),
-        tts: String::new(),
-      });
+    block_spoken.push_str(&cleaned);
+
+    let is_last = i + 1 >= raw_lines.len();
+    let next_is_blank = !is_last && raw_lines[i + 1].trim().is_empty();
+    let block_ends = is_standalone || line.ends_with('.') || next_is_blank || is_last;
+    if !block_ends {
+      continue;
     }
-    line_no += 1;
+
+    flush_block(&mut phrases, &mut block_no, &mut block_display, &mut block_spoken);
   }
   phrases
 }
 
-/// Move what has been collected into `phrases` as one spoken phrase of `line`,
-/// unless there is nothing in it to say.
+/// Move what has been collected into `phrases` as one spoken phrase of
+/// `block_no`, unless there is nothing in it to say.
 fn push_spoken(
   phrases: &mut Vec<SpokenPhrase>,
-  line_no: usize,
-  line: &str,
+  block_no: usize,
+  display: &str,
   current: &mut String,
 ) {
   let spoken = current.trim();
   if spoken.chars().any(char::is_alphanumeric) {
     phrases.push(SpokenPhrase {
-      line: line_no,
-      text: line.to_string(),
+      line: block_no,
+      text: display.to_string(),
       tts: spoken.to_string(),
     });
   }
@@ -464,6 +748,13 @@ pub fn terminate(code: i32) -> ! {
   crate::ui::wait_for_ui_stopped(std::time::Duration::from_millis(200));
   // close the wav of the turn --save-html was still recording
   crate::html_export::finish();
+  // Drop `-s`'s wav sender, if any: the writer thread only finalizes the
+  // file (patches its header's size fields) once every sender clone is
+  // gone, and this is the one exit path every close, Ctrl-C and read-file
+  // mode's own included, funnels through - `process::exit` below skips
+  // destructors, so a static holding the sender would otherwise keep it
+  // open forever instead of just until the process happens to end.
+  crate::playback::clear_wav_tx();
   run_exit_hook();
    // Disable raw mode if enabled, to restore terminal state
    let _ = crossterm::terminal::disable_raw_mode();

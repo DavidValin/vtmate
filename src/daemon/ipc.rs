@@ -27,6 +27,10 @@ pub enum ClientMsg {
   Key(crossterm::event::KeyEvent),
   /// Leave; the daemon keeps running.
   Detach,
+  /// `-s`/`--save-html` given to an attach-client while the daemon was
+  /// already running: turn saving on for the rest of this daemon session.
+  /// Only ever turns a flag on, never off.
+  StartSave { save: bool, save_html: bool },
   /// Testing without a microphone: process `text` as if it had been
   /// transcribed from a hotkey utterance of this kind. Hidden.
   Say { text: String, kind: UtteranceKind },
@@ -95,6 +99,13 @@ pub struct StateView {
   pub debate_enabled: bool,
   pub debate_paused: bool,
   pub debate_agents: Vec<String>,
+  /// `-s`/`--save-html`, live: drives the bottom bar's SAVING tag on an
+  /// attached client, which otherwise only ever sees its own throwaway
+  /// mirror of these flags, never the daemon's real ones.
+  #[serde(default)]
+  pub save_enabled: bool,
+  #[serde(default)]
+  pub save_html_enabled: bool,
   pub modal_visible: bool,
   pub modal_agent1: usize,
   pub modal_agent2: usize,
@@ -123,6 +134,8 @@ impl StateView {
       processing_response: state.processing_response.load(Ordering::Relaxed),
       debate_enabled: state.debate_enabled.load(Ordering::SeqCst),
       debate_paused: state.debate_paused.load(Ordering::SeqCst),
+      save_enabled: state.save_enabled.load(Ordering::Relaxed),
+      save_html_enabled: state.save_html_enabled.load(Ordering::Relaxed),
       debate_agents: state
         .debate_agents
         .lock()
@@ -172,6 +185,12 @@ impl StateView {
     state
       .debate_paused
       .store(self.debate_paused, Ordering::SeqCst);
+    state
+      .save_enabled
+      .store(self.save_enabled, Ordering::Relaxed);
+    state
+      .save_html_enabled
+      .store(self.save_html_enabled, Ordering::Relaxed);
     {
       // the modal and the bar only read agent names from these entries
       let agents = state.agents();

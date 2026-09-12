@@ -17,11 +17,31 @@ use std::time::Instant;
 
 // API
 
-static WAV_TX: OnceLock<Sender<crate::audio::AudioChunk>> = OnceLock::new();
+// A Mutex, not a OnceLock: `-s`'s wav session is replaced on every
+// history-reset resave and dropped outright when saving stops, and a
+// OnceLock can only ever be set once for the life of the process - it would
+// keep the very first session's sender alive forever, which both stops the
+// writer thread from ever finalizing its file (finalize only runs once every
+// clone of the sender is dropped) and leaves later sessions silently
+// missing agent audio (this global is the only thing that feeds it in).
+static WAV_TX: Mutex<Option<Sender<crate::audio::AudioChunk>>> = Mutex::new(None);
 
-/// Set the global channel used by the WAV writer thread.
+/// Set the shared channel used to feed the WAV writer thread for the
+/// current `-s` session, replacing (and thereby finalizing) any previous one.
 pub fn set_wav_tx(tx: Sender<crate::audio::AudioChunk>) {
-  WAV_TX.set(tx).ok();
+  *WAV_TX.lock().unwrap() = Some(tx);
+}
+
+/// The sender for the currently active `-s` session, if any.
+pub fn wav_tx() -> Option<Sender<crate::audio::AudioChunk>> {
+  WAV_TX.lock().unwrap().clone()
+}
+
+/// Stop `-s`'s wav session: dropping the sender (here and wherever else it
+/// was held) is what ends the writer thread's `rx.iter()` and makes it
+/// finalize the file, right now instead of never.
+pub fn clear_wav_tx() {
+  *WAV_TX.lock().unwrap() = None;
 }
 // ------------------------------------------------------------------
 
@@ -310,7 +330,7 @@ pub fn playback_thread(
         recv(rx_audio) -> msg => {
           let Ok(chunk) = msg else { break };
           // Forward to wav writer if set (it normalises format itself)
-          if let Some(tx) = WAV_TX.get() {
+          if let Some(tx) = wav_tx() {
             tx.send(chunk.clone()).unwrap_or(());
           }
           // --save-html keeps one wav per turn: this chunk belongs to whichever

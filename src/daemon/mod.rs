@@ -215,7 +215,7 @@ fn print_shortcut_help(d: &config::DaemonSettings) {
   );
   println!("    What: Ask the selected agent via voice and listen the reply");
   println!(
-    "    e.g. ai voice conversation, find information, ask about a specific text selection, ..."
+    "    e.g. ai voice conversation, find information, ask about a text selection, ..."
   );
   println!();
 
@@ -224,7 +224,8 @@ fn print_shortcut_help(d: &config::DaemonSettings) {
   println!("    What: stops ongoing playback");
   println!();
   how_line("Press ", &d.llm_background_reset, " twice");
-  println!("    What: resets the llm conversation");
+  println!("    What: resets the llm conversation (and stops saving if session is being saved)");
+
   println!();
 
   println!("  tts_background_combo:");
@@ -433,6 +434,16 @@ pub fn run_foreground(args: &Args) -> ! {
   // the daemon only opens the mic while a combo is held, whatever the file says
   *state.ptt_override.lock().unwrap() = args.ptt;
   GLOBAL_STATE.set(state.clone()).ok();
+  // Set here rather than left for conversation_thread's own seeding: that
+  // only runs after crate::stt::init loads the Whisper model, which can take
+  // a few seconds, and an attaching client's bottom bar would otherwise miss
+  // the SAVING tag until it does.
+  if args.save {
+    state.save_enabled.store(true, Ordering::Relaxed);
+  }
+  if args.save_html {
+    state.save_html_enabled.store(true, Ordering::Relaxed);
+  }
 
   // ---------------------------------------------------
   // assets, channels, threads

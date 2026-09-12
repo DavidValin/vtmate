@@ -393,6 +393,11 @@ impl Controller {
       crate::tts::apply_residency(state);
     }
     state.reset_conversation();
+    // A history reset starts a new session: `-s`/`--save-html` exported the
+    // one that just got cleared, and must be asked for again (rather than
+    // silently resuming) to export whatever comes next.
+    state.save_enabled.store(false, Ordering::Relaxed);
+    state.save_html_enabled.store(false, Ordering::Relaxed);
     self.ui_line("");
     self.ui_line("\n\x1b[32m↻ Session restarted (history reset) \x1b[0m\n");
     crate::log::log("info", "conversation reset by hotkey");
@@ -419,6 +424,20 @@ impl Controller {
     match ev {
       ClientEvent::Key(k) => self.on_client_key(k),
       ClientEvent::Say { text, kind } => self.say(text, kind),
+      ClientEvent::StartSave { save, save_html } => self.start_save(save, save_html),
+    }
+  }
+
+  /// An attach client asked (via `-s`/`--save-html`) for saving to start on
+  /// this already-running daemon. The conversation thread's loop notices
+  /// these flags on its next turn and does the actual setup lazily, the same
+  /// way it would if they had been given at daemon startup.
+  fn start_save(&mut self, save: bool, save_html: bool) {
+    if save {
+      self.state.save_enabled.store(true, Ordering::Relaxed);
+    }
+    if save_html {
+      self.state.save_html_enabled.store(true, Ordering::Relaxed);
     }
   }
 

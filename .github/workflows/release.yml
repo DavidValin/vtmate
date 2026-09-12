@@ -71,7 +71,7 @@ jobs:
           if [ "$VERSION" != "${GITHUB_REF_NAME}" ]; then
             echo "warning: tag ${GITHUB_REF_NAME} differs from Cargo.toml version ${VERSION}; assets use ${VERSION}" >&2
           fi
-          mkdir -p assets
+          mkdir -p release_assets
 
           # Rendered (README.pdf) or copied (quicksheet.pdf) by build.yml's
           # docs job, as siblings in the same artifact directory. Every .tgz
@@ -93,7 +93,7 @@ jobs:
             # recompressing - the built archive is otherwise untouched.
             if [ -n "$(find "$dir" -name '*.tgz' -print -quit)" ]; then
               while IFS= read -r tgz; do
-                out="assets/$(basename "$tgz")"
+                out="release_assets/$(basename "$tgz")"
                 gzip -dc "$tgz" > "${out%.tgz}.tar"
                 tar -rf "${out%.tgz}.tar" -C "$PDF_DIR" README.pdf quicksheet.pdf
                 gzip -n -c "${out%.tgz}.tar" > "$out"
@@ -116,22 +116,22 @@ jobs:
             bindir="$(dirname "$bin")"
             case "$bin" in
               *.exe)
-                ( cd "$bindir" && zip -qr "${GITHUB_WORKSPACE}/assets/vtmate-${VERSION}-${name}.zip" . )
+                ( cd "$bindir" && zip -qr "${GITHUB_WORKSPACE}/release_assets/vtmate-${VERSION}-${name}.zip" . )
                 echo "packaged (zip): $name" ;;
               *)
                 cp "$PDF" "$QUICKSHEET" "$bindir"
-                ( cd "$bindir" && tar -czf "${GITHUB_WORKSPACE}/assets/vtmate-${VERSION}-${name}.tgz" -- * )
+                ( cd "$bindir" && tar -czf "${GITHUB_WORKSPACE}/release_assets/vtmate-${VERSION}-${name}.tgz" -- * )
                 echo "packaged (tgz + README.pdf + quicksheet.pdf): $name" ;;
             esac
           done
 
-          echo "--- assets ---"
-          ls -lh assets
+          echo "--- release_assets ---"
+          ls -lh release_assets
 
       - name: Verify README.pdf and quicksheet.pdf reached every tgz
         run: |
           set -euo pipefail
-          for a in assets/*.tgz; do
+          for a in release_assets/*.tgz; do
             [ -e "$a" ] || continue
             # Read the whole listing first: piping tar straight into grep -q
             # lets grep exit on the match while tar is still writing, and the
@@ -149,7 +149,7 @@ jobs:
       - name: Verify the binary sits at the top level of every archive
         run: |
           set -euo pipefail
-          for a in assets/*; do
+          for a in release_assets/*; do
             case "$a" in
               *.tgz) want=vtmate;     listing="$(tar -tzf "$a")" ;;
               *.zip) want=vtmate.exe; listing="$(unzip -Z1 "$a")" ;;
@@ -163,7 +163,7 @@ jobs:
 
       - name: Fail if no assets were produced
         run: |
-          count=$(find assets -type f | wc -l)
+          count=$(find release_assets -type f | wc -l)
           echo "asset count: $count"
           [ "$count" -gt 0 ] || { echo "No assets to publish" >&2; exit 1; }
 
@@ -172,4 +172,4 @@ jobs:
         with:
           name: ${{ github.ref_name }}
           generate_release_notes: true
-          files: assets/*
+          files: release_assets/*
