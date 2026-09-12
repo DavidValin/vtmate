@@ -60,13 +60,20 @@ mod llm {
   }
 }
 
+mod llm_cli {
+  pub fn is_cli_provider(_provider: &str) -> bool {
+    false
+  }
+}
+
 #[path = "../src/config.rs"]
 mod config;
 
 use config::{
   Args, DaemonSettings, GeneralSettings, load_daemon_settings,
-  load_general_settings, load_settings, persist_selected_agent, save_settings,
-  select_agent, split_leading_sections, try_load_settings, validate_agent,
+  load_general_settings, load_settings, persist_selected_agent, resolve_agents_path,
+  resolve_settings_path, save_settings, select_agent, split_leading_sections,
+  try_load_settings, validate_agent,
 };
 
 fn temp_settings(contents: &str) -> std::path::PathBuf {
@@ -105,6 +112,9 @@ fn default_args() -> Args {
     daemon_foreground: false,
     daemon_stop: false,
     daemon_status: false,
+    no_banner: false,
+    clone_voice: None,
+    refine_voice: None,
   }
 }
 
@@ -142,6 +152,9 @@ voice_speed = 5.0
 
 #[test]
 fn leading_sections_are_split_out_and_agents_still_parse() {
+  // split_leading_sections works on either file: general/daemon go with the
+  // settings file, system_prompt/agent with the agents file, but the parser
+  // itself does not care which file it is fed.
   let contents = format!(
     "[general]\nselected_agent = explainer\n\n[daemon]\nllm_background_ptt_combo = ctrl+alt+q\n\n{}\n{}",
     AGENT_A, AGENT_B
@@ -152,19 +165,55 @@ fn leading_sections_are_split_out_and_agents_still_parse() {
   assert!(sections.rest.starts_with("[agent]"));
   assert_eq!(sections.rest.matches("[agent]").count(), 2);
 
-  let path = temp_settings(&contents);
-  let agents = load_settings(&path, &default_args()).expect("agents parse with leading sections");
+  // the agents file holds only [agent] (and [system_prompt]) sections
+  let agents_path = temp_settings(&format!("{}\n{}", AGENT_A, AGENT_B));
+  let agents =
+    load_settings(&agents_path, &default_args()).expect("agents parse on their own");
   assert_eq!(agents.len(), 2);
   assert_eq!(agents[0].name, "main agent");
   assert_eq!(agents[1].name, "explainer");
 
-  let general = load_general_settings(&path).unwrap();
+  // [general] and [daemon] live in the settings file instead
+  let settings_path = temp_settings(&format!(
+    "[general]\nselected_agent = explainer\n\n[daemon]\nllm_background_ptt_combo = ctrl+alt+q\n"
+  ));
+  let general = load_general_settings(&settings_path).unwrap();
   assert_eq!(general.selected_agent, "explainer");
-  let daemon = load_daemon_settings(&path).unwrap();
+  let daemon = load_daemon_settings(&settings_path).unwrap();
   assert_eq!(daemon.llm_background_ptt_combo, "ctrl+alt+q");
   assert_eq!(daemon.tts_background_combo, "ctrl+alt+r");
   assert_eq!(daemon.stt_and_paste_background_ptt_combo, "ctrl+alt+s");
   assert_eq!(daemon.llm_background_reset, DaemonSettings::default().llm_background_reset);
+}
+
+#[test]
+fn try_load_settings_refuses_general_or_daemon_in_the_agents_file() {
+  let path = temp_settings(&format!("[general]\nselected_agent = a\n\n{}", AGENT_A));
+  let err = try_load_settings(&path, &default_args()).unwrap_err().to_string();
+  assert!(err.contains("[general]"), "{}", err);
+
+  let path = temp_settings(&format!(
+    "[daemon]\nllm_background_reset = ctrl+q\n\n{}",
+    AGENT_A
+  ));
+  let err = try_load_settings(&path, &default_args()).unwrap_err().to_string();
+  assert!(err.contains("[daemon]"), "{}", err);
+}
+
+#[test]
+fn agents_path_follows_dash_c_but_settings_path_never_does() {
+  // the stubbed `util::get_user_home_path` above always returns /tmp
+  assert_eq!(resolve_settings_path().unwrap(), std::path::PathBuf::from("/tmp/.vtmate/settings"));
+  assert_eq!(resolve_agents_path(&default_args()).unwrap(), std::path::PathBuf::from("/tmp/.vtmate/agents"));
+
+  let mut args = default_args();
+  args.config = Some("/elsewhere/philosophers.txt".to_string());
+  assert_eq!(
+    resolve_agents_path(&args).unwrap(),
+    std::path::PathBuf::from("/elsewhere/philosophers.txt")
+  );
+  // -c only ever redirects the agents file
+  assert_eq!(resolve_settings_path().unwrap(), std::path::PathBuf::from("/tmp/.vtmate/settings"));
 }
 
 #[test]
@@ -199,6 +248,9 @@ fn select_agent_precedence() {
 
 #[test]
 fn persist_selected_agent_inserts_section_on_top_and_keeps_agents() {
+  // persist_selected_agent is a plain text rewrite, unconcerned with which
+  // file it runs on; the agent text below the [general] it inserts is left
+  // untouched byte for byte, whatever that text happens to be.
   let original = format!("\n{}\n{}", AGENT_A, AGENT_B);
   let path = temp_settings(&original);
   persist_selected_agent(&path, "explainer").unwrap();
@@ -206,7 +258,7 @@ fn persist_selected_agent_inserts_section_on_top_and_keeps_agents() {
   assert!(after.starts_with("[general]\nselected_agent = explainer\n\n"));
   assert!(after.ends_with(original.trim_start_matches('\n')));
   assert_eq!(load_general_settings(&path).unwrap().selected_agent, "explainer");
-  assert_eq!(load_settings(&path, &default_args()).unwrap().len(), 2);
+  assert_eq!(after.matches("[agent]").count(), 2);
 }
 
 #[test]
@@ -255,7 +307,7 @@ fn test_load_settings_with_double_quotes() {
   // Create a temporary config file with quoted values
   let mut path = temp_dir();
   path.push(format!(
-    "ai_mate_test_config_{}.ini",
+    "vtmate_test_config_{}.ini",
     SystemTime::now()
       .duration_since(UNIX_EPOCH)
       .unwrap()
@@ -303,6 +355,9 @@ voice_speed = 5.0
     daemon_foreground: false,
     daemon_stop: false,
     daemon_status: false,
+    no_banner: false,
+    clone_voice: None,
+    refine_voice: None,
   };
 
   let agents = load_settings(&path, &args).expect("Failed to load settings");
@@ -331,7 +386,7 @@ fn test_load_settings() {
   // Create a temporary config file with quoted values
   let mut path = temp_dir();
   path.push(format!(
-    "ai_mate_test_config_{}.ini",
+    "vtmate_test_config_{}.ini",
     SystemTime::now()
       .duration_since(UNIX_EPOCH)
       .unwrap()
@@ -379,6 +434,9 @@ voice_speed = 5.0
     daemon_foreground: false,
     daemon_stop: false,
     daemon_status: false,
+    no_banner: false,
+    clone_voice: None,
+    refine_voice: None,
   };
 
   let agents = load_settings(&path, &args).expect("Failed to load settings");
@@ -598,9 +656,12 @@ fn persist_selected_agent_leaves_prompt_blocks_untouched() {
   assert!(written.contains("selected_agent = b"), "{}", written);
   assert!(written.contains("selected_agent = NOT THIS"), "{}", written);
   assert_eq!(load_general_settings(&path).unwrap().selected_agent, "b");
+  // the prompt block's body reads back exactly as written, '[general]' line
+  // and all - it is never mistaken for a real section header
+  let sections = split_leading_sections(&written);
   assert_eq!(
-    load_settings(&path, &default_args()).unwrap()[0].system_prompt,
-    "[general]\nselected_agent = NOT THIS"
+    sections.prompts.get("p").map(|s| s.as_str()),
+    Some("[general]\nselected_agent = NOT THIS")
   );
 }
 
@@ -617,28 +678,40 @@ fn prompt_of(path: &std::path::Path, name: &str) -> String {
 }
 
 #[test]
-fn saving_keeps_the_agents_and_the_other_sections() {
-  let contents = format!(
-    "[general]\nselected_agent = main agent\n\n[daemon]\nllm_background_ptt_combo = ctrl+alt+q\n\n{}\n{}",
-    AGENT_A, AGENT_B
-  );
-  let path = temp_settings(&contents);
+fn saving_writes_only_prompt_and_agent_sections() {
+  // save_settings only ever writes the agents file: no [general], no
+  // [daemon] - selected_agent is persist_selected_agent's job, on the
+  // settings file, and [daemon] is never touched from here at all.
+  let path = temp_settings(&format!("{}\n{}", AGENT_A, AGENT_B));
   let agents = load_settings(&path, &default_args()).unwrap();
 
-  save_settings(&path, &agents, "explainer").unwrap();
+  save_settings(&path, &agents).unwrap();
 
   let written = std::fs::read_to_string(&path).unwrap();
-  assert!(
-    written.contains("llm_background_ptt_combo = ctrl+alt+q"),
-    "{}",
-    written
-  );
-  assert_eq!(
-    load_general_settings(&path).unwrap().selected_agent,
-    "explainer"
-  );
+  assert!(!written.contains("[general]"), "{}", written);
+  assert!(!written.contains("[daemon]"), "{}", written);
+  assert!(written.starts_with("[agent]"), "{}", written);
   // every value survives the round trip, in order
   assert_eq!(load_settings(&path, &default_args()).unwrap(), agents);
+}
+
+#[test]
+fn every_agent_section_comes_before_every_system_prompt_section() {
+  // agents are what most people open the file to look at - a block-worthy
+  // prompt on the very first agent must not push it below the rest.
+  let long = (1..=8)
+    .map(|i| format!("line {}", i))
+    .collect::<Vec<_>>()
+    .join("\\n");
+  let path = temp_settings(&format!("{}{}", agent_with_prompt("a", &long), AGENT_A));
+  let agents = load_settings(&path, &default_args()).unwrap();
+
+  save_settings(&path, &agents).unwrap();
+
+  let written = std::fs::read_to_string(&path).unwrap();
+  let last_agent = written.rfind("[agent]").expect("an [agent] section");
+  let first_prompt = written.find("[system_prompt]").expect("a [system_prompt] section");
+  assert!(last_agent < first_prompt, "{}", written);
 }
 
 #[test]
@@ -651,7 +724,7 @@ fn an_added_agent_is_written_and_an_removed_one_is_gone() {
   extra.system_prompt = "You are the third one.".to_string();
   agents.push(extra);
 
-  save_settings(&path, &agents, "explainer").unwrap();
+  save_settings(&path, &agents).unwrap();
 
   let reloaded = load_settings(&path, &default_args()).unwrap();
   let names: Vec<&str> = reloaded.iter().map(|a| a.name.as_str()).collect();
@@ -669,7 +742,7 @@ fn a_prompt_over_five_lines_is_written_as_a_block() {
   let agents = load_settings(&path, &default_args()).unwrap();
   assert_eq!(agents[0].system_prompt.lines().count(), 8);
 
-  save_settings(&path, &agents, "a").unwrap();
+  save_settings(&path, &agents).unwrap();
 
   let written = std::fs::read_to_string(&path).unwrap();
   assert!(written.contains("[system_prompt]"), "{}", written);
@@ -684,7 +757,7 @@ fn a_prompt_of_five_lines_or_less_stays_inline() {
   let path = temp_settings(&agent_with_prompt("a", short));
   let agents = load_settings(&path, &default_args()).unwrap();
 
-  save_settings(&path, &agents, "a").unwrap();
+  save_settings(&path, &agents).unwrap();
 
   let written = std::fs::read_to_string(&path).unwrap();
   assert!(!written.contains("[system_prompt]"), "{}", written);
@@ -708,7 +781,7 @@ fn a_prompt_that_came_from_a_block_keeps_its_name() {
   let path = temp_settings(&contents);
   let agents = load_settings(&path, &default_args()).unwrap();
 
-  save_settings(&path, &agents, "a").unwrap();
+  save_settings(&path, &agents).unwrap();
 
   let written = std::fs::read_to_string(&path).unwrap();
   assert!(written.contains("name = shared"), "{}", written);
@@ -731,7 +804,7 @@ fn two_agents_editing_a_shared_prompt_apart_get_a_block_each() {
   let mut agents = load_settings(&path, &default_args()).unwrap();
   agents[1].system_prompt = format!("{}\nand more", body);
 
-  save_settings(&path, &agents, "a").unwrap();
+  save_settings(&path, &agents).unwrap();
 
   let written = std::fs::read_to_string(&path).unwrap();
   assert_eq!(written.matches("[system_prompt]").count(), 2, "{}", written);
@@ -751,7 +824,7 @@ fn a_prompt_the_inline_form_would_eat_is_written_as_a_block() {
     let path = temp_settings(&agent_with_prompt("a", "placeholder"));
     let mut agents = load_settings(&path, &default_args()).unwrap();
     agents[0].system_prompt = prompt.to_string();
-    save_settings(&path, &agents, "a").unwrap();
+    save_settings(&path, &agents).unwrap();
     assert_eq!(prompt_of(&path, "a"), prompt, "prompt: {:?}", prompt);
   }
 }
@@ -762,7 +835,7 @@ fn a_body_holding_a_fence_is_wrapped_in_a_longer_one() {
   let path = temp_settings(&agent_with_prompt("a", "placeholder"));
   let mut agents = load_settings(&path, &default_args()).unwrap();
   agents[0].system_prompt = body.to_string();
-  save_settings(&path, &agents, "a").unwrap();
+  save_settings(&path, &agents).unwrap();
   assert_eq!(prompt_of(&path, "a"), body);
 }
 
@@ -772,13 +845,9 @@ fn saving_over_a_missing_file_writes_a_whole_one() {
   let agents = load_settings(&path, &default_args()).unwrap();
   std::fs::remove_file(&path).unwrap();
 
-  save_settings(&path, &agents, "main agent").unwrap();
+  save_settings(&path, &agents).unwrap();
 
   assert_eq!(load_settings(&path, &default_args()).unwrap(), agents);
-  assert_eq!(
-    load_general_settings(&path).unwrap().selected_agent,
-    "main agent"
-  );
 }
 
 #[test]
@@ -793,7 +862,7 @@ fn validate_agent_reports_what_load_settings_would_refuse() {
   assert_eq!(problems.len(), 2, "{:?}", problems);
 
   // and the file it would produce is refused the same way when read back
-  save_settings(&path, &[agent], "main agent").unwrap();
+  save_settings(&path, &[agent]).unwrap();
   assert!(try_load_settings(&path, &default_args()).is_err());
 }
 

@@ -61,22 +61,26 @@ pub struct AgentSettings {
 #[command(group(clap::ArgGroup::new("daemon_cmd").multiple(false)))]
 #[command(group(clap::ArgGroup::new("voice_clone_cmd").multiple(false)))]
 #[clap(after_help = r#"
-Settings file is at ~/.vtmate/settings
+Settings live in two files:
 
-The file starts with a [general] section, then a [daemon]
-section, then one [agent] section per agent. Press Ctrl+S
-during a conversation to edit the agents from the terminal
-instead: what you save is written back to this file and
-applies straight away.
+  ~/.vtmate/settings  a [general] section, then a [daemon] section
+  ~/.vtmate/agents    one [system_prompt] section per named prompt,
+                      then one [agent] section per agent
 
-[general]
+`-c <file>` uses a different agents file instead of ~/.vtmate/agents
+(e.g. to keep separate groups of agents for different debates);
+~/.vtmate/settings is always the same file. Press Ctrl+S during a
+conversation to edit the agents from the terminal instead: what you
+save is written back to the agents file and applies straight away.
+
+[general]  (in ~/.vtmate/settings)
   * selected_agent:       name of the agent vtmate starts with.
                           Updated automatically every time you
                           switch agents with LEFT/RIGHT (in the
                           terminal or while attached to the
                           daemon). `-a` overrides it for one run.
 
-[daemon]  (global shortcuts used by `vtmate --daemon`)
+[daemon]  (in ~/.vtmate/settings; global shortcuts used by `vtmate --daemon`)
   * llm_background_ptt_combo:          hold to talk; on release the
                                        speech plus any selected text
                                        is sent to the agent and the
@@ -92,7 +96,7 @@ applies straight away.
   shift+f5, cmd+alt+r (modifiers: ctrl, alt/option, shift,
   cmd/super, cmdorctrl).
 
-[system_prompt]  (optional, as many as you want)
+[system_prompt]  (in ~/.vtmate/agents; optional, as many as you want)
   A named multiline system prompt that agents pull in with
   `system_prompt = @<name>`. The block holds a `name` and then
   the prompt body fenced between two lines of three or more
@@ -113,7 +117,7 @@ applies straight away.
   expanded (it already has real new lines). Close a body that
   itself contains '---' with a longer fence ('----').
 
-Explanation on the [agent] fields:
+Explanation on the [agent] fields (in ~/.vtmate/agents):
 
   * name:                 a short name for the agent
   ------------------------------------------------------------
@@ -267,8 +271,8 @@ pub struct Args {
   #[arg(
     short = 'c',
     long = "config",
-    value_name = "CONFIG_FILE",
-    help = "use a specific settings file"
+    value_name = "AGENTS_FILE",
+    help = "use a specific agents file instead of ~/.vtmate/agents"
   )]
   pub config: Option<String>,
 
@@ -445,8 +449,9 @@ impl DaemonSettings {
   }
 }
 
-/// The `[general]`, `[daemon]` and `[system_prompt]` blocks cut out of a
-/// settings file, plus everything else (the `[agent]` sections) untouched.
+/// The `[general]`, `[daemon]` and `[system_prompt]` blocks cut out of an ini
+/// file (the settings file, or the agents file), plus everything else (the
+/// `[agent]` sections) untouched.
 #[derive(Debug, Clone, Default)]
 pub struct LeadingSections {
   pub general: Option<String>,
@@ -914,7 +919,7 @@ pub fn persist_selected_agent(settings_path: &std::path::Path, name: &str) -> st
 
 /// Replace `settings_path` with `contents` in one step: write a sibling
 /// `.tmp`, flush it to disk and rename it over the file, so a full disk or a
-/// crash halfway through never leaves a truncated settings file behind.
+/// crash halfway through never leaves a truncated file behind.
 pub fn write_atomically(settings_path: &std::path::Path, contents: &str) -> std::io::Result<()> {
   let tmp = settings_path.with_file_name(format!(
     "{}.tmp",
@@ -932,13 +937,25 @@ pub fn write_atomically(settings_path: &std::path::Path, contents: &str) -> std:
 }
 
 /// The command line as vtmate sees it with no option at all: what reading the
-/// settings file needs when no override should apply to what is on disk.
+/// agents file needs when no override should apply to what is on disk.
 pub fn plain_args() -> Args {
   Args::parse_from(["vtmate"])
 }
 
-/// Path of the settings file: `-c` (with `~` expanded) or `~/.vtmate/settings`.
-pub fn resolve_settings_path(args: &Args) -> Result<std::path::PathBuf, Error> {
+/// Path of the settings file, always `~/.vtmate/settings`: the `[general]`
+/// and `[daemon]` sections are the same regardless of which agents file `-c`
+/// points at.
+pub fn resolve_settings_path() -> Result<std::path::PathBuf, Error> {
+  Ok(
+    get_user_home_path()
+      .ok_or_else(|| Error::msg("Unable to determine home directory"))?
+      .join(".vtmate")
+      .join("settings"),
+  )
+}
+
+/// Path of the agents file: `-c` (with `~` expanded) or `~/.vtmate/agents`.
+pub fn resolve_agents_path(args: &Args) -> Result<std::path::PathBuf, Error> {
   if let Some(ref cfg) = args.config {
     let mut path = std::path::PathBuf::from(cfg.as_str());
     if path.starts_with("~") {
@@ -953,7 +970,7 @@ pub fn resolve_settings_path(args: &Args) -> Result<std::path::PathBuf, Error> {
     get_user_home_path()
       .ok_or_else(|| Error::msg("Unable to determine home directory"))?
       .join(".vtmate")
-      .join("settings"),
+      .join("agents"),
   )
 }
 
@@ -1034,7 +1051,7 @@ pub fn whisper_models_available() -> Vec<String> {
   models
 }
 
-/// Why a settings file could not be turned into a list of agents.
+/// Why the agents file could not be turned into a list of agents.
 #[derive(Debug)]
 pub enum LoadError {
   /// The file cannot be read, or a section of it cannot be parsed.
@@ -1053,23 +1070,28 @@ impl std::fmt::Display for LoadError {
 
 impl std::error::Error for LoadError {}
 
-/// Read, expand and validate every `[agent]` section, reporting problems
-/// instead of writing to the terminal. `load_settings` is the startup
-/// entry point; the settings popup uses this one to reload after saving.
+/// Read, expand and validate every `[agent]` section of the agents file,
+/// reporting problems instead of writing to the terminal. `load_settings` is
+/// the startup entry point; the settings popup uses this one to reload after
+/// saving.
 pub fn try_load_settings(
-  settings_path: &std::path::Path,
+  agents_path: &std::path::Path,
   args: &Args,
 ) -> Result<Vec<AgentSettings>, LoadError> {
-  // Read the whole INI file; the [general] and [daemon] sections are parsed
-  // separately (load_general_settings / load_daemon_settings).
-  let text = read_to_string(settings_path)
-    .map_err(|e| LoadError::Syntax(format!("{}: {}", settings_path.display(), e)))?;
+  let text = read_to_string(agents_path)
+    .map_err(|e| LoadError::Syntax(format!("{}: {}", agents_path.display(), e)))?;
   let sections = split_leading_sections(&text);
+  if sections.general.is_some() || sections.daemon.is_some() {
+    return Err(LoadError::Syntax(format!(
+      "{} holds a [general] or [daemon] section: those belong in the settings file (~/.vtmate/settings), not the agents file",
+      agents_path.display()
+    )));
+  }
   if !sections.unknown.is_empty() {
     return Err(LoadError::Syntax(format!(
-      "unknown section {} in {}: expected [general], [daemon], [system_prompt] or [agent]",
+      "unknown section {} in {}: expected [system_prompt] or [agent]",
       sections.unknown.join(", "),
-      settings_path.display()
+      agents_path.display()
     )));
   }
   // Malformed [system_prompt] blocks are a file syntax problem, like an
@@ -1077,7 +1099,7 @@ pub fn try_load_settings(
   if !sections.prompt_errors.is_empty() {
     return Err(LoadError::Syntax(format!(
       "in {}:\n{}",
-      settings_path.display(),
+      agents_path.display(),
       sections.prompt_errors.join("\n")
     )));
   }
@@ -1143,7 +1165,7 @@ pub fn try_load_settings(
 
   if agents.is_empty() {
     return Err(LoadError::Syntax(
-      "No [agent] sections found in settings file".to_string(),
+      "No [agent] sections found in agents file".to_string(),
     ));
   }
 
@@ -1165,10 +1187,10 @@ pub fn try_load_settings(
 }
 
 pub fn load_settings(
-  settings_path: &std::path::Path,
+  agents_path: &std::path::Path,
   args: &Args,
 ) -> Result<Vec<AgentSettings>, Error> {
-  match try_load_settings(settings_path, args) {
+  match try_load_settings(agents_path, args) {
     Ok(agents) => Ok(agents),
     // A file we cannot parse is reported to the caller, which decides how to
     // give up; values we can parse but cannot accept stop vtmate right here,
@@ -1186,18 +1208,17 @@ pub fn load_settings(
   }
 }
 
+/// Create `~/.vtmate/settings` (the `[general]` and `[daemon]` sections)
+/// with its defaults, if it does not exist yet.
 pub fn ensure_settings_file() -> Result<(), Error> {
-  // Determine home directory
   let home =
     get_user_home_path().ok_or_else(|| Error::msg("Unable to determine home directory"))?;
 
-  let ai_mate_dir = home.join(".vtmate");
-  // Ensure directory exists
-  if !ai_mate_dir.exists() {
-    create_dir_all(&ai_mate_dir)?;
+  let vtmate_dir = home.join(".vtmate");
+  if !vtmate_dir.exists() {
+    create_dir_all(&vtmate_dir)?;
   }
-  let settings_path = ai_mate_dir.join("settings");
-  // If file already exists, skip writing
+  let settings_path = vtmate_dir.join("settings");
   if settings_path.exists() {
     return Ok(());
   }
@@ -1209,22 +1230,28 @@ llm_background_ptt_combo = ctrl+alt+a
 tts_background_combo = ctrl+alt+r
 stt_and_paste_background_ptt_combo = ctrl+alt+s
 llm_background_reset = ctrl+q
+"#;
+  let mut file = File::create(&settings_path)?;
+  file.write_all(content.as_bytes())?;
+  Ok(())
+}
 
-[system_prompt]
-name = concise_assistant
----
-You are a neutral, helpful AI assistant.
-Follow the subject of the conversation with special attention to the user
-request. Provide accurate, concise answers.
+/// Create `~/.vtmate/agents` (the `[system_prompt]` and `[agent]` sections)
+/// with its defaults, if it does not exist yet. Unaffected by `-c`: that flag
+/// picks a different agents file to run with, not where this default lives.
+pub fn ensure_agents_file() -> Result<(), Error> {
+  let home =
+    get_user_home_path().ok_or_else(|| Error::msg("Unable to determine home directory"))?;
 
-Rules:
-  1. Keep replies under 30 words.
-  2. If a longer answer is required, limit it to 250 words.
-  3. Assume no prior context unless the user supplies it.
-  4. Do not mention yourself.
----
-
-[agent]
+  let vtmate_dir = home.join(".vtmate");
+  if !vtmate_dir.exists() {
+    create_dir_all(&vtmate_dir)?;
+  }
+  let agents_path = vtmate_dir.join("agents");
+  if agents_path.exists() {
+    return Ok(());
+  }
+  let content = r#"[agent]
 name = main agent
 language = en
 tts = supertonic3
@@ -1329,9 +1356,23 @@ end_silence_ms = 2500
 ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 
+[system_prompt]
+name = concise_assistant
+---
+You are a neutral, helpful AI assistant.
+Follow the subject of the conversation with special attention to the user
+request. Provide accurate, concise answers.
+
+Rules:
+  1. Keep replies under 30 words.
+  2. If a longer answer is required, limit it to 250 words.
+  3. Assume no prior context unless the user supplies it.
+  4. Do not mention yourself.
+---
+
 
 "#;
-  let mut file = File::create(&settings_path)?;
+  let mut file = File::create(&agents_path)?;
   file.write_all(content.as_bytes())?;
   Ok(())
 }
@@ -1372,7 +1413,7 @@ pub fn pick_input_config(
     .ok_or_else(|| Error::msg("no supported input configs"))
 }
 
-// Writing the settings file back
+// Writing the agents file back
 // ------------------------------------------------------------------
 
 /// How many lines a prompt may have before it is written as a
@@ -1416,10 +1457,8 @@ pub fn validate_agent(agent: &AgentSettings) -> Vec<String> {
     .collect()
 }
 
-/// Write the whole settings file from `agents`: the `[general]` section (with
-/// `selected_agent` set to `selected`) and the `[daemon]` section are carried
-/// over from the file as they were, then come the `[system_prompt]` blocks the
-/// prompts need, then one `[agent]` section per agent, in order.
+/// Write the whole agents file from `agents`: the `[system_prompt]` blocks
+/// the prompts need, then one `[agent]` section per agent, in order.
 ///
 /// A prompt is written inline (`\n` for its line breaks) while it fits in
 /// `INLINE_PROMPT_MAX_LINES` lines and survives the round trip through the
@@ -1429,15 +1468,8 @@ pub fn validate_agent(agent: &AgentSettings) -> Vec<String> {
 /// keeps that block's name.
 ///
 /// The file is replaced atomically, so an interrupted save never leaves a
-/// half-written settings file.
-pub fn save_settings(
-  settings_path: &std::path::Path,
-  agents: &[AgentSettings],
-  selected: &str,
-) -> std::io::Result<()> {
-  let previous = read_to_string(settings_path).unwrap_or_default();
-  let sections = split_leading_sections(&previous);
-
+/// half-written agents file.
+pub fn save_settings(agents_path: &std::path::Path, agents: &[AgentSettings]) -> std::io::Result<()> {
   // one [system_prompt] block per prompt that cannot be written inline,
   // and the value the agent's `system_prompt` key gets
   let mut blocks: Vec<(String, String)> = Vec::new();
@@ -1457,48 +1489,17 @@ pub fn save_settings(
     }
   }
 
-  let mut out = String::with_capacity(previous.len() + 512);
+  let mut out = String::with_capacity(1024);
+  let mut first = true;
 
-  // [general]: selected_agent first, then whatever else the user had there
-  out.push_str("[general]\n");
-  out.push_str(&format!("selected_agent = {}\n", selected.trim()));
-  if let Some(block) = &sections.general {
-    for line in block.lines() {
-      let key = line.split('=').next().map(str::trim).unwrap_or("");
-      if key == "selected_agent" || line.trim().is_empty() {
-        continue;
-      }
-      out.push_str(line.trim_end_matches('\r'));
-      out.push('\n');
-    }
-  }
-
-  // [daemon]: carried over untouched (it is not edited here)
-  if let Some(block) = &sections.daemon {
-    out.push_str("\n[daemon]\n");
-    for line in block.lines() {
-      if line.trim().is_empty() {
-        continue;
-      }
-      out.push_str(line.trim_end_matches('\r'));
-      out.push('\n');
-    }
-  }
-
-  for (name, body) in &blocks {
-    let fence = "-".repeat(fence_len_for(body));
-    out.push_str("\n[system_prompt]\n");
-    out.push_str(&format!("name = {}\n", name));
-    out.push_str(&fence);
-    out.push('\n');
-    out.push_str(body);
-    out.push('\n');
-    out.push_str(&fence);
-    out.push('\n');
-  }
-
+  // [agent] sections first, then every [system_prompt] block they reference -
+  // the agents are what most people open the file to look at.
   for (agent, prompt_value) in agents.iter().zip(prompt_values) {
-    out.push_str("\n[agent]\n");
+    if !first {
+      out.push('\n');
+    }
+    first = false;
+    out.push_str("[agent]\n");
     out.push_str(&format!("name = {}\n", agent.name));
     out.push_str(&format!("language = {}\n", agent.language));
     out.push_str(&format!("tts = {}\n", agent.tts));
@@ -1523,7 +1524,23 @@ pub fn save_settings(
     ));
   }
 
-  write_atomically(settings_path, &out)
+  for (name, body) in &blocks {
+    let fence = "-".repeat(fence_len_for(body));
+    if !first {
+      out.push('\n');
+    }
+    first = false;
+    out.push_str("[system_prompt]\n");
+    out.push_str(&format!("name = {}\n", name));
+    out.push_str(&fence);
+    out.push('\n');
+    out.push_str(body);
+    out.push('\n');
+    out.push_str(&fence);
+    out.push('\n');
+  }
+
+  write_atomically(agents_path, &out)
 }
 
 // PRIVATE
@@ -1795,7 +1812,7 @@ fn validate_api_key(api_key: &str, provider: &str) -> Result<(), std::io::Error>
     return Err(std::io::Error::new(
       std::io::ErrorKind::Other,
       format!(
-        "provider '{}' needs an api_key (set it in the settings file or via the {} environment variable)",
+        "provider '{}' needs an api_key (set it in the agents file or via the {} environment variable)",
         provider,
         crate::llm::api_key_env_var(provider).unwrap_or("provider")
       ),

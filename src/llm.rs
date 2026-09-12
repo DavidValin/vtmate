@@ -46,7 +46,7 @@ pub const CLOUD_PROVIDERS: &[&str] = &[
 
 /// `(canonical, legacy bare form, the `llm` crate's own backend name)` for
 /// every hosted provider. `is_cloud_provider`, `api_key_env_var` and
-/// `build_provider` all resolve through this, so a settings file written
+/// `build_provider` all resolve through this, so an agents file written
 /// before the `-api` rename (`provider = openai`) keeps working.
 const CLOUD_PROVIDER_ALIASES: &[(&str, &str, &str)] = &[
   ("openai-api", "openai", "openai"),
@@ -418,7 +418,7 @@ fn build_provider(
     .map_err(|e| format!("Unsupported provider '{}': {}", target.provider, e))?;
   let api_key = resolve_api_key(&provider, &target.api_key).ok_or_else(|| {
     format!(
-      "No api_key configured for provider '{}' (set api_key in the settings file or the {} environment variable)",
+      "No api_key configured for provider '{}' (set api_key in the agents file or the {} environment variable)",
       provider,
       api_key_env_var(&provider).unwrap_or("provider")
     )
@@ -493,7 +493,7 @@ mod tests {
     assert!(is_local_provider("ollama"));
     assert!(is_local_provider("Llama-Server"));
     assert!(is_cloud_provider("anthropic-api"));
-    // a settings file written before the `-api` rename still works
+    // an agents file written before the `-api` rename still works
     assert!(is_cloud_provider("anthropic"));
     assert!(!is_supported_provider("foo"));
     assert_eq!(api_key_env_var("openai-api"), Some("OPENAI_API_KEY"));

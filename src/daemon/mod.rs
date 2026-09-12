@@ -49,7 +49,15 @@ pub fn spawn_detached(args: &Args) -> ! {
 
   // Settings errors print here instead of in the child (whose output is discarded).
   let _ = config::ensure_settings_file();
-  let settings_path = match config::resolve_settings_path(args) {
+  let _ = config::ensure_agents_file();
+  let settings_path = match config::resolve_settings_path() {
+    Ok(p) => p,
+    Err(e) => {
+      println!("✗ {}", e);
+      plain_exit(1);
+    }
+  };
+  let agents_path = match config::resolve_agents_path(args) {
     Ok(p) => p,
     Err(e) => {
       println!("✗ {}", e);
@@ -58,7 +66,7 @@ pub fn spawn_detached(args: &Args) -> ! {
   };
   let mut check_args = args.clone();
   check_args.ptt = Some(true);
-  let agents = match config::load_settings(&settings_path, &check_args) {
+  let agents = match config::load_settings(&agents_path, &check_args) {
     Ok(a) => a,
     Err(e) => {
       println!("✗ Failed to load settings: {}", e);
@@ -290,11 +298,14 @@ pub fn run_foreground(args: &Args) -> ! {
   // settings
   // ---------------------------------------------------
   let _ = config::ensure_settings_file();
-  let settings_path = config::resolve_settings_path(args)
-    .unwrap_or_else(|e| fail_start(&e.to_string(), EXIT_BAD_SETTINGS));
+  let _ = config::ensure_agents_file();
+  let settings_path =
+    config::resolve_settings_path().unwrap_or_else(|e| fail_start(&e.to_string(), EXIT_BAD_SETTINGS));
   let mut args = args.clone();
   args.ptt = Some(true); // the mic opens only while a push-to-talk combo is held
-  let agents = config::load_settings(&settings_path, &args).unwrap_or_else(|e| {
+  let agents_path = config::resolve_agents_path(&args)
+    .unwrap_or_else(|e| fail_start(&e.to_string(), EXIT_BAD_SETTINGS));
+  let agents = config::load_settings(&agents_path, &args).unwrap_or_else(|e| {
     fail_start(
       &format!("Failed to load settings: {}", e),
       EXIT_BAD_SETTINGS,
@@ -367,6 +378,7 @@ pub fn run_foreground(args: &Args) -> ! {
     agents.clone(),
     false,
     settings_path.clone(),
+    agents_path.clone(),
   ));
   state.daemon_mode.store(true, Ordering::Relaxed);
   state.recording_paused.store(true, Ordering::Relaxed);

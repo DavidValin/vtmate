@@ -277,44 +277,54 @@ remove_installed() { # from manifest + anything at the resolved locations
   [ -d "$LIB_DIR" ] && priv rmdir "$LIB_DIR" 2>/dev/null || true
 }
 
-# The backup is staged outside $VTMATE_HOME and only moved in once the new
-# binary is installed. A copy left inside that directory does not survive the
-# reinstall: reset_vtmate_home rewrites it, and vtmate up to 0.8.x wiped the
-# whole of ~/.vtmate on its first start when the espeak marker was missing -
-# which is exactly the state the reset leaves behind, and the first start is
-# install_from's own smoke test. Staging keeps the backup safe even when the
-# version being installed is one of those older binaries.
-BACKUP_STAGE=""; BACKUP_NAME=""
+# settings ([general]/[daemon]) and agents ([agent]/[system_prompt]) are two
+# separate files, backed up and reset the same way. $VTMATE_HOME is
+# $HOME/.vtmate, and $HOME is already the right directory on Windows too -
+# Git Bash sets it to the same place as %USERPROFILE%.
+#
+# The backups are staged outside $VTMATE_HOME and only moved in once the new
+# binary is installed, so an abort or a failed install cannot take the user's
+# files down with it; reset_vtmate_home removes the originals right after
+# staging, before the new binary is even downloaded.
+BACKUP_STAGE_FILES="" # space-separated "name:staged_path" pairs
 backup_settings() {
-  [ -f "$VTMATE_HOME/settings" ] || return 0
-  BACKUP_NAME="settings.backup.$(date +%Y-%m-%d_%H-%M-%S)"
-  BACKUP_STAGE="$TMP_DIR/$BACKUP_NAME"
-  cp -p "$VTMATE_HOME/settings" "$BACKUP_STAGE"
-}
-
-# Move the staged backup into $VTMATE_HOME. Called once the install is done,
-# and again from the EXIT trap so an abort or a failed install cannot take the
-# user's settings down with it.
-install_settings_backup() {
-  [ -n "$BACKUP_STAGE" ] && [ -f "$BACKUP_STAGE" ] || return 0
-  mkdir -p "$VTMATE_HOME" || return 0
-  # Never overwrite an existing backup: two runs in the same second would
-  # otherwise collide, and the second one carries the fresh defaults.
-  dest="$VTMATE_HOME/$BACKUP_NAME"; n=1
-  while [ -e "$dest" ]; do dest="$VTMATE_HOME/$BACKUP_NAME.$n"; n=$((n + 1)); done
-  mv "$BACKUP_STAGE" "$dest" 2>/dev/null || cp -p "$BACKUP_STAGE" "$dest" || return 0
-  BACKUP_STAGE=""
-  warn "Your settings were backed up to $dest"
-  warn "vtmate starts with fresh default settings; copy your agents, keys and choices back from the backup (or rename it to 'settings' to restore it as is)."
-}
-
-reset_vtmate_home() { # keep settings backups and read-files, drop everything else
-  [ -d "$VTMATE_HOME" ] || return 0
-  for e in "$VTMATE_HOME"/* "$VTMATE_HOME"/.[!.]*; do
-    [ -e "$e" ] || continue
-    case "$(basename "$e")" in settings.backup.*|read-files) continue ;; esac
-    rm -rf "$e"
+  BACKUP_STAGE_FILES=""
+  ts="$(date +%Y-%m-%d_%H-%M-%S)"
+  for name in settings agents; do
+    [ -f "$VTMATE_HOME/$name" ] || continue
+    stage="$TMP_DIR/$name.backup.$ts"
+    cp -p "$VTMATE_HOME/$name" "$stage"
+    BACKUP_STAGE_FILES="$BACKUP_STAGE_FILES $name:$stage"
   done
+}
+
+# Move the staged backups into $VTMATE_HOME. Called once the install is done,
+# and again from the EXIT trap so an abort or a failed install cannot take the
+# user's settings and agents down with it.
+install_settings_backup() {
+  [ -n "$BACKUP_STAGE_FILES" ] || return 0
+  mkdir -p "$VTMATE_HOME" || return 0
+  moved=""
+  for pair in $BACKUP_STAGE_FILES; do
+    stage="${pair#*:}"
+    [ -f "$stage" ] || continue
+    base="$(basename "$stage")"
+    # Never overwrite an existing backup: two runs in the same second would
+    # otherwise collide, and the second one carries the fresh defaults.
+    dest="$VTMATE_HOME/$base"; n=1
+    while [ -e "$dest" ]; do dest="$VTMATE_HOME/$base.$n"; n=$((n + 1)); done
+    mv "$stage" "$dest" 2>/dev/null || cp -p "$stage" "$dest" || continue
+    moved="$moved
+  $dest"
+  done
+  BACKUP_STAGE_FILES=""
+  [ -n "$moved" ] || return 0
+  warn "Backed up to:$moved"
+  warn "vtmate starts with fresh default settings and agents; copy your agents, keys and choices back from the backups (or rename them to 'settings' and 'agents' to restore them as is)."
+}
+
+reset_vtmate_home() { # only settings and agents - everything else is kept
+  rm -f "$VTMATE_HOME/settings" "$VTMATE_HOME/agents"
 }
 
 # -------------------------
@@ -641,7 +651,7 @@ if detect_existing; then
   say "vtmate is already installed:$FOUND"
   if [ "$DRY_RUN" -eq 0 ]; then
     if [ "$YES" -eq 0 ] && ! have_tty; then die "existing installation found; rerun with --yes to reinstall"; fi
-    confirm "Reinstall? (settings are backed up, $VTMATE_HOME is reset, read-files are kept)" "n" || { say "Aborted."; exit 0; }
+    confirm "Reinstall? (settings and agents are backed up and reset, everything else in $VTMATE_HOME is kept)" "n" || { say "Aborted."; exit 0; }
     REINSTALL=1
   fi
 fi

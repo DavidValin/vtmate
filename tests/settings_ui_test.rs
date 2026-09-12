@@ -177,7 +177,7 @@ fn ui(state: &AppState) -> SettingsUi {
 /// cursor move starts a new line, so the rows can be looked at.
 fn screen(ui: &SettingsUi) -> String {
   let mut out: Vec<u8> = Vec::new();
-  settings_ui::draw(&mut out, ui, &["a conversation line".to_string()]);
+  settings_ui::draw(&mut out, ui, &["a conversation line".to_string()], "");
   let raw = String::from_utf8_lossy(&out).to_string();
   let mut lines: Vec<String> = vec![String::new()];
   let mut rest = raw.as_str();
