@@ -207,13 +207,7 @@ pub fn conversation_thread(
     }
     prev_debate_enabled = current_debate_enabled;
 
-    let save_now = state.save_enabled.load(Ordering::Relaxed);
-    let save_html_now = state.save_html_enabled.load(Ordering::Relaxed);
-    let needs_setup = (save_now && state.save_path.lock().unwrap().is_none())
-      || (save_html_now && !crate::html_export::is_active());
-    if needs_setup {
-      maybe_setup_and_save(&conversation_history, &settings_clone, save_now, save_html_now)?;
-    }
+    ensure_save_setup(&conversation_history, &settings_clone)?;
 
     if !state.debate_enabled.load(Ordering::SeqCst) {
       if let Some(ref prompt) = pending_user_msg {
@@ -251,6 +245,7 @@ pub fn conversation_thread(
           recv(rx_utt) -> utt_result => {
             if let Ok(utt) = utt_result {
               // User provided input - process it
+              ensure_save_setup(&conversation_history, &settings_clone)?;
               let state = GLOBAL_STATE.get().expect("AppState not initialized");
               state.conversation_paused.store(false, Ordering::Relaxed);
               // Resume debate if it was paused
@@ -452,6 +447,7 @@ pub fn conversation_thread(
           crate::log::log("debug", "Utterance discarded (reset)");
           continue;
         }
+        ensure_save_setup(&conversation_history, &settings_clone)?;
         if let Some(wav_tx) = crate::playback::wav_tx() {
           wav_tx.send(utt.audio.clone()).unwrap_or(());
         }
@@ -734,6 +730,28 @@ fn build_metadata(state: &AppState, settings: &crate::config::AgentSettings) -> 
     system_prompt: settings.system_prompt.clone(),
     voice: settings.voice.clone(),
   }
+}
+
+/// Turn `-s`/`--save-html` on if newly requested (`state.save_enabled`/
+/// `save_html_enabled`, flipped by a daemon-attach client's `StartSave`)
+/// and not already set up. Called both at the top of the main loop and again
+/// at the very start of each utterance received: the flag can flip between
+/// one call and the next while the loop sits blocked in `select!` waiting on
+/// exactly the utterance that would otherwise go unsaved, so the loop-top
+/// call alone is one full turn too late for whichever utterance woke it.
+fn ensure_save_setup(
+  conversation_history: &ConversationHistory,
+  settings_clone: &crate::config::AgentSettings,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  let state = GLOBAL_STATE.get().expect("AppState not initialized");
+  let save_now = state.save_enabled.load(Ordering::Relaxed);
+  let save_html_now = state.save_html_enabled.load(Ordering::Relaxed);
+  let needs_setup = (save_now && state.save_path.lock().unwrap().is_none())
+    || (save_html_now && !crate::html_export::is_active());
+  if needs_setup {
+    maybe_setup_and_save(conversation_history, settings_clone, save_now, save_html_now)?;
+  }
+  Ok(())
 }
 
 /// Give the last pushed user message its own wav file (`--save-html`).
