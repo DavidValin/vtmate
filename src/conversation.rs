@@ -882,7 +882,7 @@ fn handle_undo(
 
   // Clear and re-render history
   let _ = tx_ui.send("redraw_full_history|".to_string());
-  let _ = tx_ui.send("line|\n\x1b[32m✨ Last message reverted \x1b[0m\n".to_string());
+  let _ = tx_ui.send("line|\n\x1b[32m↻ Last message reverted \x1b[0m\n".to_string());
 
   // Persist conversation after undo
   perform_save(&conversation_history, settings);

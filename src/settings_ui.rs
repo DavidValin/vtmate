@@ -191,7 +191,7 @@ impl SettingsUi {
 pub fn open(state: &AppState) -> Vec<String> {
   let settings_path = state.settings_path.lock().unwrap().clone();
   if settings_path.as_os_str().is_empty() {
-    return vec!["line|\n\x1b[31m❌ No settings file in use, nothing to edit\x1b[0m\n".to_string()];
+    return vec!["line|\n\x1b[31m✗ No settings file in use, nothing to edit\x1b[0m\n".to_string()];
   }
   // straight from the file: the running agents may carry command line
   // overrides (`--ptt`), and those must not be written back as settings
@@ -200,7 +200,7 @@ pub fn open(state: &AppState) -> Vec<String> {
     Ok(agents) => agents,
     Err(e) => {
       return vec![format!(
-        "line|\n\x1b[31m❌ Cannot edit {}: {}\x1b[0m\n",
+        "line|\n\x1b[31m✗ Cannot edit {}: {}\x1b[0m\n",
         settings_path.display(),
         e
       )];
@@ -341,7 +341,7 @@ fn save(state: &AppState) -> Vec<String> {
   vec![
     "settings_hide|".to_string(),
     format!(
-      "line|\n\x1b[32m💾 Settings saved - agent '\x1b[37m{}\x1b[32m' is live\x1b[0m\n",
+      "line|\n\x1b[32m✓ Settings saved - agent '\x1b[37m{}\x1b[32m' is live\x1b[0m\n",
       active.name
     ),
   ]
@@ -1117,7 +1117,7 @@ fn maybe_spawn_ollama_poller(ui: &mut SettingsUi) {
 }
 
 /// Runs every 5s while the popup shows an ollama agent, refreshing the
-/// model list a ◀ ▶ picker offers; exits (clearing the running flag) as soon
+/// model list a ◂ ▸ picker offers; exits (clearing the running flag) as soon
 /// as the popup closes or moves off ollama, so at most one of these ever
 /// runs.
 fn poll_ollama_models() {
@@ -1699,7 +1699,7 @@ fn form_lines(ui: &SettingsUi, inner: usize, rows: u16) -> (String, Vec<String>,
     ),
   ];
   for problem in form.errors.iter().take(3) {
-    footer.push(format!("{}⚠ {}{}", RED, cut(problem, inner - 2), OFF));
+    footer.push(format!("{}▲ {}{}", RED, cut(problem, inner - 2), OFF));
   }
 
   let title = match form.editing {
@@ -1802,7 +1802,7 @@ fn model_field_hint(field: &Field, provider: &str, form: &Form) -> Option<(Strin
   None
 }
 
-/// The rendered value of one field: a box for text, `◀ value ▶` for a select,
+/// The rendered value of one field: a box for text, `◂ value ▸` for a select,
 /// a bar for a slider.
 fn field_value(
   agent: &AgentSettings,
@@ -1879,7 +1879,7 @@ fn field_value(
     // a reachable provider gets a tick after its name; not found is red
     // (see the color below) rather than decorated, the hint line says why
     let is_reachability_field = field == Field::Provider && has_reachability_check(&agent.provider);
-    // a narrow tick, not the ✅ emoji: that one renders as 2 terminal
+    // a narrow tick, not the ✓ emoji: that one renders as 2 terminal
     // columns wide while counting as 1 char, which threw the padding math
     // below off by a column and pushed the popup's right border out of line
     let display_value = if is_reachability_field && provider_reachable == Some(true) {
@@ -1887,7 +1887,7 @@ fn field_value(
     } else {
       value.clone()
     };
-    // padded, so the ▶ and the counter do not jump as the value changes
+    // padded, so the ▸ and the counter do not jump as the value changes
     let body_width = width.saturating_sub(counter.chars().count() + 6);
     let body = pad(&cut(&display_value, body_width), body_width, ' ');
     // a model picked while a cli or ollama no longer offers it (an ollama
@@ -1904,8 +1904,10 @@ fn field_value(
     } else {
       OFF
     };
+    // Small triangles, not U+25C0/U+25B6: those are the bases of the colour
+    // arrow emoji and a renderer may promote them to two-column glyphs.
     return format!(
-      "{}◀{} {}{}{} {}▶{} {}{}{}",
+      "{}◂{} {}{}{} {}▸{} {}{}{}",
       arrows, OFF, value_color, body, OFF, arrows, OFF, DIM, counter, OFF
     );
   }

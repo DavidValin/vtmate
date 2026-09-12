@@ -268,7 +268,7 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
           } else {
             // Not enough agents
             let _ = ctx.tx_ui.send(
-              "line|\n\x1b[31m❌ Need at least 2 agents for debate mode\x1b[0m\n".to_string(),
+              "line|\n\x1b[31m✗ Need at least 2 agents for debate mode\x1b[0m\n".to_string(),
             );
           }
         } else {
@@ -278,8 +278,8 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
           state.debate_agents.lock().unwrap().clear();
           state.debate_turn.store(0, Ordering::SeqCst);
           *state.debate_subject.lock().unwrap() = String::new();
-          // Back to the selected agent alone. An engine it shares with one of
-          // the debate agents is kept, not torn down and loaded again.
+          // Back to the selected agent alone; an engine it shares with a
+          // debate agent stays loaded.
           crate::tts::apply_residency(state);
           // Interrupt any ongoing TTS playback
           ctx.interrupt_counter.fetch_add(1, Ordering::SeqCst);
@@ -287,7 +287,7 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
             .playback
             .playback_active
             .store(false, Ordering::Relaxed);
-          let _ = ctx.tx_ui.send("line|\n\x1b[33m🎭 Debate mode DISABLED\x1b[0m\n".to_string());
+          let _ = ctx.tx_ui.send("line|\n\x1b[33m⇄ Debate mode DISABLED\x1b[0m\n".to_string());
         }
       }
     }
@@ -317,7 +317,7 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
             state.debate_paused.store(true, Ordering::SeqCst);
             // send UI
             let _ = ctx.tx_ui.send(
-              "line|\n\x1b[32m🚩 Debate paused, speak again to continue \x1b[0m\n"
+              "line|\n\x1b[32m▮▮ Debate paused, speak again to continue \x1b[0m\n"
                 .to_string(),
             );
           }
@@ -346,7 +346,7 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
 
         if agent1_idx == agent2_idx {
           let _ = ctx.tx_ui.send(
-            "line|\n\x1b[31m❌ Please select two different agents\x1b[0m\n".to_string(),
+            "line|\n\x1b[31m✗ Please select two different agents\x1b[0m\n".to_string(),
           );
         } else {
           let debate_agents = vec![agents[agent1_idx].clone(), agents[agent2_idx].clone()];
@@ -362,10 +362,10 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
 
           let _ = ctx.tx_ui.send("modal_hide|".to_string());
           let _ = ctx.tx_ui.send(format!(
-            "line|\n\x1b[33m🎭 Debate mode ENABLED between '{}' and '{}'\x1b[0m",
+            "line|\n\x1b[33m⇄ Debate mode ENABLED between '{}' and '{}'\x1b[0m",
             agents[agent1_idx].name, agents[agent2_idx].name
           ));
-          let _ = ctx.tx_ui.send("line|\n\x1b[33m💬 Speak to set the debate topic or change the subject at any time\x1b[0m\n".to_string());
+          let _ = ctx.tx_ui.send("line|\n\x1b[33m» Speak to set the debate topic or change the subject at any time\x1b[0m\n".to_string());
         }
       }
       KeyCode::Up => {
@@ -475,7 +475,7 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
         if !state.debate_paused.load(Ordering::SeqCst) {
           state.debate_paused.store(true, Ordering::SeqCst);
           let _ = ctx.tx_ui.send(
-            "line|\n\x1b[32m🚩 Debate paused, speak again to continue \x1b[0m\n".to_string(),
+            "line|\n\x1b[32m▮▮ Debate paused, speak again to continue \x1b[0m\n".to_string(),
           );
         }
       }
@@ -490,7 +490,7 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
           }
           let _ = ctx.tx_ui.send("line|".to_string());
           let _ = ctx.tx_ui.send(
-            "line|\n\x1b[32m✨ Session restarted (history reset) \x1b[0m\n".to_string(),
+            "line|\n\x1b[32m↻ Session restarted (history reset) \x1b[0m\n".to_string(),
           );
         } else {
           st.last_esc = Some(now);
@@ -538,8 +538,8 @@ pub fn switch_agent(
   tx_ui: &Sender<String>,
 ) {
   state.apply_agent(new_agent);
-  // The new agent may speak through a different engine than the old one: load
-  // what it needs and free what nothing needs any more.
+  // The new agent may use a different engine: load what it needs, free the
+  // rest.
   crate::tts::apply_residency(state);
   // Reset conversation history when changing agents
   state.reset_conversation();
@@ -557,7 +557,7 @@ pub fn switch_agent(
     );
   }
   let _ = tx_ui.send(format!(
-    "line|\n\x1b[32m🤖 Agent switched to '\x1b[37m{}\x1b[0m\x1b[32m' language: \x1b[37m{}\x1b[0m",
+    "line|\n\x1b[32m◆ Agent switched to '\x1b[37m{}\x1b[0m\x1b[32m' language: \x1b[37m{}\x1b[0m",
     new_agent.name, new_agent.language
   ));
 }

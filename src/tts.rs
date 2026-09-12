@@ -38,11 +38,9 @@ pub enum SpeakOutcome {
   Interrupted,
 }
 
-// All three share one shape: `None` when the engine is not loaded, and
-// replaceable, so an engine can be dropped when no agent needs it and rebuilt
-// on the CPU when the GPU refuses (supertonic3_tts::rebuild_on_cpu). They were
-// `OnceLock` before, which is a one-way door - once set it can never be
-// cleared, so every engine ever spoken through stayed resident for the run.
+// `None` when the engine is not loaded. Replaceable, so an engine can be
+// dropped once no agent needs it and rebuilt on the CPU when the GPU refuses
+// (supertonic3_tts::rebuild_on_cpu).
 static KOKORO_ENGINE: Mutex<Option<Arc<Mutex<TtsEngine>>>> = Mutex::new(None);
 static SUPERTONIC2_ENGINE: Mutex<Option<Arc<Mutex<Supertonic2TtsEngine>>>> = Mutex::new(None);
 static SUPERTONIC3_ENGINE: Mutex<Option<Arc<supertonic3_tts_crate::TtsEngine>>> = Mutex::new(None);
@@ -51,18 +49,14 @@ static SUPERTONIC3_ENGINE: Mutex<Option<Arc<supertonic3_tts_crate::TtsEngine>>> 
 // ------------------------------------------------------------------
 // Model weights are the largest thing vtmate holds, and on a CUDA build they
 // sit on the card: supertonic3 is ~400 MB of ONNX sessions, supertonic2 ~260.
-// Which engines are *needed* changes as agents are switched and debates begin
-// and end, so what stays loaded follows that set instead of accumulating every
-// engine ever spoken through. A card that fills up mid-synthesis is a real
-// failure, not a theoretical one - see `util::describe_gpu_failure`.
+// What stays loaded follows the agents that can speak, so the card does not
+// fill up mid-synthesis (see `util::describe_gpu_failure`).
 //
-// "opentts" is absent on purpose: it is a network service that holds nothing
-// locally, so there is nothing to load or free.
+// "opentts" is absent on purpose: a network service holds nothing locally.
 const LOADABLE_ENGINES: [&str; 3] = ["kokoro", "supertonic2", "supertonic3"];
 
-/// Held across a whole residency change, so two of them (an agent switch
-/// racing a debate ending, say) cannot interleave and leave an engine both
-/// wanted and unloaded.
+/// Held across a whole residency change, so two of them cannot interleave and
+/// leave an engine both wanted and unloaded.
 static RESIDENCY: Mutex<()> = Mutex::new(());
 
 /// The engines the current mode needs: both debate agents while a debate runs,
@@ -82,28 +76,23 @@ pub fn wanted_engines(state: &crate::state::AppState) -> Vec<String> {
 }
 
 /// Make the set of loaded engines match what the current mode needs. Call it
-/// after anything that changes which agents can speak: switching agent,
-/// entering or leaving a debate.
+/// after anything that changes which agents can speak.
 ///
-/// The work happens on its own thread. Callers are the keyboard and daemon
-/// threads, and loading a model takes seconds - long enough that doing it
-/// inline would freeze the UI on every agent switch.
+/// Runs on its own thread: loading a model takes seconds, and the callers are
+/// the keyboard and daemon threads.
 pub fn apply_residency(state: &crate::state::AppState) {
   let wanted = wanted_engines(state);
   std::thread::spawn(move || apply_residency_set(&wanted));
 }
 
-/// Load what is missing, drop what is not wanted. An engine wanted both before
-/// and after a transition is left alone: leaving a debate for an agent that
-/// shares one of its engines must not tear down a model that is already there.
+/// Load what is missing, drop what is not wanted. An engine in both sets is
+/// left alone, so leaving a debate for an agent that shares one keeps it.
 ///
-/// Dropping is releasing this module's handle, not a guarantee the memory is
-/// back - a thread still speaking holds its own `Arc` and frees when it
-/// finishes its phrase.
+/// Dropping releases this module's handle; a thread still speaking holds its
+/// own `Arc` until it finishes its phrase.
 fn apply_residency_set(wanted: &[String]) {
   let _guard = RESIDENCY.lock().unwrap_or_else(|e| e.into_inner());
-  // Free before loading: on a card that is already tight, the other order
-  // needs room for both at once, which is the situation being avoided.
+  // Free first: the other order needs room for both engines at once.
   for name in LOADABLE_ENGINES {
     if !wanted.iter().any(|w| w == name) {
       let dropped = match name {
@@ -122,8 +111,8 @@ fn apply_residency_set(wanted: &[String]) {
   for name in LOADABLE_ENGINES {
     if wanted.iter().any(|w| w == name) {
       if let Err(e) = load_engine_named(name) {
-        // Not fatal: the engine stays unloaded and the next phrase tries again
-        // on the speaking thread, where the failure reaches the user.
+        // Not fatal: the next phrase retries on the speaking thread, where
+        // the failure reaches the user.
         crate::log::log(
           "warning",
           &format!("[tts] could not preload {}: {}", name, e),
@@ -133,8 +122,7 @@ fn apply_residency_set(wanted: &[String]) {
   }
 }
 
-/// Load one engine by name if it is not loaded already. Used both by the
-/// residency pass and by read-file mode, which loads its one engine up front.
+/// Load one engine by name if it is not loaded already.
 pub fn load_engine_named(name: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   match name {
     "kokoro" => kokoro_tts::ensure_loaded(),
@@ -213,7 +201,7 @@ pub fn tts_thread(
   tx_tts_done: Sender<u64>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   loop {
-    crate::log::log("info", "🔄 TTS thread waiting for next phrase...");
+    crate::log::log("info", "↻ TTS thread waiting for next phrase...");
     // Wait for either a new phrase or a stop signal
     crossbeam_channel::select! {
       recv(rx_tts) -> msg => {
@@ -425,7 +413,7 @@ pub fn print_voices() {
   let langs = get_all_available_languages();
 
   println!(
-    "supertonic3 🏆 High Quality Voices\n======================================================\n{:<8}\t{:<12}\t{:<2}\t{}",
+    "supertonic3 ★ High Quality Voices\n======================================================\n{:<8}\t{:<12}\t{:<2}\t{}",
     "TTS", "Language", "Flag", "Voices"
   );
   println!("======================================================");
@@ -434,17 +422,17 @@ pub fn print_voices() {
     if voices.is_empty() {
       continue;
     }
-    let flag = crate::util::get_flag(lang);
+    let code = crate::util::lang_code(lang);
     let voices_str = voices.join(", ");
     println!(
       "{:<8}\t{:<12}\t{:<2}\t{}",
-      "supertonic3", lang, flag, voices_str
+      "supertonic3", lang, code, voices_str
     );
   }
   print_voice_styles_hint("supertonic3");
   println!();
   println!(
-    "supertonic2 🏆 High Quality Voices\n======================================================\n{:<8}\t{:<12}\t{:<2}\t{}",
+    "supertonic2 ★ High Quality Voices\n======================================================\n{:<8}\t{:<12}\t{:<2}\t{}",
     "TTS", "Language", "Flag", "Voices"
   );
   println!("======================================================");
@@ -453,11 +441,11 @@ pub fn print_voices() {
     if voices.is_empty() {
       continue;
     }
-    let flag = crate::util::get_flag(lang);
+    let code = crate::util::lang_code(lang);
     let voices_str = voices.join(", ");
     println!(
       "{:<8}\t{:<12}\t{:<2}\t{}",
-      "supertonic2", lang, flag, voices_str
+      "supertonic2", lang, code, voices_str
     );
   }
   print_voice_styles_hint("supertonic2");
@@ -470,7 +458,7 @@ pub fn print_voices() {
   println!();
 
   println!(
-    "kokoro 🏆 High Quality Voices\n======================================================\n{:<8}\t{:<12}\t{:<2}\t{}",
+    "kokoro ★ High Quality Voices\n======================================================\n{:<8}\t{:<12}\t{:<2}\t{}",
     "TTS", "Language", "Flag", "Voices"
   );
   println!("======================================================");
@@ -480,9 +468,9 @@ pub fn print_voices() {
     if voices.is_empty() {
       continue;
     }
-    let flag = crate::util::get_flag(lang);
+    let code = crate::util::lang_code(lang);
     let voices_str = voices.join(", ");
-    println!("{:<8}\t{:<12}\t{:<2}\t{}", "kokoro", lang, flag, voices_str);
+    println!("{:<8}\t{:<12}\t{:<2}\t{}", "kokoro", lang, code, voices_str);
   }
   println!();
   println!();
@@ -494,11 +482,11 @@ pub fn print_voices() {
     if voices.is_empty() {
       continue;
     }
-    let flag = crate::util::get_flag(lang);
+    let code = crate::util::lang_code(lang);
     let voices_str = voices.join(", ");
     println!(
       "{:<8}\t{:<12}\t{:<2}\t{}",
-      "opentts", lang, flag, voices_str
+      "opentts", lang, code, voices_str
     );
   }
 }
