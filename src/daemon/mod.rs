@@ -215,7 +215,7 @@ fn print_shortcut_help(d: &config::DaemonSettings) {
   );
   println!("    What: Ask the selected agent via voice and listen the reply");
   println!(
-    "    e.g. ai voice conversation, find information, ask about a specific text selection, ..."
+    "    e.g. ai voice conversation, find information, ask about a text selection, ..."
   );
   println!();
 
@@ -224,7 +224,8 @@ fn print_shortcut_help(d: &config::DaemonSettings) {
   println!("    What: stops ongoing playback");
   println!();
   how_line("Press ", &d.llm_background_reset, " twice");
-  println!("    What: resets the llm conversation");
+  println!("    What: resets the llm conversation (and stops saving if session is being saved)");
+
   println!();
 
   println!("  tts_background_combo:");
