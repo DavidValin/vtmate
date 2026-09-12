@@ -368,12 +368,23 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
           let _ = ctx.tx_ui.send("line|\n\x1b[33m» Speak to set the debate topic or change the subject at any time\x1b[0m\n".to_string());
         }
       }
-      KeyCode::Up => {
+      KeyCode::Up | KeyCode::Down | KeyCode::Tab => {
+        // Switch focus between agent1, agent2, and confirm button - the same
+        // convention the agent settings form uses (Tab/↑/↓ move between
+        // fields, ←/→ change the current field's value).
+        let mut focus = state.debate_modal_focus.lock().unwrap();
+        if k.code == KeyCode::Up {
+          *focus = if *focus == 0 { 2 } else { *focus - 1 };
+        } else {
+          *focus = (*focus + 1) % 3;
+        }
+        let _ = ctx.tx_ui.send("modal_update|".to_string());
+      }
+      KeyCode::Left => {
         let focus = *state.debate_modal_focus.lock().unwrap();
         let agent_count = state.agents.lock().unwrap().len();
 
         if focus == 0 {
-          // Agent 1 selection - move up
           let mut agent1_idx = state.debate_modal_selected_agent1.lock().unwrap();
           *agent1_idx = if *agent1_idx == 0 {
             agent_count - 1
@@ -382,7 +393,6 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
           };
           let _ = ctx.tx_ui.send("modal_update|".to_string());
         } else if focus == 1 {
-          // Agent 2 selection - move up
           let mut agent2_idx = state.debate_modal_selected_agent2.lock().unwrap();
           *agent2_idx = if *agent2_idx == 0 {
             agent_count - 1
@@ -392,31 +402,19 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
           let _ = ctx.tx_ui.send("modal_update|".to_string());
         }
       }
-      KeyCode::Down => {
+      KeyCode::Right => {
         let focus = *state.debate_modal_focus.lock().unwrap();
         let agent_count = state.agents.lock().unwrap().len();
 
         if focus == 0 {
-          // Agent 1 selection - move down
           let mut agent1_idx = state.debate_modal_selected_agent1.lock().unwrap();
           *agent1_idx = (*agent1_idx + 1) % agent_count;
           let _ = ctx.tx_ui.send("modal_update|".to_string());
         } else if focus == 1 {
-          // Agent 2 selection - move down
           let mut agent2_idx = state.debate_modal_selected_agent2.lock().unwrap();
           *agent2_idx = (*agent2_idx + 1) % agent_count;
           let _ = ctx.tx_ui.send("modal_update|".to_string());
         }
-      }
-      KeyCode::Left | KeyCode::Right | KeyCode::Tab => {
-        // Switch focus between agent1, agent2, and confirm button
-        let mut focus = state.debate_modal_focus.lock().unwrap();
-        if k.code == KeyCode::Left {
-          *focus = if *focus == 0 { 2 } else { *focus - 1 };
-        } else {
-          *focus = (*focus + 1) % 3;
-        }
-        let _ = ctx.tx_ui.send("modal_update|".to_string());
       }
       _ => {}
     }

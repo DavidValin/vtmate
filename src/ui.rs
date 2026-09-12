@@ -1544,8 +1544,8 @@ fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
 
   // Agent 1 dropdown
   let dropdown1_width = modal_width as usize - 4 - agent1_label.len();
-  let agent1_display = if agents[agent1_idx].name.len() > dropdown1_width - 4 {
-    format!("{}...", &agents[agent1_idx].name[..dropdown1_width - 7])
+  let agent1_display = if agents[agent1_idx].name.len() > dropdown1_width - 5 {
+    format!("{}...", &agents[agent1_idx].name[..dropdown1_width - 8])
   } else {
     agents[agent1_idx].name.clone()
   };
@@ -1560,7 +1560,7 @@ fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
       } else {
         "\x1b[97;48;5;237m"
       },
-      format!(" {} ▼", agent1_display),
+      format!("◀ {} ▶", agent1_display),
       width = dropdown1_width
     ))
   )
@@ -1581,8 +1581,8 @@ fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
 
   // Agent 2 dropdown
   let dropdown2_width = modal_width as usize - 4 - agent2_label.len();
-  let agent2_display = if agents[agent2_idx].name.len() > dropdown2_width - 4 {
-    format!("{}...", &agents[agent2_idx].name[..dropdown2_width - 7])
+  let agent2_display = if agents[agent2_idx].name.len() > dropdown2_width - 5 {
+    format!("{}...", &agents[agent2_idx].name[..dropdown2_width - 8])
   } else {
     agents[agent2_idx].name.clone()
   };
@@ -1597,7 +1597,7 @@ fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
       } else {
         "\x1b[97;48;5;237m"
       },
-      format!(" {} ▼", agent2_display),
+      format!("◀ {} ▶", agent2_display),
       width = dropdown2_width
     ))
   )
@@ -1631,7 +1631,7 @@ fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
     out,
     MoveTo(modal_x + 2, instructions_y + 1),
     Print(format!(
-      "\x1b[48;5;234m\x1b[97m Tab/←/→ \x1b[90m Switch focus\x1b[0m"
+      "\x1b[48;5;234m\x1b[97m Tab/↑/↓ \x1b[90m Switch focus\x1b[0m"
     ))
   )
   .unwrap();
@@ -1640,7 +1640,7 @@ fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
     out,
     MoveTo(modal_x + 2, instructions_y + 2),
     Print(format!(
-      "\x1b[48;5;234m\x1b[97m ↑/↓     \x1b[90m Change selection\x1b[0m"
+      "\x1b[48;5;234m\x1b[97m ←/→     \x1b[90m Change selection\x1b[0m"
     ))
   )
   .unwrap();
