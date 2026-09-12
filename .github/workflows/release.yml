@@ -73,10 +73,14 @@ jobs:
           fi
           mkdir -p assets
 
-          # Rendered by build.yml's docs job. Every .tgz carries a copy at its
-          # top level, beside the binary, so the manual ships with the release.
+          # Rendered (README.pdf) or copied (quicksheet.pdf) by build.yml's
+          # docs job, as siblings in the same artifact directory. Every .tgz
+          # carries a copy of both at its top level, beside the binary, so
+          # the manual and the printable cheat sheet ship with the release.
           PDF="$(find artifacts/readme-pdf -name README.pdf | head -1)"
           [ -n "$PDF" ] || { echo "README.pdf missing from build artifacts" >&2; exit 1; }
+          QUICKSHEET="$(find artifacts/readme-pdf -name quicksheet.pdf | head -1)"
+          [ -n "$QUICKSHEET" ] || { echo "quicksheet.pdf missing from build artifacts" >&2; exit 1; }
           PDF_DIR="$(dirname "$PDF")"
 
           for dir in artifacts/*/; do
@@ -91,11 +95,11 @@ jobs:
               while IFS= read -r tgz; do
                 out="assets/$(basename "$tgz")"
                 gzip -dc "$tgz" > "${out%.tgz}.tar"
-                tar -rf "${out%.tgz}.tar" -C "$PDF_DIR" README.pdf
+                tar -rf "${out%.tgz}.tar" -C "$PDF_DIR" README.pdf quicksheet.pdf
                 gzip -n -c "${out%.tgz}.tar" > "$out"
                 rm -f "${out%.tgz}.tar"
               done < <(find "$dir" -name '*.tgz')
-              echo "packaged (pre-built archive + README.pdf): $name"
+              echo "packaged (pre-built archive + README.pdf + quicksheet.pdf): $name"
               continue
             fi
 
@@ -115,16 +119,16 @@ jobs:
                 ( cd "$bindir" && zip -qr "${GITHUB_WORKSPACE}/assets/vtmate-${VERSION}-${name}.zip" . )
                 echo "packaged (zip): $name" ;;
               *)
-                cp "$PDF" "$bindir"
+                cp "$PDF" "$QUICKSHEET" "$bindir"
                 ( cd "$bindir" && tar -czf "${GITHUB_WORKSPACE}/assets/vtmate-${VERSION}-${name}.tgz" -- * )
-                echo "packaged (tgz + README.pdf): $name" ;;
+                echo "packaged (tgz + README.pdf + quicksheet.pdf): $name" ;;
             esac
           done
 
           echo "--- assets ---"
           ls -lh assets
 
-      - name: Verify README.pdf reached every tgz
+      - name: Verify README.pdf and quicksheet.pdf reached every tgz
         run: |
           set -euo pipefail
           for a in assets/*.tgz; do
@@ -133,8 +137,10 @@ jobs:
             # lets grep exit on the match while tar is still writing, and the
             # resulting EPIPE trips pipefail even though the PDF is there.
             listing="$(tar -tzf "$a")"
-            grep -qxF 'README.pdf' <<<"$listing" || {
-              echo "README.pdf missing from $a" >&2; exit 1; }
+            for want in README.pdf quicksheet.pdf; do
+              grep -qxF "$want" <<<"$listing" || {
+                echo "$want missing from $a" >&2; exit 1; }
+            done
             echo "ok: $a"
           done
 

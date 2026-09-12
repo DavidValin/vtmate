@@ -21,11 +21,12 @@ on:
 
 jobs:
 
-  # The README rendered to PDF, shipped inside every release archive so the
-  # docs travel with the binary (diagrams included). One job, not one per
-  # variant: the output is identical everywhere, and release.yml injects it
-  # into each archive. Chrome and node come preinstalled on the runner image;
-  # scripts/readme-pdf.sh fails loudly if either is missing.
+  # The README rendered to PDF, plus the printable quicksheet, shipped inside
+  # every release archive so the docs travel with the binary (diagrams
+  # included). One job, not one per variant: the output is identical
+  # everywhere, and release.yml injects both into each archive. Chrome and
+  # node come preinstalled on the runner image; scripts/readme-pdf.sh fails
+  # loudly if either is missing.
   docs:
     name: README PDF
     runs-on: ubuntu-latest
@@ -37,11 +38,20 @@ jobs:
           chmod +x scripts/readme-pdf.sh
           ./scripts/readme-pdf.sh
 
+      - name: Stage quicksheet.pdf
+        # Copied flat next to README.pdf so both land at the artifact's top
+        # level: upload-artifact preserves each path's directory relative to
+        # the common ancestor of everything listed, and docs/en/quicksheet.pdf
+        # would otherwise keep its docs/en/ prefix inside the artifact.
+        run: cp docs/en/quicksheet.pdf quicksheet.pdf
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: readme-pdf
-          path: README.pdf
+          path: |
+            README.pdf
+            quicksheet.pdf
           if-no-files-found: error
 
   linux:

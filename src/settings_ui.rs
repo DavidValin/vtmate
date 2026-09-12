@@ -1,7 +1,7 @@
 // ------------------------------------------------------------------
 //  Settings popup (Ctrl+S)
 //
-//  The agents of the settings file, edited from the terminal: a list, a form
+//  The agents of the agents file, edited from the terminal: a list, a form
 //  per agent, and the two confirmations (delete an agent, throw away
 //  changes). Everything is edited on a working copy; "Save" writes the file
 //  and puts the agents it loaded back into the running state, so the next
@@ -39,8 +39,6 @@ pub enum Screen {
   ConfirmDelete,
   /// "Throw away the changes?" for the whole popup.
   ConfirmDiscard,
-  /// The same, for the agent being filled in.
-  ConfirmDiscardForm,
 }
 
 /// One editable value of an agent, in the order the form shows them. The TTS
@@ -98,12 +96,11 @@ pub struct Form {
   pub draft: AgentSettings,
   /// The agent as the form opened on it, to know whether anything was typed.
   pub original: AgentSettings,
-  /// Cursor: a `visible_fields()` index, then the Done and Cancel buttons.
+  /// Cursor: a `visible_fields()` index. There are no buttons here - ESCAPE
+  /// is the only way out (see `close_form`).
   pub cursor: usize,
   /// Character position inside the focused text field.
   pub caret: usize,
-  /// What is wrong with the draft, shown under it.
-  pub errors: Vec<String>,
   /// Models last fetched from `draft.provider`'s cli, and what went wrong
   /// fetching them, if anything - see `refresh_cli_models`.
   pub cli_models: Vec<String>,
@@ -131,12 +128,6 @@ impl Form {
   }
   fn fields(&self) -> Vec<Field> {
     visible_fields(&self.draft)
-  }
-  fn on_done(&self) -> bool {
-    self.cursor == self.fields().len()
-  }
-  fn on_cancel(&self) -> bool {
-    self.cursor == self.fields().len() + 1
   }
   fn field(&self) -> Option<Field> {
     self.fields().get(self.cursor).copied()
@@ -186,22 +177,22 @@ impl SettingsUi {
   }
 }
 
-/// Open the popup on the agents of the running settings file. Returns the UI
+/// Open the popup on the agents of the running agents file. Returns the UI
 /// messages to send (the popup, or why it cannot be opened).
 pub fn open(state: &AppState) -> Vec<String> {
-  let settings_path = state.settings_path.lock().unwrap().clone();
-  if settings_path.as_os_str().is_empty() {
-    return vec!["line|\n\x1b[31m✗ No settings file in use, nothing to edit\x1b[0m\n".to_string()];
+  let agents_path = state.agents_path.lock().unwrap().clone();
+  if agents_path.as_os_str().is_empty() {
+    return vec!["line|\n\x1b[31m✗ No agents file in use, nothing to edit\x1b[0m\n".to_string()];
   }
   // straight from the file: the running agents may carry command line
   // overrides (`--ptt`), and those must not be written back as settings
-  let agents = match crate::config::try_load_settings(&settings_path, &crate::config::plain_args())
+  let agents = match crate::config::try_load_settings(&agents_path, &crate::config::plain_args())
   {
     Ok(agents) => agents,
     Err(e) => {
       return vec![format!(
         "line|\n\x1b[31m✗ Cannot edit {}: {}\x1b[0m\n",
-        settings_path.display(),
+        agents_path.display(),
         e
       )];
     }
@@ -240,7 +231,7 @@ pub fn handle_key(state: &AppState, k: &KeyEvent) -> Vec<String> {
       Screen::List => list_key(&mut ui, k, &mut commit),
       Screen::Form => form_key(&mut ui, k),
       Screen::ConfirmDelete => confirm_delete_key(&mut ui, k),
-      Screen::ConfirmDiscard | Screen::ConfirmDiscardForm => confirm_discard_key(&mut ui, k),
+      Screen::ConfirmDiscard => confirm_discard_key(&mut ui, k),
     }
     if !ui.open {
       messages.push("settings_hide|".to_string());
@@ -267,15 +258,18 @@ pub fn is_open(state: &AppState) -> bool {
 // Saving
 // ------------------------------------------------------------------
 
-/// Write the working copy to the settings file, load it back and make it the
-/// running configuration. Anything rejected leaves the popup open with the
-/// reason, and the file untouched.
+/// Write the working copy to the agents file, load it back and make it the
+/// running configuration. `selected_agent` is written to the settings file
+/// separately. Anything rejected leaves the popup open with the reason, and
+/// both files untouched.
 fn save(state: &AppState) -> Vec<String> {
-  let (agents, was, settings_path) = {
+  let (agents, was, cursor, agents_path, settings_path) = {
     let ui = state.settings_ui.lock().unwrap();
     (
       ui.agents.clone(),
       ui.saved.clone(),
+      ui.cursor,
+      state.agents_path.lock().unwrap().clone(),
       state.settings_path.lock().unwrap().clone(),
     )
   };
@@ -289,12 +283,15 @@ fn save(state: &AppState) -> Vec<String> {
     return fail(problem);
   }
 
-  // the session stays on the agent it was on: by name, and by its place in
-  // the list when that name was the one just renamed
+  // ENTER on an agent row asks for that one specifically - `cursor` is only
+  // a valid agent index in that case, never on the Save button (parked past
+  // the last row). Otherwise the session stays on the agent it was already
+  // on: by name, and by its place in the list when that name was the one
+  // just renamed.
   let current = state.agent_name.lock().unwrap().clone();
   let selected = agents
-    .iter()
-    .find(|a| a.name == current)
+    .get(cursor)
+    .or_else(|| agents.iter().find(|a| a.name == current))
     .or_else(|| {
       was
         .iter()
@@ -307,17 +304,16 @@ fn save(state: &AppState) -> Vec<String> {
     return fail("at least one agent is needed".to_string());
   };
 
-  if let Err(e) = crate::config::save_settings(&settings_path, &agents, &selected.name) {
-    return fail(format!(
-      "could not write {}: {}",
-      settings_path.display(),
-      e
-    ));
+  if let Err(e) = crate::config::save_settings(&agents_path, &agents) {
+    return fail(format!("could not write {}: {}", agents_path.display(), e));
+  }
+  if let Err(e) = crate::config::persist_selected_agent(&settings_path, &selected.name) {
+    return fail(format!("could not write {}: {}", settings_path.display(), e));
   }
 
   // read the file back, so what runs is exactly what is on disk
   let mut reloaded =
-    match crate::config::try_load_settings(&settings_path, &crate::config::plain_args()) {
+    match crate::config::try_load_settings(&agents_path, &crate::config::plain_args()) {
       Ok(agents) => agents,
       Err(e) => return fail(format!("saved, but reading it back failed: {}", e)),
     };
@@ -373,6 +369,19 @@ fn check_agents(agents: &[AgentSettings]) -> Result<(), String> {
   Ok(())
 }
 
+/// Whether `agent` (from the working list) differs from what is on disk:
+/// `None` when it matches an entry of `saved` with the same name exactly,
+/// `Some("edited")` when that entry exists but differs, `Some("new")` when
+/// no entry of `saved` has that name (a fresh agent, or one renamed from
+/// something `saved` still holds under its old name).
+fn agent_status(agent: &AgentSettings, saved: &[AgentSettings]) -> Option<&'static str> {
+  match saved.iter().find(|s| s.name == agent.name) {
+    Some(s) if s == agent => None,
+    Some(_) => Some("edited"),
+    None => Some("new"),
+  }
+}
+
 // Key handling
 // ------------------------------------------------------------------
 
@@ -416,19 +425,24 @@ fn list_key(ui: &mut SettingsUi, k: &KeyEvent, commit: &mut bool) {
       }
     }
     KeyCode::Enter => {
-      if ui.on_save() {
-        *commit = true;
-      } else if ui.on_cancel() {
+      if ui.on_cancel() {
         if ui.dirty() {
           ui.screen = Screen::ConfirmDiscard;
         } else {
           ui.open = false;
         }
       } else {
-        edit_agent(ui);
+        // On the Save button this keeps whichever agent was already active;
+        // on an agent row it makes that one the active agent instead - see
+        // `save`'s selection logic.
+        *commit = true;
       }
     }
     KeyCode::Char('s') | KeyCode::Char('S') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+      // Same as the Save button, wherever the cursor happens to be sitting -
+      // parking it there is what tells `save` to keep the active agent
+      // rather than switch to whatever row this is.
+      ui.cursor = ui.agents.len();
       *commit = true;
     }
     KeyCode::Char(_) if k.modifiers.contains(KeyModifiers::CONTROL) => {}
@@ -511,40 +525,50 @@ fn confirm_delete_key(ui: &mut SettingsUi, k: &KeyEvent) {
 }
 
 fn confirm_discard_key(ui: &mut SettingsUi, k: &KeyEvent) {
-  let from_form = ui.screen == Screen::ConfirmDiscardForm;
   match k.code {
-    KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
-      ui.screen = if from_form {
-        Screen::Form
-      } else {
-        Screen::List
-      };
-    }
-    KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
-      if from_form {
-        // only the form is thrown away; the list keeps what was saved into it
-        ui.screen = Screen::List;
-        ui.form = Form::default();
-      } else {
-        ui.open = false;
-      }
-    }
+    KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => ui.screen = Screen::List,
+    KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => ui.open = false,
     _ => {}
   }
 }
 
-/// Leave the form, asking first when something was typed into it.
-fn leave_form(ui: &mut SettingsUi) {
-  if ui.form.dirty() {
-    ui.screen = Screen::ConfirmDiscardForm;
-  } else {
-    ui.screen = Screen::List;
-    ui.form = Form::default();
+/// ESCAPE out of the form, back to the list. There is no separate "commit"
+/// step: each field already writes straight into `form.draft` as it is
+/// typed, so leaving just puts that draft into the working list (an update
+/// in place when editing, appended when new) - not written to the agents
+/// file or the running state until the list itself is saved. An untouched
+/// "new agent" form is dropped instead of adding a blank agent.
+fn close_form(ui: &mut SettingsUi) {
+  let mut draft = ui.form.draft.clone();
+  draft.name = draft.name.trim().to_string();
+  draft.baseurl = draft.baseurl.trim().to_string();
+  draft.model = draft.model.trim().to_string();
+  draft.api_key = draft.api_key.trim().to_string();
+  draft.whisper_model_path = draft.whisper_model_path.trim().to_string();
+  draft.system_prompt = draft.system_prompt.trim().to_string();
+
+  let dirty = ui.form.dirty();
+  match ui.form.editing {
+    Some(index) if index < ui.agents.len() => {
+      if dirty {
+        ui.set_info(format!("'{}' edited - not saved yet", draft.name));
+      }
+      ui.agents[index] = draft;
+      ui.cursor = index;
+    }
+    _ if dirty => {
+      ui.set_info(format!("'{}' added - not saved yet", draft.name));
+      ui.cursor = ui.agents.len();
+      ui.agents.push(draft);
+    }
+    _ => {}
   }
+  ui.screen = Screen::List;
+  ui.form = Form::default();
 }
 
 fn form_key(ui: &mut SettingsUi, k: &KeyEvent) {
-  let last = ui.form.fields().len() + 1; // fields, then Done, then Cancel
+  let last = ui.form.fields().len() - 1; // no buttons here: the cursor only ever walks the fields
   let field = ui.form.field();
   let in_text = matches!(
     field,
@@ -565,20 +589,11 @@ fn form_key(ui: &mut SettingsUi, k: &KeyEvent) {
 
   match k.code {
     KeyCode::Esc => {
-      leave_form(ui);
+      close_form(ui);
       return;
     }
     KeyCode::Tab => {
-      // Tab leaves the fields for the buttons, the same way it does in the
-      // list. Going through the fields one at a time is what ↑/↓ are for.
-      ui.form.cursor = if ui.form.on_done() {
-        last // Done -> Cancel
-      } else if ui.form.on_cancel() {
-        0 // Cancel -> back to the first field
-      } else {
-        ui.form.fields().len() // any field -> Done
-      };
-      place_caret(ui, true);
+      move_cursor(ui, true, last);
       return;
     }
     KeyCode::BackTab => {
@@ -595,14 +610,6 @@ fn form_key(ui: &mut SettingsUi, k: &KeyEvent) {
       return;
     }
     KeyCode::Enter => {
-      if ui.form.on_done() {
-        commit_form(ui);
-        return;
-      }
-      if ui.form.on_cancel() {
-        leave_form(ui);
-        return;
-      }
       if field == Some(Field::SystemPrompt) {
         insert_char(ui, '\n');
         return;
@@ -614,12 +621,6 @@ fn form_key(ui: &mut SettingsUi, k: &KeyEvent) {
   }
 
   let Some(field) = field else {
-    // on a button: left / right walk between them
-    match k.code {
-      KeyCode::Left if ui.form.on_cancel() => ui.form.cursor -= 1,
-      KeyCode::Right if ui.form.on_done() => ui.form.cursor += 1,
-      _ => {}
-    }
     return;
   };
 
@@ -851,46 +852,6 @@ fn cycle(options: &[String], current: &str, direction: i32) -> String {
   let at = options.iter().position(|o| o == current).unwrap_or(0) as i32;
   let next = ((at + direction) % len + len) % len;
   options[next as usize].clone()
-}
-
-/// Check the draft and put it back in the list.
-fn commit_form(ui: &mut SettingsUi) {
-  let mut draft = ui.form.draft.clone();
-  draft.name = draft.name.trim().to_string();
-  draft.baseurl = draft.baseurl.trim().to_string();
-  draft.model = draft.model.trim().to_string();
-  draft.api_key = draft.api_key.trim().to_string();
-  draft.whisper_model_path = draft.whisper_model_path.trim().to_string();
-  draft.system_prompt = draft.system_prompt.trim().to_string();
-
-  let mut errors = crate::config::validate_agent(&draft);
-  let clashes = ui
-    .agents
-    .iter()
-    .enumerate()
-    .any(|(i, other)| Some(i) != ui.form.editing && other.name == draft.name);
-  if clashes {
-    errors.push(format!("another agent is already named '{}'", draft.name));
-  }
-  if !errors.is_empty() {
-    ui.form.errors = errors;
-    return;
-  }
-
-  match ui.form.editing {
-    Some(index) if index < ui.agents.len() => {
-      ui.set_info(format!("'{}' edited - not saved yet", draft.name));
-      ui.agents[index] = draft;
-      ui.cursor = index;
-    }
-    _ => {
-      ui.set_info(format!("'{}' added - not saved yet", draft.name));
-      ui.agents.push(draft);
-      ui.cursor = ui.agents.len() - 1;
-    }
-  }
-  ui.screen = Screen::List;
-  ui.form = Form::default();
 }
 
 // Field values
@@ -1371,12 +1332,15 @@ pub fn render<W: Write>(out: &mut W, buffer: &[String]) {
     return;
   };
   let ui = state.settings_ui.lock().unwrap().clone();
-  draw(out, &ui, buffer);
+  let active_name = state.agent_name.lock().unwrap().clone();
+  draw(out, &ui, buffer, &active_name);
 }
 
 /// Draw one popup. Split out of `render` so it can be exercised on a
-/// `SettingsUi` of its own, without a running session.
-pub fn draw<W: Write>(out: &mut W, ui: &SettingsUi, buffer: &[String]) {
+/// `SettingsUi` of its own, without a running session. `active_name` is the
+/// agent actually running right now (`state.agent_name`), highlighted in the
+/// list regardless of where the cursor is - only meaningful for `Screen::List`.
+pub fn draw<W: Write>(out: &mut W, ui: &SettingsUi, buffer: &[String], active_name: &str) {
   if !ui.open {
     return;
   }
@@ -1389,11 +1353,9 @@ pub fn draw<W: Write>(out: &mut W, ui: &SettingsUi, buffer: &[String]) {
   let inner = width as usize - 4;
 
   let (title, lines, footer) = match ui.screen {
-    Screen::List => list_lines(&ui, inner, rows),
+    Screen::List => list_lines(&ui, inner, rows, active_name),
     Screen::Form => form_lines(&ui, inner, rows),
-    Screen::ConfirmDelete | Screen::ConfirmDiscard | Screen::ConfirmDiscardForm => {
-      confirm_lines(&ui, inner)
-    }
+    Screen::ConfirmDelete | Screen::ConfirmDiscard => confirm_lines(&ui, inner),
   };
 
   // the bottom bar keeps the last row; the footer (buttons, shortcuts) is
@@ -1465,7 +1427,12 @@ pub fn draw<W: Write>(out: &mut W, ui: &SettingsUi, buffer: &[String]) {
   out.flush().unwrap();
 }
 
-fn list_lines(ui: &SettingsUi, inner: usize, rows: u16) -> (String, Vec<String>, Vec<String>) {
+fn list_lines(
+  ui: &SettingsUi,
+  inner: usize,
+  rows: u16,
+  active_name: &str,
+) -> (String, Vec<String>, Vec<String>) {
   let (widths, prompt_width) = column_widths(inner);
   let mut header = String::new();
   for (i, (name, _, _)) in COLUMNS.iter().enumerate() {
@@ -1481,19 +1448,30 @@ fn list_lines(ui: &SettingsUi, inner: usize, rows: u16) -> (String, Vec<String>,
   // bottom bar and the two borders are its own), and out of those the footer
   // takes its separator, shortcuts, buttons and any notice, while the list
   // itself spends one line on the header, one under it, one on the scroll
-  // hint and one above the footer. Reserving the hint line whether or not it
-  // is used keeps the count from depending on its own outcome.
+  // hint, one on the edited-agents summary and one above the footer.
+  // Reserving the hint and summary lines whether or not they are used keeps
+  // the count from depending on its own outcome.
   let footer_len = 3 + usize::from(ui.notice.is_some());
-  let room = (rows as usize).saturating_sub(7 + footer_len).max(1);
+  let room = (rows as usize).saturating_sub(8 + footer_len).max(1);
   let scroll = scroll_for(ui.cursor.min(ui.agents.len()), ui.agents.len(), room);
 
   let mut lines = vec![format!("{}{}{}", DIM, header, OFF), String::new()];
-  for (i, agent) in ui.agents.iter().enumerate().skip(scroll).take(room) {
+  let mut edited_count = 0;
+  for (i, agent) in ui.agents.iter().enumerate() {
+    let status = agent_status(agent, &ui.saved);
+    if status.is_some() {
+      edited_count += 1;
+    }
+    if i < scroll || i >= scroll + room {
+      continue;
+    }
     lines.push(agent_row(
       agent,
       &widths,
       prompt_width,
       i == ui.cursor,
+      agent.name == active_name,
+      status,
       inner,
     ));
   }
@@ -1509,13 +1487,22 @@ fn list_lines(ui: &SettingsUi, inner: usize, rows: u16) -> (String, Vec<String>,
       OFF
     ));
   }
+  if edited_count > 0 {
+    lines.push(format!(
+      "{}{} agent{} edited. Press Save to apply the changes.{}",
+      YELLOW,
+      edited_count,
+      if edited_count == 1 { "" } else { "s" },
+      OFF
+    ));
+  }
   lines.push(String::new());
 
   let mut footer = vec![
     format!("{}{}{}", DIM, "─".repeat(inner), OFF),
     format!(
-      "{}n{} new agent   {}e{} edit agent   {}d{} delete agent   {}↑/↓{} move",
-      YELLOW, DIM, YELLOW, DIM, YELLOW, DIM, FG, DIM
+      "{}n{} new agent   {}e{} edit agent   {}ENTER{} select   {}d{} delete agent   {}↑/↓{} move",
+      YELLOW, DIM, YELLOW, DIM, YELLOW, DIM, YELLOW, DIM, FG, DIM
     ),
     format!(
       "  {}   {}",
@@ -1543,6 +1530,8 @@ fn agent_row(
   widths: &[usize],
   prompt_width: Option<usize>,
   selected: bool,
+  active: bool,
+  status: Option<&'static str>,
   inner: usize,
 ) -> String {
   let cells = [
@@ -1556,18 +1545,27 @@ fn agent_row(
     agent.model.clone(),
   ];
   let mut row = String::new();
+  let name_color = if active { GREEN } else { YELLOW };
   for (i, cell) in cells.iter().enumerate() {
     let Some(w) = widths.get(i) else { break };
     let text = cut(cell, *w);
     if i == 0 {
-      row.push_str(&format!("{}{:<width$}{} ", YELLOW, text, OFF, width = *w));
+      row.push_str(&format!("{}{:<width$}{} ", name_color, text, OFF, width = *w));
     } else {
       row.push_str(&format!("{:<width$} ", text, width = *w));
     }
   }
   if let Some(width) = prompt_width {
+    // a status tag (not saved yet) eats into the prompt's own room rather
+    // than a column of its own - there is none to spare
+    let tag = status.map(|s| format!(" [{}]", s));
+    let tag_len = tag.as_ref().map(|t| t.chars().count()).unwrap_or(0);
+    let prompt_width = width.saturating_sub(tag_len);
     let prompt = agent.system_prompt.replace('\n', " ");
-    row.push_str(&format!("{}{}{}", DIM, cut(&prompt, width), OFF));
+    row.push_str(&format!("{}{}{}", DIM, cut(&prompt, prompt_width), OFF));
+    if let Some(tag) = tag {
+      row.push_str(&format!("{}{}{}", YELLOW, tag, OFF));
+    }
   }
   if selected {
     format!("{}{}{}{}", BG_ROW, pad(&row, inner, ' '), BG, OFF)
@@ -1696,21 +1694,13 @@ fn form_lines(ui: &SettingsUi, inner: usize, rows: u16) -> (String, Vec<String>,
   }
   let visible: Vec<String> = lines.into_iter().skip(start).take(room).collect();
 
-  let mut footer = vec![
+  let footer = vec![
     format!("{}{}{}", DIM, "─".repeat(inner), OFF),
     format!(
-      "{}↑/↓{} field   {}←/→{} change   {}TAB{} next   {}ESC{} back",
+      "{}↑/↓{} field   {}←/→{} change   {}TAB{} next   {}ESC{} close",
       FG, DIM, FG, DIM, FG, DIM, FG, DIM
     ),
-    format!(
-      "  {}   {}",
-      button("Done", form.on_done()),
-      button("Cancel", form.on_cancel())
-    ),
   ];
-  for problem in form.errors.iter().take(3) {
-    footer.push(format!("{}▲ {}{}", RED, cut(problem, inner - 2), OFF));
-  }
 
   let title = match form.editing {
     Some(_) => format!("Edit agent - {}", cut(&form.draft.name, 24)),
@@ -2040,7 +2030,7 @@ fn prompt_box(text: &str, caret: usize, focused: bool, width: usize) -> Vec<Stri
   out
 }
 
-/// How the prompt will be written to the settings file.
+/// How the prompt will be written to the agents file.
 fn prompt_summary(agent: &AgentSettings) -> String {
   let lines = agent.system_prompt.split('\n').count();
   let inline = lines <= crate::config::INLINE_PROMPT_MAX_LINES;
@@ -2104,15 +2094,10 @@ fn confirm_lines(ui: &SettingsUi, inner: usize) -> (String, Vec<String>, Vec<Str
         "It is removed from the list; the file is only written when you save.".to_string(),
       )
     }
-    Screen::ConfirmDiscardForm => (
-      "Unsaved agent".to_string(),
-      format!("Throw away the changes to '{}'?", ui.form.draft.name),
-      "The agent goes back to what the list holds for it.".to_string(),
-    ),
     _ => (
       "Unsaved changes".to_string(),
       "Throw away the changes?".to_string(),
-      "The settings file keeps what it has now.".to_string(),
+      "The agents file keeps what it has now.".to_string(),
     ),
   };
   let lines = vec![

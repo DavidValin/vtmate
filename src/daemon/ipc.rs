@@ -101,7 +101,7 @@ pub struct StateView {
   pub modal_focus: u8,
   /// The settings popup while it is open, so an attached terminal can draw
   /// it. The keys that drive it are handled by the daemon, which owns the
-  /// settings file; the client only renders this copy.
+  /// agents file; the client only renders this copy.
   #[serde(default)]
   pub settings: Option<crate::settings_ui::SettingsUi>,
 }

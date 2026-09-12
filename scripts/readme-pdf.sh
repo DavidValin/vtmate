@@ -27,57 +27,56 @@ sed -E 's#https://github\.com/[^/]+/[^/)"]+/(raw|blob)/[^/)"]+/#./#g' "$in" > "$
 npx -y marked@18 --gfm -i "$tmp/in.md" -o "$tmp/body.html" || {
   echo "marked failed" >&2; exit 1; }
 
-# Landscape images get capped in height so they slot into the text flow instead
-# of being bumped to the next page; portrait ones keep the full text width and
-# take a page of their own.
-python3 - "$tmp/body.html" "$srcdir" <<'PYIMG'
-import os, re, struct, sys, urllib.parse
+# Every image is stretched to the full page width (see the `img` rule below);
+# the one exception is special-cased below.
+python3 - "$tmp/body.html" <<'PYPOST'
+import re
+import sys
 
-html_path, srcdir = sys.argv[1], sys.argv[2]
-
-def size(path):
-    with open(path, 'rb') as f:
-        head = f.read(32)
-        if head[:8] == b'\x89PNG\r\n\x1a\n':
-            return struct.unpack('>II', head[16:24])
-        if head[:6] in (b'GIF87a', b'GIF89a'):
-            return struct.unpack('<HH', head[6:10])
-        if head[:2] == b'\xff\xd8':
-            f.seek(2)
-            while True:
-                b = f.read(1)
-                if not b:
-                    return None
-                if b != b'\xff':
-                    continue
-                marker = f.read(1)
-                if marker in (b'\xc0', b'\xc1', b'\xc2', b'\xc3'):
-                    f.read(3)
-                    h, w = struct.unpack('>HH', f.read(4))
-                    return w, h
-                (length,) = struct.unpack('>H', f.read(2))
-                f.seek(length - 2, os.SEEK_CUR)
-    return None
-
-def is_wide(src):
-    if re.match(r'[a-z][a-z0-9+.-]*:', src):   # remote: not measurable, leave as is
-        return False
-    path = os.path.join(srcdir, urllib.parse.unquote(src.split('#')[0].split('?')[0]))
-    try:
-        dims = size(path)
-    except OSError:
-        return False
-    return bool(dims) and dims[1] > 0 and dims[0] >= 1.2 * dims[1]
-
-def tag(m):
-    src = re.search(r'src="([^"]*)"', m.group(0))
-    if src and is_wide(src.group(1)):
-        return m.group(0).replace('<img', '<img class="wide"', 1)
-    return m.group(0)
-
+html_path = sys.argv[1]
 html = open(html_path).read()
-open(html_path, 'w').write(re.sub(r'<img\b[^>]*>', tag, html))
-PYIMG
+
+# marked does not add heading ids on its own, so the Index's #anchor links
+# have nothing to jump to. Slug them the same way GitHub does (lowercase,
+# drop anything but letters/digits/spaces/hyphens, spaces -> hyphens), and
+# number apart any two headings that land on the same slug.
+seen = {}
+
+def slugify(text):
+    text = re.sub(r'<[^>]+>', '', text).strip().lower()
+    text = re.sub(r'[^\w\s-]', '', text)
+    text = re.sub(r'[\s_]+', '-', text)
+    return text
+
+# Headings that also need a fresh page of their own, keyed by their exact
+# text: "How it works"'s diagram and the steps below it are meant to read as
+# one unit, so "LLM integration" right after it is pushed to its own page
+# too rather than trailing into whatever room is left; "How to use it"
+# should likewise not trail whatever came before it.
+PAGE_START = {'How it works', 'LLM integration', 'How to use it'}
+
+def heading(m):
+    tag, text = m.group(1), m.group(2)
+    slug = slugify(text)
+    if slug:
+        n = seen.get(slug, 0)
+        seen[slug] = n + 1
+        if n:
+            slug = f'{slug}-{n}'
+    classes = 'class="page-start" ' if text.strip() in PAGE_START else ''
+    id_attr = f'id="{slug}" ' if slug else ''
+    return f'<{tag} {classes}{id_attr}>{text}</{tag}>'
+
+html = re.sub(r'<(h[1-6])>(.*?)</\1>', heading, html)
+
+# The "How it works" diagram is shrunk (instead of the default full width)
+# so it and the steps below it both fit their page together, centered.
+html = html.replace(
+    '<img src="./docs/en/diagrams/how-it-works.png" alt="how it works">',
+    '<img src="./docs/en/diagrams/how-it-works.png" alt="how it works" class="page-fit">',
+    1)
+open(html_path, 'w').write(html)
+PYPOST
 
 {
   cat <<HEAD
@@ -94,9 +93,9 @@ PYIMG
   h1, h2, h3, h4 { line-height: 1.25; margin: 1.4em 0 .5em; break-after: avoid; }
   h1 { font-size: 1.9em; border-bottom: 1px solid #d1d9e0; padding-bottom: .3em; }
   h2 { font-size: 1.45em; border-bottom: 1px solid #d1d9e0; padding-bottom: .3em; }
-  img, svg, video { max-width: 100%; max-height: 250mm; height: auto; break-inside: avoid; }
-  img.wide { max-height: 68mm; }
-  p > img:only-child { display: block; margin: 1em auto; }
+  .page-start { break-before: page; }
+  img, svg, video { width: 100%; height: auto; display: block; margin: 1em auto; break-inside: avoid; }
+  img.page-fit { width: auto; max-width: 100%; max-height: 170mm; margin: 1em auto; }
   pre { background: #f6f8fa; border-radius: 6px; padding: 12px; overflow: visible;
         white-space: pre-wrap; word-wrap: break-word; break-inside: avoid; }
   code { font: .85em/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }

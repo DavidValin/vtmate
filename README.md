@@ -2,14 +2,16 @@
 
 ![vtmate](banner.png)
 
-The final AI voice conversational system all running in your terminal! vtmate is a Powerful terminal-based voice ai toolkit with many realistic voices, extremely low latency, 41 languages supported. Allows you to voice conversate with local ai models (or cloud based), pipe data and save into files. 
+The final AI voice conversational system all running in your terminal! vtmate is a Powerful terminal-based voice ai toolkit with many realistic voices, extremely low latency, 41 languages supported. Allows you to voice conversate with local ai models (or cloud based), pipe data and save into files.
+
+Homepage [https://github.com/DavidValin/vtmate](https://github.com/DavidValin/vtmate)
 
 ### Quick installation
 ```
 curl -fsSL https://raw.githubusercontent.com/DavidValin/vtmate/main/installer.sh | sh
 ```
 
-The program self contains (1.5GB) all TTS models and voices and necessary files to recognize speech and speak with voice with no external installations ensuring maximum portability.
+The program self-contains all TTS models and voices and necessary files to recognize speech and speak with voice with no external installations ensuring maximum portability.
 
 * [⬇️ Download](https://github.com/DavidValin/vtmate/releases) (⭐ MacOS ⭐ Linux and ⭐ Windows supported)
 * [🤠 Quicksheet (PDF)](https://raw.githubusercontent.com/DavidValin/vtmate/refs/heads/main/docs/en/quicksheet.pdf) (🖨️ print ready for easy access)
@@ -127,17 +129,12 @@ Thinking / reasoning is disabled on local servers so replies start speaking righ
 
 ### 📌 1. **Install vtmate**
 
-One line, on Linux, macOS and Windows (Git Bash):
+Single interactive network installer (works for fresh installs or upgrades):
 ```
 curl -fsSL https://raw.githubusercontent.com/DavidValin/vtmate/main/installer.sh | sh
 ```
-The installer detects your OS, C library, CPU and GPU (CUDA, Vulkan or CPU), asks whether to install for your user or system-wide, downloads the matching release, puts `vtmate` on your `$PATH` and its libraries in a fixed location (`<prefix>/lib/vtmate` on Linux, `...\vtmate\lib` on Windows). If the chosen GPU build cannot start on your machine it falls back to the next one. Reinstalling backs up `~/.vtmate/settings` to `~/.vtmate/settings.backup.<time>`.
 
-Options: `--scope user|system`, `--prefix DIR`, `--variant cpu|cpu-static|vulkan|cuda`, `--version TAG`, `--yes`, `--dry-run`, `--uninstall` (also removes `~/.vtmate`).
-
-On Linux there are two CPU builds and the installer picks between them by your C library, not your distro: `cpu` is built against glibc and plays through whatever sound server you run (PulseAudio, PipeWire), while `cpu-static` is a fully static musl binary that runs anywhere but can only reach ALSA hardware devices directly. Machines with glibc 2.39 or newer get `cpu`; older ones, and musl systems like Alpine, get `cpu-static`. The `vulkan` and `cuda` builds are glibc-only, since the GPU loaders they dlopen are.
-
-Or download a release by hand from `https://github.com/DavidValin/vtmate/releases` and put the binary in a folder in your $PATH (keep the `.so`/`.dll` files of the cuda build next to it).
+Or download a release by hand from `https://github.com/DavidValin/vtmate/releases`.
 
 ### 📌 2. **Install llm engine (needed for ai responses)**
 
@@ -150,22 +147,8 @@ Option B- llama-server support.
 - Download a gguf model: `https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q8_0.gguf?download=true`.
 
 Option C- hosted provider (no local install).
-- Get an api key from the provider and set `provider`, `model` and `api_key` in the agent, for instance:
 
-```
-provider = anthropic
-baseurl =
-model = claude-sonnet-5
-api_key = sk-ant-...
-```
-
-### 📌 3. **(Windows only) Install supported terminal**
-
-- Install Windows Terminal (which supports emojis): `https://apps.microsoft.com/detail/9n0dx20hk701` (use this terminal to run vtmate)
-
-### 📌 4. **(Optional) OpenTTS support**
-
-- `docker pull synesthesiam/opentts:all`
+vtmate works with all major cloud providers, both api and cli options. You can configure your agents by running vtmate and pressing `Control+s` or manually editing ~/.vtmate/agents file.
 
 ## Configure agents
 
@@ -186,14 +169,17 @@ The quickest way is to press `Control+S` while vtmate is running: a popup opens 
 
 * `n` adds an agent (starting from the one you are on), `e` edits the selected one, `d` removes it after asking.
 * Every field is a select, a slider or a text box, and the one you are on explains itself in a line underneath. The language only offers what the TTS engine speaks, the voice only what that engine and language have, and the provider lists every LLM backend vtmate can use, so an agent that cannot work is hard to build by accident.
-* `Save` writes `~/.vtmate/settings` and the agents are live straight away: no restart, and the conversation you are in keeps going. `Cancel` or `ESCAPE` asks first when you changed something.
+* `Save` writes `~/.vtmate/agents` and the agents are live straight away: no restart, and the conversation you are in keeps going. `Cancel` or `ESCAPE` asks first when you changed something.
 * `ARROW_UP` / `ARROW_DOWN` move between fields, `ARROW_LEFT` / `ARROW_RIGHT` change the value of a select or a slider, `TAB` walks through everything including the buttons.
 
 The rest of this section is what the popup writes for you, and you can of course write it yourself.
 
-The first time you run vtmate it will create a configuration file if it doesn't exist in `~/.vtmate/settings` with a `[general]` section, a `[daemon]` section and several `[agent]` sections. You can define as many agents as you want.
+Settings live in two files. The first time you run vtmate it will create both if they don't exist:
 
-The file starts like this:
+* `~/.vtmate/settings` - a `[general]` section and a `[daemon]` section.
+* `~/.vtmate/agents` - one `[system_prompt]` section per named prompt, then one `[agent]` section per agent. You can define as many agents as you want. `-c <file>` uses a different agents file instead (see [Separate agents](#separate-agents)); `~/.vtmate/settings` is always the same file.
+
+`~/.vtmate/settings` starts like this:
 
 ```
 [general]
@@ -209,7 +195,7 @@ llm_background_reset = ctrl+q
 * `selected_agent` is the agent vtmate starts with. It is updated automatically every time you switch agents with `ARROW_LEFT` / `ARROW_RIGHT` (in the terminal or while attached to the daemon), so the next start picks the same agent. `-a <agent>` overrides it for one run without changing the file; a debate picks its agents per turn and never changes it either.
 * The `[daemon]` keys are the global shortcuts of the [daemon mode](#daemon-mode-global-shortcuts).
 
-Example of agent definition:
+Example of agent definition, in `~/.vtmate/agents`:
 
 ```
 [agent]
@@ -234,7 +220,7 @@ whisper_model_path = ~/.whisper-models/ggml-tiny.bin
 
 ### Reusable system prompts
 
-A long system prompt is easier to write and to share between agents in its own `[system_prompt]` section. The block has a `name` and then the prompt body fenced between two lines of three or more dashes, and agents pull it in with `@<name>`:
+A long system prompt is easier to write and to share between agents in its own `[system_prompt]` section, in `~/.vtmate/agents`. The block has a `name` and then the prompt body fenced between two lines of three or more dashes, and agents pull it in with `@<name>`:
 
 ```
 [system_prompt]
@@ -269,7 +255,7 @@ vtmate --help
 
 ## How to use it
 
-The first agent defined in `~/vtmate/settings` will always be selected agent when running vtmate, unless `-a <agent_name>` is used.
+The first agent defined in `~/.vtmate/agents` will always be selected agent when running vtmate, unless `-a <agent_name>` is used.
 
 Before running vtmate make sure ollama is running: `ollama serve`.
 Optionally, if you want to use llama.cpp make sure llama-server is running.
@@ -280,21 +266,30 @@ All cli options:
 ```
   -a <agent_name>                       set a specific initial agent
   -p <prompt>                           initialize with a text prompt
-  -q                                    quiet mode: produces a single response and exit (requires `-p` or `-i`)
+  -q                                    quiet mode: produces a single response and exit
+                                        (requires `-p` or `-i`)
   -i <file.txt>                         initialize with a file prompt
   -i -                                  initialize with prompt from STDIN (runs in quiet mode)
-  -s                                    save the conversation to text and audio file in ~/.vtmate/conversations or ~/.vtmate/read-files
-  -s-html, --save-html                  save the conversation to a folder in ~/.vtmate/conversations with an html player and one audio file per turn
+  -s                                    save the conversation to text and audio file in
+                                        ~/.vtmate/conversations or ~/.vtmate/read-files
+  -s-html, --save-html                  save the conversation to a folder in ~/.vtmate/conversations
+                                        with an html player and one audio file per turn
   --debate <AGENT1> <AGENT2> [SUBJECT]  initialize a debate between 2 agents with an initial prompt
-  --debate <AGENT1> <AGENT2> -i <FILE>  initialize a debate between 2 agents with an initial prompt from file
-  --debate <AGENT1> <AGENT2> -i –       initialize a debate between 2 agents with an initial prompt from STDIN
-  --max-turns <N>                       end the program after N debate turns (one agent reply is one turn)
+  --debate <AGENT1> <AGENT2> -i <FILE>  initialize a debate between 2 agents with an initial prompt
+                                        from file
+  --debate <AGENT1> <AGENT2> -i –       initialize a debate between 2 agents with an initial prompt
+                                        from STDIN
+  --max-turns <N>                       end the program after N debate turns
+                                        (one agent reply is one turn)
   -r <file.txt>                         read a file with voice, phrase by phrase (no llm involved)
-  -r -                                  read text from STDIN with voice, phrase by phrase (no llm involved). Use - for STDIN (runs in quiet mode)
-  -c <settings_file>                    use a specific settings file
+  -r -                                  read text from STDIN with voice, phrase by phrase
+                                        (no llm involved). Use - for STDIN (runs in quiet mode)
+  -c <agents_file>                      use a specific agents file instead of ~/.vtmate/agents
   --list-voices                         list all voices for all languages and tts systems
-  --ptt <true/false>                    override for this session the ptt setting for all agents independently of its settings
-  --daemon                              start vtmate in the background, driven by global shortcuts (see daemon mode)
+  --ptt <true/false>                    override for this session the ptt setting for all agents
+                                        independently of its settings
+  --daemon                              start vtmate in the background, driven by global shortcuts
+                                        (see daemon mode)
   --daemon-stop                         stop the background daemon
   --daemon-status                       show whether the daemon is running and its shortcuts
   --verbose                             run the program in verbose mode
@@ -505,8 +500,8 @@ In this mode you can:
 
 ###  Separate agents
 
-By default vtmate uses `~/.vtmate/settings` file.
-You can create different setting fields for different agent groups, example:
+By default vtmate uses the `~/.vtmate/agents` file.
+You can create separate agents files for different agent groups, each holding its own `[agent]` (and `[system_prompt]`) sections, example:
 
 ```
 philosophers.txt
@@ -514,7 +509,7 @@ scientists.txt
 employees.txt
 ```
 
-And then load each as you need:
+And then load each as you need with `-c`:
 ```
 vtmate -c philosophers.txt --debate "Aristoteles" "Ptahhotep" "how to achieve harmony?"
 ```

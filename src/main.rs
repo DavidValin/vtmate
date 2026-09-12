@@ -169,9 +169,11 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // Load settings first to get agent configuration
     let _ = config::ensure_settings_file();
-    let settings_path = config::resolve_settings_path(&args)?;
+    let _ = config::ensure_agents_file();
+    let settings_path = config::resolve_settings_path()?;
+    let agents_path = config::resolve_agents_path(&args)?;
 
-    let agents = match config::load_settings(&settings_path, &args) {
+    let agents = match config::load_settings(&agents_path, &args) {
       Ok(v) => v,
       Err(e) => {
         crate::log::log("error", &format!("Failed to load settings: {}", e));
@@ -203,6 +205,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       agents.clone(),
       args.quiet,
       settings_path.clone(),
+      agents_path.clone(),
     ));
     state::GLOBAL_STATE.set(app_state.clone()).unwrap();
 
@@ -632,12 +635,14 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   // ---------------------------------------------------
   // Load Settings
   // ---------------------------------------------------
-  // force creation of default config file if unexisting
+  // force creation of default config files if unexisting
   let _ = config::ensure_settings_file();
-  let settings_path = config::resolve_settings_path(&args)?;
+  let _ = config::ensure_agents_file();
+  let settings_path = config::resolve_settings_path()?;
+  let agents_path = config::resolve_agents_path(&args)?;
 
   // load and file settings, merge cli args and validate
-  let agents = match config::load_settings(&settings_path, &args) {
+  let agents = match config::load_settings(&agents_path, &args) {
     Ok(v) => v,
     Err(e) => {
       print!("✗ Failed to load settings: {}", e);
@@ -662,6 +667,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     agents.clone(),
     args.quiet,
     settings_path.clone(),
+    agents_path.clone(),
   ));
 
   *state.ptt_override.lock().unwrap() = args.ptt;

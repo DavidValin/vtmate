@@ -68,7 +68,7 @@ pub struct AppState {
   pub speed: AtomicU32,
   pub conversation_history: crate::conversation::ConversationHistory,
   pub agent_name: Arc<Mutex<String>>,
-  /// Every agent of the settings file, in file order. Replaced (not only
+  /// Every agent of the agents file, in file order. Replaced (not only
   /// read) at run time: the settings popup writes the file and puts the
   /// agents it loaded back here.
   pub agents: Arc<Mutex<Vec<crate::config::AgentSettings>>>,
@@ -106,8 +106,12 @@ pub struct AppState {
   pub save_path: Arc<Mutex<Option<std::path::PathBuf>>>,
   pub start_date: Arc<Mutex<String>>,
   pub undo_pending: Arc<AtomicBool>,
-  /// Settings file in use; `selected_agent` is written back here on agent switch.
+  /// Settings file in use ([general]/[daemon]); `selected_agent` is written
+  /// back here on agent switch.
   pub settings_path: Arc<Mutex<PathBuf>>,
+  /// Agents file in use ([agent]/[system_prompt]); the Ctrl+S popup reads
+  /// and writes it.
+  pub agents_path: Arc<Mutex<PathBuf>>,
   /// Meta attached to the next utterance the record thread flushes.
   pub utterance_meta: Arc<Mutex<UtteranceMeta>>,
   /// Whisper model loaded (the daemon reports it as "ready").
@@ -177,6 +181,7 @@ impl AppState {
       start_date: Arc::new(Mutex::new(String::new())),
       undo_pending: Arc::new(AtomicBool::new(false)),
       settings_path: Arc::new(Mutex::new(PathBuf::new())),
+      agents_path: Arc::new(Mutex::new(PathBuf::new())),
       utterance_meta: Arc::new(Mutex::new(UtteranceMeta::default())),
       stt_ready: Arc::new(AtomicBool::new(false)),
       tts_read_active: Arc::new(AtomicBool::new(false)),
@@ -191,12 +196,14 @@ impl AppState {
     agents: Vec<crate::config::AgentSettings>,
     quiet: bool,
     settings_path: PathBuf,
+    agents_path: PathBuf,
   ) -> Self {
     let mut state = Self::new();
     state.ui.quiet = quiet;
     state.apply_agent(&settings);
     state.agents = Arc::new(Mutex::new(agents));
     *state.settings_path.lock().unwrap() = settings_path;
+    *state.agents_path.lock().unwrap() = agents_path;
     state
   }
 
