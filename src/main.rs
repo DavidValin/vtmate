@@ -96,7 +96,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
       }
       println!(
-        "⚠️  a vtmate daemon (pid {}) is running but does not answer; starting a separate terminal session",
+        "▲  a vtmate daemon (pid {}) is running but does not answer; starting a separate terminal session",
         pid
       );
       thread::sleep(Duration::from_millis(1500));
@@ -156,7 +156,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     && args.prompt_file.is_none()
     && !(args.read_file.as_deref() == Some("-"))
   {
-    println!("❌ Quiet mode requires either one of the next options: -p or -i.\n");
+    println!("✗ Quiet mode requires either one of the next options: -p or -i.\n");
     util::terminate(1);
   }
 
@@ -192,11 +192,9 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Read the filename or stdin
     let content = util::read_file(filename);
 
-    // Read-file mode speaks as one agent for the whole run and cannot switch,
-    // so its engine is loaded here, up front, and the first phrase does not
-    // pay for it. Conversation mode instead follows the agents in play - see
-    // tts::apply_residency. This used to load an engine for every agent in the
-    // settings file, including agents that were never selected.
+    // Read-file mode speaks as one agent for the whole run, so its engine is
+    // loaded up front and the first phrase does not pay for it. Conversation
+    // mode follows the agents in play instead - see tts::apply_residency.
     tts::load_engine_named(&settings.tts)?;
 
     // Initialize global state for TTS thread
@@ -316,7 +314,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       .filter(|&i| i == 0 || split[i - 1].line != split[i].line)
       .collect();
 
-    println!("📖 Reading {} phrases from '{}'", phrases.len(), filename);
+    println!("≡ Reading {} phrases from '{}'", phrases.len(), filename);
 
     // State for phrase navigation
     let current_phrase = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -612,7 +610,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
       }
     }
 
-    print!("\r✅ All phrases completed\n\r");
+    print!("\r✓ All phrases completed\n\r");
     // Export txt content
     if let Err(e) = audio::write_txt(&txt_path, &content) {
       eprintln!("Failed to write txt: {}", e);
@@ -642,7 +640,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let agents = match config::load_settings(&settings_path, &args) {
     Ok(v) => v,
     Err(e) => {
-      print!("❌ Failed to load settings: {}", e);
+      print!("✗ Failed to load settings: {}", e);
       thread::sleep(Duration::from_millis(300));
       util::terminate(1);
     }
@@ -652,7 +650,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let settings = match config::select_agent(&agents, args.agent.as_deref(), &general) {
     Ok(a) => a,
     Err(e) => {
-      print!("❌ {}", e);
+      print!("✗ {}", e);
       thread::sleep(Duration::from_millis(300));
       util::terminate(1);
     }
@@ -686,6 +684,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     status_line.clone(),
     channels.rx_ui.clone(),
     conversation_history.clone(),
+    args.no_banner,
   );
 
   // ---------------------------------------------------

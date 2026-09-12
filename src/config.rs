@@ -50,6 +50,14 @@ pub struct AgentSettings {
 
 #[derive(Parser, Debug, Clone)]
 #[clap(version = env!("CARGO_PKG_VERSION"))]
+// The header is baked straight into the template rather than passed through
+// `before_help`: clap pads that placeholder with blank lines of its own no
+// matter what the string ends in, which left extra gaps before "Usage:". A
+// literal segment in the template is rendered exactly as written.
+#[clap(help_template = concat!(
+  "\n vtmate v", env!("CARGO_PKG_VERSION"), " - https://github.com/DavidValin/vtmate\n\n",
+  "{usage-heading} {usage}\n\n{all-args}{after-help}"
+))]
 #[command(group(clap::ArgGroup::new("daemon_cmd").multiple(false)))]
 #[command(group(clap::ArgGroup::new("voice_clone_cmd").multiple(false)))]
 #[clap(after_help = r#"
@@ -244,6 +252,14 @@ pub struct Args {
 
   #[arg(long, action = clap::ArgAction::SetTrue, help = "run the program in verbose mode")]
   pub verbose: bool,
+
+  #[arg(
+    long = "nb",
+    alias = "no-banner",
+    action = clap::ArgAction::SetTrue,
+    help = "do not render the vtmate banner"
+  )]
+  pub no_banner: bool,
 
   #[arg(long, action=clap::ArgAction::SetTrue, help = "list all voices for all languages and tts systems")]
   pub list_voices: bool,

@@ -412,9 +412,8 @@ detect_vulkan() {
   command -v vulkaninfo >/dev/null 2>&1 && return 0
   [ -f "/c/Windows/System32/vulkaninfo.exe" ] && return 0
   ls "/c/Program Files/Vulkan SDK/"*/Bin/vulkaninfo.exe >/dev/null 2>&1 && return 0
-  # One ls with several operands exits non-zero when ANY of them is missing, so
-  # test the paths one at a time - the loader lives in exactly one of them, and
-  # the multi-operand form made this check fail on every normal Linux system.
+  # One at a time: ls with several operands exits non-zero when any of them is
+  # missing, and the loader lives in exactly one.
   if [ "$OS_NAME" = "linux" ]; then
     for f in /usr/lib/libvulkan.so.1 /usr/lib/*/libvulkan.so.1 /usr/lib64/libvulkan.so.1; do
       [ -e "$f" ] && return 0
@@ -426,10 +425,9 @@ detect_vulkan() {
 # have_so libcudart.so.12 -> found through ldconfig, LD_LIBRARY_PATH or the usual CUDA dirs
 have_so() {
   ldconfig -p 2>/dev/null | grep -q "$1" && return 0
-  # Unquoted in the for below, so the globs expand; an unmatched glob stays
-  # literal and simply fails the -e test. cuda-13.0 without the /usr/local/cuda
-  # symlink, and the targets/<arch>/lib layout the symlink usually hides, both
-  # need naming explicitly.
+  # Unquoted in the for below, so the globs expand; an unmatched one stays
+  # literal and fails the -e test. A versioned cuda-13.0 with no
+  # /usr/local/cuda symlink, and the targets/<arch>/lib layout, need naming.
   dirs="$(printf '%s' "${LD_LIBRARY_PATH:-}" | tr ':' ' ')
     /usr/local/cuda/lib64 /usr/local/cuda/targets/*/lib
     /usr/local/cuda-*/lib64 /usr/local/cuda-*/targets/*/lib
@@ -450,10 +448,9 @@ have_dll() {
     [ -n "$d" ] && ls "$d"/$1 >/dev/null 2>&1 && return 0
   done
   # Quoted separately from the loop above, which splits PATH on spaces and so
-  # cannot carry "Program Files". CUDA_PATH points at one major; the glob
-  # catches a toolkit whose installer ran after this shell started, and the
-  # versioned directory a second major leaves beside it. Both are on PATH for
-  # a normal login, which is why they may be counted as reachable at all.
+  # cannot carry "Program Files". CUDA_PATH names one major; the glob catches a
+  # toolkit installed after this shell started, and a second major beside it.
+  # A normal login has both on PATH, which is why they count as reachable.
   for d in "$(winpath "${CUDA_PATH:-}")/bin" \
     "$(winpath "${ProgramFiles:-C:\\Program Files}")/NVIDIA GPU Computing Toolkit/CUDA"/v*/bin; do
     [ -n "$d" ] && ls "$d"/$1 >/dev/null 2>&1 && return 0
@@ -486,17 +483,16 @@ cuda_runtime_missing() { # MAJOR -> prints what is missing for the cudaMAJOR var
 }
 # cuda_unreachable_dirs "LIB..." -> directories holding one of LIB that the
 # dynamic loader does not search: pip wheels (nvidia-*-cu13) and conda envs.
-# vtmate loads CUDA through the loader, not through its own rpath, so a library
-# found only here does NOT count as present - installing the cuda build would
-# just fail the smoke test. Naming the directory turns "missing libcudnn.so.9"
-# into something the user can act on.
+# vtmate loads CUDA through the loader, not its rpath, so a library found only
+# here does NOT count as present - the cuda build would fail its smoke test.
+# Naming the directory turns "missing libcudnn.so.9" into something actionable.
 cuda_unreachable_dirs() {
   libs="$1"
-  # Held in the positional parameters so directories with spaces survive:
-  # "Program Files" would be two words in any unquoted list.
+  # Positional parameters so paths with spaces survive: "Program Files" would
+  # be two words in any unquoted list.
   if [ "$OS_NAME" = "windows" ]; then
-    # cuDNN's installer does not put its bin on PATH (see the warning further
-    # down), so this is where an otherwise complete CUDA 13 usually hides.
+    # cuDNN's installer does not put its bin on PATH, so an otherwise complete
+    # CUDA 13 usually hides here.
     set -- "${VIRTUAL_ENV:-/nonexistent}"/Lib/site-packages/nvidia/*/bin \
       "${CONDA_PREFIX:-/nonexistent}"/Library/bin \
       "$(winpath "${ProgramFiles:-C:\\Program Files}")/NVIDIA/CUDNN"/v*/bin \
@@ -509,7 +505,7 @@ cuda_unreachable_dirs() {
       /usr/lib/python*/dist-packages/nvidia/*/lib
   fi
   # One line per directory: a path with spaces cannot be split back out of a
-  # single space-separated string.
+  # space-separated string.
   for d in "$@"; do
     for l in $libs; do
       [ -e "$d/$l" ] || continue

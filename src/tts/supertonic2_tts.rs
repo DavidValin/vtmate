@@ -45,9 +45,8 @@ pub struct StreamingTts {
 }
 
 /// The shared engine, loading it if it is not resident. Built without the slot
-/// locked: loading takes seconds, and blocking every other speaker on it is
-/// worse than the rare double build, where the engine already stored wins so
-/// callers still share one.
+/// locked: loading takes seconds, and a rare double build - the stored engine
+/// wins, so callers still share one - beats blocking every other speaker.
 fn engine_handle() -> Result<Arc<Mutex<TtsEngine>>, Box<dyn std::error::Error + Send + Sync>> {
   if let Some(e) = SUPERTONIC2_ENGINE
     .lock()
