@@ -6,7 +6,7 @@ use crate::tts;
 use crate::util::get_user_home_path;
 use crate::util::terminate;
 use anyhow::Error;
-use clap::{CommandFactory, Parser};
+use clap::Parser;
 use cpal::Device;
 use cpal::traits::DeviceTrait;
 use serde::{Deserialize, Serialize};
@@ -50,14 +50,8 @@ pub struct AgentSettings {
 
 #[derive(Parser, Debug, Clone)]
 #[clap(version = env!("CARGO_PKG_VERSION"))]
-// The banner is printed directly by `print_help`, not through this template:
-// `print_help` also boxes the usage/options block that `{all-args}` renders
-// here, so it needs that block on its own, without the banner glued in front
-// of it.
-#[clap(help_template = "{usage-heading} {usage}\n\n{all-args}{after-help}")]
 #[command(group(clap::ArgGroup::new("daemon_cmd").multiple(false)))]
 #[command(group(clap::ArgGroup::new("voice_clone_cmd").multiple(false)))]
-#[clap(after_help = "")]
 pub struct Args {
   #[arg(
     short = 'p',
@@ -593,9 +587,9 @@ const AFTER_HELP_PRE: &str = "\nSettings live in two files (\"~\" is your home d
   \x1b[90m~/.vtmate/agents\x1b[0m (e.g. to keep separate groups of
   agents for different debates); \x1b[90m~/.vtmate/settings\x1b[0m is
   always the same file. Press \x1b[90mCtrl+S\x1b[0m during a
-  conversation to edit the agents from the terminal instead:
-  what you save is written back to the agents file and
-  applies straight away.
+  conversation to edit the agents from the terminal
+  instead: what you save is written back to the agents
+  file and applies straight away.
 
 [general]  (in \x1b[90m~/.vtmate/settings\x1b[0m)
   selected_agent
@@ -612,10 +606,11 @@ const AFTER_HELP_PRE: &str = "\nSettings live in two files (\"~\" is your home d
   tts_background_combo (\x1b[90m%TTS_COMBO%\x1b[0m)
     Read the selected text aloud; press again to stop.
   stt_and_paste_background_ptt_combo (\x1b[90m%STT_COMBO%\x1b[0m)
-    Hold to talk; on release the transcript is pasted at the
-      cursor.
+    Hold to talk; on release the transcript is pasted at
+      the cursor.
   llm_background_reset (\x1b[90m%RESET_COMBO%\x1b[0m)
-    Stop the speech; twice in a row resets the conversation.
+    Stop the speech; twice in a row resets the
+      conversation.
   Combos are written as modifiers joined by '+', e.g.
     ctrl+alt+a, shift+f5, cmd+alt+r (modifiers: ctrl,
     alt/option, shift, cmd/super, cmdorctrl).
@@ -639,8 +634,9 @@ const AFTER_HELP_PRE: &str = "\nSettings live in two files (\"~\" is your home d
 
   The body is taken verbatim: blank lines, indentation and
     lines starting with '[' are kept, and no \\n escape is
-    expanded (it already has real new lines). Close a body
-    that itself contains '---' with a longer fence ('----').
+    expanded (it already has real new lines). Close a
+    body that itself contains '---' with a longer fence
+    ('----').
 
 Explanation on the [agent] fields (in \x1b[90m~/.vtmate/agents\x1b[0m):
   name
@@ -733,11 +729,11 @@ Explanation on the [agent] fields (in \x1b[90m~/.vtmate/agents\x1b[0m):
 const SHORTCUTS_HEADER: &str = "Shortcuts while focused in vtmate:
 ";
 const SHORTCUTS_BODY: &str = "  \x1b[90mCtrl+S\x1b[0m
-    Opens the settings popup, to edit agents, or select a
-      different one by pressing ENTER on it.
+    Opens the settings popup, to edit agents, or select
+      a different one by pressing ENTER on it.
   \x1b[90mCtrl+D\x1b[0m
-    Opens the debate popup, to start a debate between two
-      agents.
+    Opens the debate popup, to start a debate between
+      two agents.
   \x1b[90mESCAPE (once)\x1b[0m
     Stops ongoing playback. In debate mode, this also
       pauses the debate - speak again to continue.
@@ -746,8 +742,8 @@ const SHORTCUTS_BODY: &str = "  \x1b[90mCtrl+S\x1b[0m
   \x1b[90mu\x1b[0m
     Undoes the previous response.
   \x1b[90mSPACE (push while you talk)\x1b[0m
-    In PTT mode: records your speech while held, and sends
-      it to the agent on release.
+    In PTT mode: records your speech while held, and
+      sends it to the agent on release.
   \x1b[90mSPACE (once)\x1b[0m
     In LIVE mode: pauses or resumes the conversation.
   \x1b[90mARROW_UP\x1b[0m / \x1b[90mARROW_DOWN\x1b[0m
@@ -760,18 +756,19 @@ When running `vtmate --daemon`, these shortcuts work
   (combos below reflect your current [daemon] settings):
 ";
 const DAEMON_BODY: &str = "  llm_background_ptt_combo (\x1b[90m%PTT_COMBO%\x1b[0m)
-    Push to talk, then release (select some text first to
-      add it as context). Asks the selected agent via
-      voice and speaks the reply.
+    Push to talk, then release (select some text first
+      to add it as context). Asks the selected agent
+      via voice and speaks the reply.
   tts_background_combo (\x1b[90m%TTS_COMBO%\x1b[0m)
     Select some text, then press once to read it aloud.
   stt_and_paste_background_ptt_combo (\x1b[90m%STT_COMBO%\x1b[0m)
-    Push to talk, then release. Turns the speech into text
-      and pastes it at the cursor.
+    Push to talk, then release. Turns the speech into
+      text and pastes it at the cursor.
   llm_background_reset (\x1b[90m%RESET_COMBO%\x1b[0m)
     Press once to stop the current speech; press twice
-      within a second to reset the conversation (this also
-      stops saving, if the session was being saved).";
+      within a second to reset the conversation (this
+      also stops saving, if the session was being
+      saved).";
 
 const EXPORTED_FILES_HEADER: &str = "\nExported files:\n";
 const EXPORTED_FILES_BODY: &str = "  \x1b[90m~/.vtmate/conversations\x1b[0m
@@ -780,16 +777,19 @@ const EXPORTED_FILES_BODY: &str = "  \x1b[90m~/.vtmate/conversations\x1b[0m
   \x1b[90m~/.vtmate/read-files\x1b[0m
     Exported voice read files (-r <FILE> -s).";
 
-/// Wraps `content` (one shortcut/description block, already colored) in a
-/// box drawn to fit its widest line - measured with ANSI codes stripped so a
-/// user's own (possibly long) combo text never overflows the border.
-fn wrap_in_box(content: &str) -> String {
+/// Wraps `content` in a box at least `min_interior` columns wide - wider
+/// only if some line (e.g. a user's own long daemon combo) needs it, so the
+/// border never cuts content off. Every box in one `--help` render is given
+/// the same `min_interior` (see `print_help`), so they all line up at a
+/// shared width instead of each shrinking to its own section's content.
+fn wrap_in_box(content: &str, min_interior: usize) -> String {
   let lines: Vec<&str> = content.lines().collect();
   let max_width = lines
     .iter()
     .map(|l| crate::util::_strip_ansi(l).chars().count())
     .max()
-    .unwrap_or(0);
+    .unwrap_or(0)
+    .max(min_interior);
   let mut out = String::new();
   out.push_str(&format!("\x1b[90m┌{}┐\x1b[0m\n", "─".repeat(max_width + 2)));
   for line in &lines {
@@ -801,11 +801,149 @@ fn wrap_in_box(content: &str) -> String {
   out
 }
 
+/// Greedy word-wrap: `indent` spaces before the first word, `indent + 2`
+/// before every wrapped continuation - the same label/description nesting
+/// used by the hand-wrapped sections above, but computed instead of typed,
+/// since `OPTIONS` entries vary too much in length to hand-wrap safely.
+fn wrap_text(text: &str, width: usize, indent: usize) -> String {
+  let cont_indent = indent + 2;
+  let mut lines: Vec<String> = Vec::new();
+  let mut cur = String::new();
+  for word in text.split_whitespace() {
+    if cur.is_empty() {
+      let ind = if lines.is_empty() { indent } else { cont_indent };
+      cur.push_str(&" ".repeat(ind));
+      cur.push_str(word);
+    } else if crate::util::_strip_ansi(&cur).chars().count() + 1 + word.chars().count() <= width {
+      cur.push(' ');
+      cur.push_str(word);
+    } else {
+      lines.push(std::mem::take(&mut cur));
+      cur.push_str(&" ".repeat(cont_indent));
+      cur.push_str(word);
+    }
+  }
+  if !cur.is_empty() {
+    lines.push(cur);
+  }
+  lines.join("\n")
+}
+
+/// One `(signature, help)` pair per CLI flag, mirroring the `#[arg(...)]`
+/// attributes on `Args` above - kept as plain data, rather than read back off
+/// `Args::command()`, because clap's own `wrap_help` layout cannot fit this
+/// list into a compact box: it reserves a description column sized to the
+/// longest flag signature (`--refine-voice <VOICE_NAME> ...`, ~68 columns
+/// alone) and degenerates to one word per line once the box is narrower than
+/// that, however `term_width` is set. Wrapping the signature and the help
+/// text ourselves, independently, avoids that entirely. Must be kept in
+/// sync with the `help =` strings above by hand, same as every other
+/// hand-authored section of this help text.
+const OPTIONS: &[(&str, &str)] = &[
+  ("-p, --prompt <PROMPT>", "initialize with a text prompt"),
+  (
+    "-i, --prompt-file <FILE>",
+    "initialize with a file prompt (use '-' for STDIN (runs in quiet mode))",
+  ),
+  ("--verbose", "run the program in verbose mode"),
+  ("--nb", "do not render the vtmate banner"),
+  ("--list-voices", "list all voices for all languages and tts systems"),
+  (
+    "-c, --config <AGENTS_FILE>",
+    "use a specific agents file instead of ~/.vtmate/agents",
+  ),
+  ("-a, --agent <AGENT>", "set a specific initial agent"),
+  (
+    "--ptt <PTT>",
+    "override for this session the ptt setting for all agents independently of its settings [possible values: true, false]",
+  ),
+  (
+    "--debate <AGENT1 AGENT2 SUBJECT> <AGENT1 AGENT2 SUBJECT>...",
+    "enable debate mode with two agents and a subject",
+  ),
+  (
+    "--max-turns <N>",
+    "end the program after N debate turns (one agent reply is one turn)",
+  ),
+  (
+    "-r, --read-file <FILENAME>",
+    "read a file with voice, phrase by phrase (no llm involved). Use '-' for STDIN (runs in quiet mode))",
+  ),
+  (
+    "-q, --quiet",
+    "produce a single response and exit (requires `-p` or `-i`)",
+  ),
+  (
+    "-s, --save",
+    "save the conversation to text and audio file in ~/.vtmate/conversations",
+  ),
+  (
+    "--save-html",
+    "save the conversation to a folder in ~/.vtmate/conversations with an html player and one audio file per turn (also accepted as `-s-html`)",
+  ),
+  (
+    "--daemon",
+    "start vtmate in the background (global hotkeys, voice only). Run `vtmate` again to attach",
+  ),
+  ("--daemon-stop", "stop the running daemon"),
+  ("--daemon-status", "show whether a daemon is running and its hotkeys"),
+  (
+    "--clone-voice <VOICE_NAME> <LANGUAGE> <WAV_FILE> <REF_TEXT>",
+    "train a new supertonic3 voice from a wav reference (+ its transcript) and make it immediately available as VOICE_NAME (letters, digits, '_' only)",
+  ),
+  (
+    "--refine-voice <VOICE_NAME> <LANGUAGE> <WAV_FILE> <REF_TEXT>",
+    "refine an EXISTING supertonic3 voice further from a new wav reference (+ its transcript), warm-started from its current style; VOICE_NAME must already exist (see --clone-voice). Never overwrites: saves as VOICE_NAMEv<n>, the next unused version, so the base voice and every earlier version stay usable",
+  ),
+  ("-h, --help", "Print help"),
+  ("-V, --version", "Print version"),
+];
+
+/// Builds the boxed options list at `width` columns, wrapping both the flag
+/// signature and its description independently (see `OPTIONS`); the
+/// signature is rendered gray, matching every other shortcut/path mention in
+/// this help text.
+fn build_options_body(width: usize) -> String {
+  let mut out = String::new();
+  for (i, (sig, help)) in OPTIONS.iter().enumerate() {
+    if i > 0 {
+      out.push('\n');
+    }
+    let sig_wrapped = wrap_text(sig, width, 2);
+    out.push_str("\x1b[90m");
+    out.push_str(&sig_wrapped);
+    out.push_str("\x1b[0m\n");
+    out.push_str(&wrap_text(help, width, 4));
+  }
+  out
+}
+
+/// Terminal columns right now, falling back to 80 (matches every other
+/// `terminal::size()` call in this codebase) when there is no controlling
+/// terminal to query - e.g. `--help` piped to a file. Some pty
+/// implementations report a successful but zero-sized `0x0` window instead
+/// of erroring when there is no real terminal upstream, so a `0` is treated
+/// the same as an error.
+fn term_cols() -> usize {
+  match crossterm::terminal::size() {
+    Ok((cols, _)) if cols > 0 => cols as usize,
+    _ => 80,
+  }
+}
+
 const BANNER: &str = concat!(
   "\n vtmate v",
   env!("CARGO_PKG_VERSION"),
   " - https://github.com/DavidValin/vtmate\n\n"
 );
+
+/// Interior box width this help text is designed for - together with the
+/// border ("│ " + " │") that makes every box exactly 59 columns wide, the
+/// figure the rest of this text (`AFTER_HELP_PRE` and the section bodies
+/// below) is itself hand-wrapped to. Boxes only ever get wider than this,
+/// never narrower: `wrap_in_box` still grows past it for a line that needs
+/// more room (e.g. a user's own long daemon combo).
+const BOX_INTERIOR: usize = 55;
 
 /// `--help`/`-h`: the compiled-in help text names the daemon combos with
 /// `%..._COMBO%` placeholders instead of literal defaults, filled in here
@@ -820,8 +958,14 @@ const BANNER: &str = concat!(
 /// passed through `#[clap(after_help = ...)]`: clap converts anything handed
 /// to `after_help` into a `StyledStr` and strips literal ANSI escapes from it
 /// in the process, so a colored template sourced from `Command::get_after_help`
-/// always comes back stripped. Printing these constants directly, after
-/// `render_help()` has printed the options list, sidesteps that entirely.
+/// always comes back stripped. Printing these constants directly sidesteps
+/// that entirely - `Args::command()` is never even built here any more.
+///
+/// Below `BOX_INTERIOR + 4` (the box border) columns, a box cannot render at
+/// its design width without wrapping onto itself, so this drops the boxes
+/// instead of drawing broken ones: the same section bodies print without
+/// their border, softly wrapped by the terminal itself at whatever width it
+/// actually has.
 pub fn print_help(_args_os: &[std::ffi::OsString]) {
   let d = resolve_settings_path()
     .ok()
@@ -835,22 +979,42 @@ pub fn print_help(_args_os: &[std::ffi::OsString]) {
   };
   let after_help_pre = fill_combos(AFTER_HELP_PRE);
   let daemon_body = fill_combos(DAEMON_BODY);
-  // Forced rather than left to the real terminal width: the rest of this
-  // help text is hand-wrapped at a fixed compact width (see AFTER_HELP_PRE
-  // and the shortcut bodies above), and boxing the options list at whatever
-  // width the terminal happens to be would make it the only part that does
-  // not match that style.
-  let mut cmd = Args::command().term_width(68);
-  let usage_and_options = cmd.render_help().to_string();
+  let term_w = term_cols();
+  let draw_boxes = term_w >= BOX_INTERIOR + 4;
+  let options_body = build_options_body(if draw_boxes {
+    BOX_INTERIOR
+  } else {
+    term_w.max(20)
+  });
+
   print!("{}", BANNER);
-  print!("{}", wrap_in_box(&usage_and_options));
-  print!("{}", after_help_pre);
-  print!("{}", SHORTCUTS_HEADER);
-  print!("{}", wrap_in_box(SHORTCUTS_BODY));
-  print!("{}", DAEMON_HEADER);
-  print!("{}", wrap_in_box(&daemon_body));
-  print!("{}", EXPORTED_FILES_HEADER);
-  print!("{}", wrap_in_box(EXPORTED_FILES_BODY));
+  print!("Usage: vtmate [OPTIONS]\n\nOptions:\n");
+  if draw_boxes {
+    let box_width = [&options_body, SHORTCUTS_BODY, &daemon_body, EXPORTED_FILES_BODY]
+      .iter()
+      .flat_map(|s| s.lines())
+      .map(|l| crate::util::_strip_ansi(l).chars().count())
+      .max()
+      .unwrap_or(BOX_INTERIOR)
+      .max(BOX_INTERIOR);
+    print!("{}", wrap_in_box(&options_body, box_width));
+    print!("{}", after_help_pre);
+    print!("{}", SHORTCUTS_HEADER);
+    print!("{}", wrap_in_box(SHORTCUTS_BODY, box_width));
+    print!("{}", DAEMON_HEADER);
+    print!("{}", wrap_in_box(&daemon_body, box_width));
+    print!("{}", EXPORTED_FILES_HEADER);
+    print!("{}", wrap_in_box(EXPORTED_FILES_BODY, box_width));
+  } else {
+    print!("{}\n\n", options_body);
+    print!("{}", after_help_pre);
+    print!("{}", SHORTCUTS_HEADER);
+    print!("{}\n\n", SHORTCUTS_BODY);
+    print!("{}", DAEMON_HEADER);
+    print!("{}\n\n", daemon_body);
+    print!("{}", EXPORTED_FILES_HEADER);
+    print!("{}\n", EXPORTED_FILES_BODY);
+  }
   std::process::exit(0);
 }
 
