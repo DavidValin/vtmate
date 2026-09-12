@@ -295,6 +295,12 @@ impl AppState {
     self.conversation_history.lock().unwrap().clear();
     *self.save_path.lock().unwrap() = None;
     *self.start_date.lock().unwrap() = String::new();
+    // Dropping the sender is what makes the wav writer thread finalize the
+    // file (see `playback::clear_wav_tx`) - without this it would otherwise
+    // sit open, unfinalized, for the rest of the process's life, since
+    // nothing else ever drops it once conversation.rs stops resaving (see
+    // `save_enabled`/`save_html_enabled` in daemon-mode reset paths).
+    crate::playback::clear_wav_tx();
     crate::html_export::reset();
   }
 }

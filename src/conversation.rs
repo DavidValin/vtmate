@@ -68,9 +68,10 @@ pub fn conversation_thread(
     state.stt_ready.store(true, Ordering::SeqCst);
   }
 
-  // WAV writer thread: activated when -s option is used
-  // WAV writer will be started lazily when the first save path is created.
-  let mut wav_tx_opt: Option<crossbeam_channel::Sender<crate::audio::AudioChunk>> = None;
+  // WAV writer thread: activated when -s option is used, started lazily when
+  // the first save path is created. Held in crate::playback's shared slot,
+  // not a local variable here, so a reset from any thread can close it
+  // immediately by clearing that slot (see AppState::reset_conversation).
 
   crate::log::log("info", &format!("LLM model: {}", settings.model));
 
@@ -84,13 +85,7 @@ pub fn conversation_thread(
 
     // Setup save path and WAV writer if saving is requested
     if save || save_html {
-      maybe_setup_and_save(
-        &mut wav_tx_opt,
-        &conversation_history,
-        &settings_clone,
-        save,
-        save_html,
-      )?;
+      maybe_setup_and_save(&conversation_history, &settings_clone, save, save_html)?;
     }
 
     let rt = TokioBuilder::new_current_thread()
@@ -217,13 +212,7 @@ pub fn conversation_thread(
     let needs_setup = (save_now && state.save_path.lock().unwrap().is_none())
       || (save_html_now && !crate::html_export::is_active());
     if needs_setup {
-      maybe_setup_and_save(
-        &mut wav_tx_opt,
-        &conversation_history,
-        &settings_clone,
-        save_now,
-        save_html_now,
-      )?;
+      maybe_setup_and_save(&conversation_history, &settings_clone, save_now, save_html_now)?;
     }
 
     if !state.debate_enabled.load(Ordering::SeqCst) {
@@ -463,7 +452,7 @@ pub fn conversation_thread(
           crate::log::log("debug", "Utterance discarded (reset)");
           continue;
         }
-        if let Some(ref wav_tx) = wav_tx_opt {
+        if let Some(wav_tx) = crate::playback::wav_tx() {
           wav_tx.send(utt.audio.clone()).unwrap_or(());
         }
 
@@ -757,7 +746,6 @@ fn record_user_audio(conversation_history: &ConversationHistory, audio: &crate::
 }
 
 fn maybe_setup_and_save(
-  wav_tx_opt: &mut Option<crossbeam_channel::Sender<crate::audio::AudioChunk>>,
   conversation_history: &ConversationHistory,
   settings_clone: &crate::config::AgentSettings,
   save: bool,
@@ -800,8 +788,7 @@ fn maybe_setup_and_save(
       let path = conv_dir.join(format!("{}.txt", stem));
       *state.save_path.lock().unwrap() = Some(path.clone());
       let wav_tx = crate::audio::init_wav_writer(&path.with_extension("wav"), 500);
-      set_wav_tx(wav_tx.clone());
-      *wav_tx_opt = Some(wav_tx);
+      set_wav_tx(wav_tx);
     }
     if need_html {
       crate::html_export::init(&conv_dir.join(&stem))?;
