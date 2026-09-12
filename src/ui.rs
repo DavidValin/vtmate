@@ -1229,6 +1229,19 @@ fn render_bottom_bar<W: Write>(
     format!("\x1b[41m\x1b[37m{}\x1b[0m", centred("recording", TAG_WIDTH))
   };
 
+  // `-s`/`--save-html`: purple, so it reads as a separate "exporting to
+  // disk" condition rather than a third state alongside recording/paused.
+  // Folded into `recording_paused_str` (not a field of its own passed to
+  // `bar_layout`) so the one width already counted for the meter's room and
+  // the right-hand group's position picks it up for free.
+  let saving = state.save_enabled.load(Ordering::Relaxed)
+    || state.save_html_enabled.load(Ordering::Relaxed);
+  let recording_paused_str = if saving {
+    format!("\x1b[45m\x1b[37m SAVING \x1b[0m {}", recording_paused_str)
+  } else {
+    recording_paused_str
+  };
+
   let internal_status = format!(
     "{}{}{}{}",
     if recording_paused {

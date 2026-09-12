@@ -393,6 +393,11 @@ impl Controller {
       crate::tts::apply_residency(state);
     }
     state.reset_conversation();
+    // A history reset starts a new session: `-s`/`--save-html` exported the
+    // one that just got cleared, and must be asked for again (rather than
+    // silently resuming) to export whatever comes next.
+    state.save_enabled.store(false, Ordering::Relaxed);
+    state.save_html_enabled.store(false, Ordering::Relaxed);
     self.ui_line("");
     self.ui_line("\n\x1b[32m↻ Session restarted (history reset) \x1b[0m\n");
     crate::log::log("info", "conversation reset by hotkey");
