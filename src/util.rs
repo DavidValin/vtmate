@@ -537,13 +537,13 @@ fn is_all_caps_line(line: &str) -> bool {
 }
 
 /// Turn everything collected in `block_display`/`block_spoken` into phrases
-/// of `block_no`, splitting the spoken text at every delimiter, then move on
-/// to the next block number.
+/// of `block_no`, splitting the spoken text at every delimiter, then reset
+/// both for the next block.
 fn flush_block(
   phrases: &mut Vec<SpokenPhrase>,
   block_no: &mut usize,
-  block_display: &[&str],
-  block_spoken: &str,
+  block_display: &mut Vec<&str>,
+  block_spoken: &mut String,
 ) {
   let display = block_display.join("\n");
   let before = phrases.len();
@@ -563,6 +563,8 @@ fn flush_block(
     });
   }
   *block_no += 1;
+  block_display.clear();
+  block_spoken.clear();
 }
 
 pub fn split_text_for_tts(content: &str, skip_code: bool) -> Vec<SpokenPhrase> {
@@ -587,9 +589,7 @@ pub fn split_text_for_tts(content: &str, skip_code: bool) -> Vec<SpokenPhrase> {
     // accumulating before it first, so it splits off instead of trailing on
     // whatever precedes it.
     if is_standalone && !block_display.is_empty() {
-      flush_block(&mut phrases, &mut block_no, &block_display, &block_spoken);
-      block_display.clear();
-      block_spoken.clear();
+      flush_block(&mut phrases, &mut block_no, &mut block_display, &mut block_spoken);
     }
 
     let to_speak = if is_list { strip_list_marker(line) } else { line };
@@ -615,9 +615,7 @@ pub fn split_text_for_tts(content: &str, skip_code: bool) -> Vec<SpokenPhrase> {
       continue;
     }
 
-    flush_block(&mut phrases, &mut block_no, &block_display, &block_spoken);
-    block_display.clear();
-    block_spoken.clear();
+    flush_block(&mut phrases, &mut block_no, &mut block_display, &mut block_spoken);
   }
   phrases
 }

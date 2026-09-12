@@ -210,15 +210,15 @@ fn finish(tx_ui: &crossbeam_channel::Sender<String>, level: &str, msg: &str) -> 
   // reply builds it up that way, one chunk at a time - so this would
   // otherwise land glued onto the tail of the last thing the assistant said.
   //
-  // The history stays exactly as it printed, the same as a non-daemon exit.
-  // What made that look wrong before was an unconditional LeaveAlternateScreen
-  // restoring a stale cursor position afterwards (see ON_ALT_SCREEN); once
-  // that stopped happening, this needed no help from a screen clear it was
-  // never really about. EXIT_LINE_PRINTED is deliberately left unset here:
-  // the viewport always reserves the bottom row for the status bar (see
-  // viewport()), so this final line never lands there, and terminate() still
-  // needs to run its normal clear on that row - otherwise the bar's last
-  // frame is left painted on screen after the process exits.
+  // The history stays exactly as it printed, the same as a non-daemon exit:
+  // ON_ALT_SCREEN guards terminate()'s LeaveAlternateScreen so it only fires
+  // when something actually left the primary screen, which is what keeps the
+  // cursor from jumping to a stale position here. EXIT_LINE_PRINTED is
+  // deliberately left unset: the viewport always reserves the bottom row for
+  // the status bar (see viewport()), so this final line never lands there,
+  // and terminate() still needs to run its normal clear on that row -
+  // otherwise the bar's last frame is left painted on screen after the
+  // process exits.
   let _ = tx_ui.send(format!(
     "final_line|\n\n{}",
     crate::log::marked_line(level, msg)
