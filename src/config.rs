@@ -932,9 +932,9 @@ fn term_cols() -> usize {
 }
 
 const BANNER: &str = concat!(
-  "\n vtmate v",
+  "\n\x1b[33mvtmate v",
   env!("CARGO_PKG_VERSION"),
-  " - https://github.com/DavidValin/vtmate\n\n"
+  " - https://github.com/DavidValin/vtmate\x1b[0m\n\n"
 );
 
 /// Interior box width this help text is designed for - together with the
