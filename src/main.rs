@@ -39,8 +39,11 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   crate::audio::install_alsa_error_handler();
   crate::audio::ensure_alsa_plugin_dir();
 
-  let mut args =
-    crate::config::Args::parse_from(crate::config::normalize_argv(std::env::args_os()));
+  let argv = crate::config::normalize_argv(std::env::args_os());
+  if argv.iter().any(|a| a == "--help" || a == "-h") {
+    crate::config::print_help(&argv);
+  }
+  let mut args = crate::config::Args::parse_from(argv);
 
   // Force quiet mode if stdin is not a terminal and input is read from pipe
   let stdin_is_tty = std::io::stdin().is_terminal();

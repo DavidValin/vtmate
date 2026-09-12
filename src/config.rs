@@ -6,7 +6,7 @@ use crate::tts;
 use crate::util::get_user_home_path;
 use crate::util::terminate;
 use anyhow::Error;
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use cpal::Device;
 use cpal::traits::DeviceTrait;
 use serde::{Deserialize, Serialize};
@@ -60,182 +60,7 @@ pub struct AgentSettings {
 ))]
 #[command(group(clap::ArgGroup::new("daemon_cmd").multiple(false)))]
 #[command(group(clap::ArgGroup::new("voice_clone_cmd").multiple(false)))]
-#[clap(after_help = r#"
-Settings live in two files:
-
-  ~/.vtmate/settings  a [general] section, then a [daemon] section
-  ~/.vtmate/agents    one [system_prompt] section per named prompt,
-                      then one [agent] section per agent
-
-`-c <file>` uses a different agents file instead of ~/.vtmate/agents
-(e.g. to keep separate groups of agents for different debates);
-~/.vtmate/settings is always the same file. Press Ctrl+S during a
-conversation to edit the agents from the terminal instead: what you
-save is written back to the agents file and applies straight away.
-
-[general]  (in ~/.vtmate/settings)
-  * selected_agent:       name of the agent vtmate starts with.
-                          Updated automatically every time you
-                          switch agents with LEFT/RIGHT (in the
-                          terminal or while attached to the
-                          daemon). `-a` overrides it for one run.
-
-[daemon]  (in ~/.vtmate/settings; global shortcuts used by `vtmate --daemon`)
-  * llm_background_ptt_combo:          hold to talk; on release the
-                                       speech plus any selected text
-                                       is sent to the agent and the
-                                       reply is spoken (ctrl+alt+a)
-  * tts_background_combo:              read the selected text aloud;
-                                       press again to stop (ctrl+alt+r)
-  * stt_and_paste_background_ptt_combo: hold to talk; on release the
-                                       transcript is pasted at the
-                                       cursor (ctrl+alt+s)
-  * llm_background_reset:              stop the speech; twice in a row
-                                       resets the conversation (ctrl+q)
-  Combos are written as modifiers joined by '+', e.g. ctrl+alt+a,
-  shift+f5, cmd+alt+r (modifiers: ctrl, alt/option, shift,
-  cmd/super, cmdorctrl).
-
-[system_prompt]  (in ~/.vtmate/agents; optional, as many as you want)
-  A named multiline system prompt that agents pull in with
-  `system_prompt = @<name>`. The block holds a `name` and then
-  the prompt body fenced between two lines of three or more
-  dashes:
-
-      [system_prompt]
-      name = planner
-      ---
-      You assist the user in the creation of a plan.
-
-      Follow these format standards:
-        1. The plan is composed by tasks and subtasks.
-        2. Each task has the format: "[ ] <task name>".
-      ---
-
-  The body is taken verbatim: blank lines, indentation and
-  lines starting with '[' are kept, and no \n escape is
-  expanded (it already has real new lines). Close a body that
-  itself contains '---' with a longer fence ('----').
-
-Explanation on the [agent] fields (in ~/.vtmate/agents):
-
-  * name:                 a short name for the agent
-  ------------------------------------------------------------
-  * language:             any of the languages available used
-                          for speech recognition and tts
-  ------------------------------------------------------------
-  * voice:                the voice name to use by the
-                          agent (see available voices for each
-                          language and tts system running
-                          `vtmate --list-voices`).
-
-                          Voice mixing:
-
-                            when using 'kokoro' tts you can mix
-                            2 voices. example:
-                            
-                               "bm_daniel.5+am_puck.5"
-
-                            (50% of bm_daniel and 50% of am_puck)
-                            
-  ------------------------------------------------------------
-  * voice_speed:          the voice speed from 1.0 to 9.0
-  ------------------------------------------------------------
-  * provider:             the system it will use to query
-                          the llm.
-
-                          Local servers (no api key needed):
-                            'ollama' (0.13 or newer),
-                            'llama-server',
-                            'openai-compatible-api' (LM Studio,
-                            vLLM, or any local or remote server
-                            exposing /v1/chat/completions -
-                            Azure OpenAI, a proxy, LiteLLM, ...
-                            included; the baseurl is where it
-                            has to point)
-
-                          Hosted providers (api key needed):
-                            'openai-api', 'anthropic-api',
-                            'google-api', 'groq-api',
-                            'mistral-api', 'openrouter-api',
-                            'deepseek-api', 'xai-api'
-
-                          Subscription clis (no api key, use
-                          whatever the cli is logged into; no
-                          baseurl either - model is passed to
-                          the cli directly):
-                            'claude-cli', 'codex-cli',
-                            'gemini-cli', 'copilot-cli',
-                            'kiro-cli', 'vibe-cli',
-                            'hermes-cli', 'opencode-cli',
-                            'pi-cli', 'aichat-cli', 'grok-cli'
-  ------------------------------------------------------------
-  * baseurl:              the base url used to contact the
-                          provider. Required for local servers -
-                          the host and port without path, e.g.
-                          http://127.0.0.1:11434 for ollama, or
-                          wherever an openai-compatible-api
-                          endpoint actually is, local or remote.
-
-                          Every hosted provider (including
-                          openai-api) and every subscription cli
-                          ignores it - set it there and it is
-                          rejected.
-  ------------------------------------------------------------
-  * model:                the model name to use
-                          (some llama-server versions will
-                          ignore this option as llama-server
-                          runs for a single model)
-  ------------------------------------------------------------
-  * api_key:              the api key for hosted providers.
-                          Optional: when empty, the provider's
-                          environment variable is used instead
-                          (OPENAI_API_KEY, ANTHROPIC_API_KEY,
-                          GOOGLE_API_KEY, GROQ_API_KEY,
-                          MISTRAL_API_KEY, OPENROUTER_API_KEY,
-                          DEEPSEEK_API_KEY, XAI_API_KEY)
-  ------------------------------------------------------------
-  * system_prompt:        the system prompt to be sent to
-                          the llm when querying it.
-                          Use \n for new lines.
-                          Write `@<name>` instead to use a
-                          [system_prompt] block, which keeps
-                          its new lines as written (start an
-                          inline prompt with `@@` for a
-                          literal '@').
-  ------------------------------------------------------------
-  * sound_threshold_peak: a value between 0 and 1 which will
-                          be used as a peak base to detect
-                          user speech
-  ------------------------------------------------------------
-  * end_silence_ms:       the milliseconds of silence below
-                          sound_threshold_peak level that
-                          have to elapse for user speech
-                          to be submitted.
-                          in ptt mode, this option is ignored,
-                          the program will wait for SPACE key
-                          to be released to submit the audio.
-  ------------------------------------------------------------
-  * tts:                  the tts system to use, it can be
-                          'supertonic3' (default, 31 languages),
-                          'supertonic2', 'kokoro' or 'opentts'.
-
-                            - opentts requires opentts docker
-                            container to be running:
-                            docker run -p 5500:5500 synesthesiam/opentts:all
-  ------------------------------------------------------------
-  * ptt:                  push to talk mode, when its set
-                          to true you have to keep the space
-                          pushed while speaking, then release.
-  ------------------------------------------------------------
-  * whisper_model_path:   the path to the whisper model.
-                          vtmate unzips 2 models in
-                          ~/.whisper-models: ggml-tiny.bin and
-                          ggml-small-q5_1.bin (quantized small).
-                          You can download bigger models and
-                          point to them here
-
-"#)]
+#[clap(after_help = "")]
 pub struct Args {
   #[arg(
     short = 'p',
@@ -755,6 +580,253 @@ pub fn load_daemon_settings(settings_path: &std::path::Path) -> Result<DaemonSet
   }
   validate_daemon_settings(&d)?;
   Ok(d)
+}
+
+const AFTER_HELP_PRE: &str = "\nSettings live in two files (\"~\" is your home directory:
+  \x1b[90m/home/<user>\x1b[0m on Linux, \x1b[90m/Users/<user>\x1b[0m on macOS,
+  \x1b[90mC:\\Users\\<user>\x1b[0m on Windows - shown as ~/.vtmate
+  everywhere else below):
+  \x1b[90m~/.vtmate/settings\x1b[0m
+    A [general] section, then a [daemon] section.
+  \x1b[90m~/.vtmate/agents\x1b[0m
+    One [system_prompt] section per named prompt, then one
+      [agent] section per agent.
+
+`-c <file>` uses a different agents file instead of
+  \x1b[90m~/.vtmate/agents\x1b[0m (e.g. to keep separate groups of
+  agents for different debates); \x1b[90m~/.vtmate/settings\x1b[0m is
+  always the same file. Press \x1b[90mCtrl+S\x1b[0m during a
+  conversation to edit the agents from the terminal instead:
+  what you save is written back to the agents file and
+  applies straight away.
+
+[general]  (in \x1b[90m~/.vtmate/settings\x1b[0m)
+  selected_agent
+    Name of the agent vtmate starts with. Updated
+      automatically every time you switch agents with
+      LEFT/RIGHT (in the terminal or while attached to the
+      daemon). `-a` overrides it for one run.
+
+[daemon]  (in \x1b[90m~/.vtmate/settings\x1b[0m; global shortcuts
+  used by `vtmate --daemon`)
+  llm_background_ptt_combo (\x1b[90m%PTT_COMBO%\x1b[0m)
+    Hold to talk; on release the speech plus any selected
+      text is sent to the agent and the reply is spoken.
+  tts_background_combo (\x1b[90m%TTS_COMBO%\x1b[0m)
+    Read the selected text aloud; press again to stop.
+  stt_and_paste_background_ptt_combo (\x1b[90m%STT_COMBO%\x1b[0m)
+    Hold to talk; on release the transcript is pasted at the
+      cursor.
+  llm_background_reset (\x1b[90m%RESET_COMBO%\x1b[0m)
+    Stop the speech; twice in a row resets the conversation.
+  Combos are written as modifiers joined by '+', e.g.
+    ctrl+alt+a, shift+f5, cmd+alt+r (modifiers: ctrl,
+    alt/option, shift, cmd/super, cmdorctrl).
+
+[system_prompt]  (in \x1b[90m~/.vtmate/agents\x1b[0m; optional, as
+  many as you want)
+  A named multiline system prompt that agents pull in with
+    `system_prompt = @<name>`. The block holds a `name` and
+    then the prompt body fenced between two lines of three
+    or more dashes:
+
+      [system_prompt]
+      name = planner
+      ---
+      You assist the user in the creation of a plan.
+
+      Follow these format standards:
+        1. The plan is composed by tasks and subtasks.
+        2. Each task has the format: \"[ ] <task name>\".
+      ---
+
+  The body is taken verbatim: blank lines, indentation and
+    lines starting with '[' are kept, and no \\n escape is
+    expanded (it already has real new lines). Close a body
+    that itself contains '---' with a longer fence ('----').
+
+Explanation on the [agent] fields (in \x1b[90m~/.vtmate/agents\x1b[0m):
+  name
+    A short name for the agent.
+  language
+    Any of the languages available, used for speech
+      recognition and tts.
+  voice
+    The voice name to use by the agent (see available
+      voices for each language and tts system running
+      `vtmate --list-voices`).
+
+    Voice mixing: when using 'kokoro' tts you can mix 2
+      voices, e.g. \"bm_daniel.5+am_puck.5\" (50% of
+      bm_daniel and 50% of am_puck).
+  voice_speed
+    The voice speed, from 1.0 to 9.0.
+  provider
+    The system it will use to query the llm.
+
+    Local servers (no api key needed): 'ollama' (0.13 or
+      newer), 'llama-server', 'openai-compatible-api' (LM
+      Studio, vLLM, or any local or remote server exposing
+      /v1/chat/completions - Azure OpenAI, a proxy,
+      LiteLLM, ... included; the baseurl is where it has
+      to point).
+
+    Hosted providers (api key needed): 'openai-api',
+      'anthropic-api', 'google-api', 'groq-api',
+      'mistral-api', 'openrouter-api', 'deepseek-api',
+      'xai-api'.
+
+    Subscription clis (no api key, use whatever the cli is
+      logged into; no baseurl either - model is passed to
+      the cli directly): 'claude-cli', 'codex-cli',
+      'gemini-cli', 'copilot-cli', 'kiro-cli', 'vibe-cli',
+      'hermes-cli', 'opencode-cli', 'pi-cli', 'aichat-cli',
+      'grok-cli'.
+  baseurl
+    The base url used to contact the provider. Required
+      for local servers - the host and port without path,
+      e.g. http://127.0.0.1:11434 for ollama, or wherever
+      an openai-compatible-api endpoint actually is, local
+      or remote.
+
+    Every hosted provider (including openai-api) and every
+      subscription cli ignores it - set it there and it is
+      rejected.
+  model
+    The model name to use (some llama-server versions will
+      ignore this option, as llama-server runs for a
+      single model).
+  api_key
+    The api key for hosted providers. Optional: when
+      empty, the provider's environment variable is used
+      instead (OPENAI_API_KEY, ANTHROPIC_API_KEY,
+      GOOGLE_API_KEY, GROQ_API_KEY, MISTRAL_API_KEY,
+      OPENROUTER_API_KEY, DEEPSEEK_API_KEY, XAI_API_KEY).
+  system_prompt
+    The system prompt sent to the llm when querying it.
+      Use \\n for new lines. Write `@<name>` instead to use
+      a [system_prompt] block, which keeps its new lines
+      as written (start an inline prompt with `@@` for a
+      literal '@').
+  sound_threshold_peak
+    A value between 0 and 1, used as a peak base to detect
+      user speech.
+  end_silence_ms
+    The milliseconds of silence below sound_threshold_peak
+      level that have to elapse for user speech to be
+      submitted. In ptt mode this option is ignored - the
+      program waits for the \x1b[90mSPACE\x1b[0m key to be released
+      to submit the audio instead.
+  tts
+    The tts system to use: 'supertonic3' (default, 31
+      languages), 'supertonic2', 'kokoro' or 'opentts'.
+      'opentts' requires the opentts docker container
+      running: docker run -p 5500:5500
+      synesthesiam/opentts:all
+  ptt
+    Push to talk mode: when true, keep the space pushed
+      while speaking, then release.
+  whisper_model_path
+    The path to the whisper model. vtmate unzips 2 models
+      into \x1b[90m~/.whisper-models\x1b[0m: \x1b[90mggml-tiny.bin\x1b[0m
+      and \x1b[90mggml-small-q5_1.bin\x1b[0m (quantized small). You
+      can download bigger models and point to them here.
+
+";
+const SHORTCUTS_HEADER: &str = "Shortcuts while focused in vtmate:
+";
+const SHORTCUTS_BODY: &str = "  \x1b[90mCtrl+S\x1b[0m
+    Opens the settings popup, to edit agents, or select a
+      different one by pressing ENTER on it.
+  \x1b[90mCtrl+D\x1b[0m
+    Opens the debate popup, to start a debate between two
+      agents.
+  \x1b[90mESCAPE (once)\x1b[0m
+    Stops ongoing playback. In debate mode, this also
+      pauses the debate - speak again to continue.
+  \x1b[90mESCAPE (twice, within a second)\x1b[0m
+    Resets the conversation (history reset).
+  \x1b[90mu\x1b[0m
+    Undoes the previous response.
+  \x1b[90mSPACE (push while you talk)\x1b[0m
+    In PTT mode: records your speech while held, and sends
+      it to the agent on release.
+  \x1b[90mSPACE (once)\x1b[0m
+    In LIVE mode: pauses or resumes the conversation.
+  \x1b[90mARROW_UP\x1b[0m / \x1b[90mARROW_DOWN\x1b[0m
+    Changes the voice speed live.
+  \x1b[90mARROW_LEFT\x1b[0m / \x1b[90mARROW_RIGHT\x1b[0m
+    Switches live to the previous / next agent.";
+const DAEMON_HEADER: &str = "
+When running `vtmate --daemon`, these shortcuts work
+  anywhere on the desktop, not just while vtmate is focused
+  (combos below reflect your current [daemon] settings):
+";
+const DAEMON_BODY: &str = "  llm_background_ptt_combo (\x1b[90m%PTT_COMBO%\x1b[0m)
+    Push to talk, then release (select some text first to
+      add it as context). Asks the selected agent via
+      voice and speaks the reply.
+  tts_background_combo (\x1b[90m%TTS_COMBO%\x1b[0m)
+    Select some text, then press once to read it aloud.
+  stt_and_paste_background_ptt_combo (\x1b[90m%STT_COMBO%\x1b[0m)
+    Push to talk, then release. Turns the speech into text
+      and pastes it at the cursor.
+  llm_background_reset (\x1b[90m%RESET_COMBO%\x1b[0m)
+    Press once to stop the current speech; press twice
+      within a second to reset the conversation (this also
+      stops saving, if the session was being saved).";
+
+/// Wraps `content` (one shortcut/description block, already colored) in a
+/// box drawn to fit its widest line - measured with ANSI codes stripped so a
+/// user's own (possibly long) combo text never overflows the border.
+fn wrap_in_box(content: &str) -> String {
+  let lines: Vec<&str> = content.lines().collect();
+  let max_width = lines
+    .iter()
+    .map(|l| crate::util::_strip_ansi(l).chars().count())
+    .max()
+    .unwrap_or(0);
+  let mut out = String::new();
+  out.push_str(&format!("\x1b[90m┌{}┐\x1b[0m\n", "─".repeat(max_width + 2)));
+  for line in &lines {
+    let visible_len = crate::util::_strip_ansi(line).chars().count();
+    let pad = " ".repeat(max_width - visible_len);
+    out.push_str(&format!("\x1b[90m│\x1b[0m {}{} \x1b[90m│\x1b[0m\n", line, pad));
+  }
+  out.push_str(&format!("\x1b[90m└{}┘\x1b[0m\n", "─".repeat(max_width + 2)));
+  out
+}
+
+/// `--help`/`-h`: the compiled-in help text names the daemon combos with
+/// `%..._COMBO%` placeholders instead of literal defaults, filled in here
+/// with whatever `[daemon]` actually holds (or the defaults, when there is
+/// no settings file yet) - so the help someone reads matches the shortcuts
+/// that are actually live, not the values vtmate shipped with.
+///
+/// The colored/boxed text lives in plain `&str` constants above, never
+/// passed through `#[clap(after_help = ...)]`: clap converts anything handed
+/// to `after_help` into a `StyledStr` and strips literal ANSI escapes from it
+/// in the process, so a colored template sourced from `Command::get_after_help`
+/// always comes back stripped. Printing these constants directly, after
+/// `render_help()` has printed the options list, sidesteps that entirely.
+pub fn print_help(_args_os: &[std::ffi::OsString]) {
+  let d = resolve_settings_path()
+    .ok()
+    .and_then(|p| load_daemon_settings(&p).ok())
+    .unwrap_or_default();
+  let daemon_body = DAEMON_BODY
+    .replace("%PTT_COMBO%", &d.llm_background_ptt_combo)
+    .replace("%TTS_COMBO%", &d.tts_background_combo)
+    .replace("%STT_COMBO%", &d.stt_and_paste_background_ptt_combo)
+    .replace("%RESET_COMBO%", &d.llm_background_reset);
+  let mut cmd = Args::command();
+  print!("{}", cmd.render_help());
+  print!("{}", AFTER_HELP_PRE);
+  print!("{}", SHORTCUTS_HEADER);
+  print!("{}", wrap_in_box(SHORTCUTS_BODY));
+  print!("{}", DAEMON_HEADER);
+  print!("{}", wrap_in_box(&daemon_body));
+  std::process::exit(0);
 }
 
 pub fn validate_daemon_settings(d: &DaemonSettings) -> Result<(), Error> {
