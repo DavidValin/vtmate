@@ -464,6 +464,13 @@ pub fn terminate(code: i32) -> ! {
   crate::ui::wait_for_ui_stopped(std::time::Duration::from_millis(200));
   // close the wav of the turn --save-html was still recording
   crate::html_export::finish();
+  // Drop `-s`'s wav sender, if any: the writer thread only finalizes the
+  // file (patches its header's size fields) once every sender clone is
+  // gone, and this is the one exit path every close, Ctrl-C and read-file
+  // mode's own included, funnels through - `process::exit` below skips
+  // destructors, so a static holding the sender would otherwise keep it
+  // open forever instead of just until the process happens to end.
+  crate::playback::clear_wav_tx();
   run_exit_hook();
    // Disable raw mode if enabled, to restore terminal state
    let _ = crossterm::terminal::disable_raw_mode();
