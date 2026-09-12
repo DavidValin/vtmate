@@ -579,7 +579,6 @@ fn close_form(ui: &mut SettingsUi) {
       ui.cursor = index;
     }
     _ if dirty => {
-      ui.set_info(format!("'{}' added - not saved yet", draft.name));
       ui.cursor = ui.agents.len();
       ui.agents.push(draft);
     }
@@ -1470,12 +1469,13 @@ fn list_lines(
 
   // Room for the agent rows. `draw` gives the body `rows - 3` lines (the
   // bottom bar and the two borders are its own), and out of those the footer
-  // takes its separator, shortcuts, buttons and any notice, while the list
-  // itself spends one line on the header, one under it, one on the scroll
-  // hint, a blank line, one on the edited-agents summary and one above the
-  // footer. Reserving the hint and summary lines whether or not they are
-  // used keeps the count from depending on its own outcome.
-  let footer_len = 3 + usize::from(ui.notice.is_some());
+  // takes its separator, shortcuts, a blank line, the buttons and any
+  // notice, while the list itself spends one line on the header, one under
+  // it, one on the scroll hint, a blank line, one on the edited-agents
+  // summary and one above the footer. Reserving the hint and summary lines
+  // whether or not they are used keeps the count from depending on its own
+  // outcome.
+  let footer_len = 4 + usize::from(ui.notice.is_some());
   let room = (rows as usize).saturating_sub(9 + footer_len).max(1);
   let scroll = scroll_for(ui.cursor.min(ui.agents.len()), ui.agents.len(), room);
 
@@ -1529,6 +1529,7 @@ fn list_lines(
       "{}n{} new agent   {}e{} edit agent   {}ENTER{} select   {}d{} delete agent   {}↑/↓{} move",
       YELLOW, DIM, YELLOW, DIM, YELLOW, DIM, YELLOW, DIM, FG, DIM
     ),
+    String::new(),
     format!(
       "  {}   {}",
       button("Save", ui.on_save()),
