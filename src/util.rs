@@ -388,27 +388,29 @@ mod tts_text_tests {
   }
 
   #[test]
-  fn a_bare_number_is_only_a_list_item_alongside_the_next_one() {
+  fn a_line_starting_with_a_number_is_its_own_item_regardless_of_neighbours() {
+    // Every one judged only on itself - no relation between the two numbers,
+    // no run to confirm, each still gets its bare "N " marker stripped.
     let shape = |t: &str| -> Vec<String> {
       split_text_for_tts(t, false).into_iter().map(|p| p.tts).collect()
     };
-    // "1 " confirmed by "2 " right after it: both are list items, marker
-    // stripped from speech.
     assert_eq!(
       shape("1 First phrase\n2 Second phrase"),
       ["First phrase", "Second phrase"]
     );
-    // A lone "3 " with nothing confirming it is just the start of a
-    // sentence: spoken as written, marker and all.
     assert_eq!(
       shape("3 apples were bought.\nThey were eaten."),
-      ["3 apples were bought.", "They were eaten."]
+      ["apples were bought.", "They were eaten."]
     );
-    // "5 " followed by "7 " does not continue the sequence, so neither
-    // counts as a list item.
     assert_eq!(
       shape("5 widgets shipped.\n7 more were ordered."),
-      ["5 widgets shipped.", "7 more were ordered."]
+      ["widgets shipped.", "more were ordered."]
+    );
+    // A year opening a list entry, the case that motivated this: judged on
+    // its own line, not on whether another entry happens to share the year.
+    assert_eq!(
+      shape("1926 something happened.\n1926 something else happened."),
+      ["something happened.", "something else happened."]
     );
   }
 
@@ -560,51 +562,12 @@ pub struct SpokenPhrase {
 /// square) instead of leaving it to indentation alone.
 const BULLET_CHARS: [char; 6] = ['-', '*', '•', '◦', '‣', '▪'];
 
-/// The leading run of digits in `line`, parsed as a number, when nothing but
-/// a space follows them - the "bare number" list style ("1 First phrase"),
-/// as opposed to "1.", "1)" or "1-" which already carry their own marker.
-fn bare_number(line: &str) -> Option<u64> {
-  let digits = line.len() - line.trim_start_matches(|c: char| c.is_ascii_digit()).len();
-  if digits == 0 || !line[digits..].starts_with(' ') {
-    return None;
-  }
-  line[..digits].parse().ok()
-}
-
-/// Which of `raw_lines` are a trustworthy bare "N " list item: only lines
-/// inside a run of two or more consecutive lines counting up by one from
-/// each other. A single bare "N " is too easily an ordinary sentence ("3
-/// apples were bought") to treat as a list marker on its own; seeing "1 "
-/// immediately followed by "2 " is what tells them apart.
-fn bare_number_list_lines(raw_lines: &[&str]) -> Vec<bool> {
-  let mut confirmed = vec![false; raw_lines.len()];
-  let mut i = 0;
-  while i < raw_lines.len() {
-    let Some(mut n) = bare_number(raw_lines[i].trim()) else {
-      i += 1;
-      continue;
-    };
-    let mut j = i + 1;
-    while let Some(next) = raw_lines.get(j).and_then(|l| bare_number(l.trim())) {
-      if next != n + 1 {
-        break;
-      }
-      n = next;
-      j += 1;
-    }
-    if j > i + 1 {
-      confirmed[i..j].fill(true);
-    }
-    i = j.max(i + 1);
-  }
-  confirmed
-}
-
-/// A bullet, or a numbered entry - "1.", "1)", "1-" or a confirmed bare
-/// "1 " (see `bare_number_list_lines`) - each followed by a space: always
-/// its own block, whatever it ends with, so a list still highlights and is
-/// spoken item by item.
-fn is_list_line(line: &str, bare_number_confirmed: bool) -> bool {
+/// A bullet, or a numbered entry - "1.", "1)", "1-" or a bare "1 " - each
+/// followed by a space: always its own block, whatever it ends with, so a
+/// list still highlights and is spoken item by item. A line starting with a
+/// number is judged entirely on its own; nothing here looks at neighbouring
+/// lines to decide.
+fn is_list_line(line: &str) -> bool {
   if let Some(rest) = line.strip_prefix(BULLET_CHARS.as_slice()) {
     return rest.starts_with(' ');
   }
@@ -614,7 +577,7 @@ fn is_list_line(line: &str, bare_number_confirmed: bool) -> bool {
   }
   let rest = &line[digits..];
   if rest.starts_with(' ') {
-    return bare_number_confirmed;
+    return true;
   }
   let mut chars = rest.chars();
   matches!(chars.next(), Some('.') | Some(')') | Some('-')) && chars.as_str().starts_with(' ')
@@ -686,7 +649,6 @@ pub fn split_text_for_tts(content: &str, skip_code: bool) -> Vec<SpokenPhrase> {
   let mut in_code = false;
 
   let raw_lines: Vec<&str> = content.lines().collect();
-  let bare_number_ok = bare_number_list_lines(&raw_lines);
   let mut block_display: Vec<&str> = Vec::new();
   let mut block_spoken = String::new();
 
@@ -700,7 +662,7 @@ pub fn split_text_for_tts(content: &str, skip_code: bool) -> Vec<SpokenPhrase> {
     if line.is_empty() {
       continue;
     }
-    let is_list = is_list_line(line, bare_number_ok[i]);
+    let is_list = is_list_line(line);
     let is_standalone = is_list || is_all_caps_line(line) || is_indented;
 
     // A list item or a heading is always its own block: flush whatever was
