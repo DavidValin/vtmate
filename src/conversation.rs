@@ -791,7 +791,8 @@ fn maybe_setup_and_save(
       set_wav_tx(wav_tx);
     }
     if need_html {
-      crate::html_export::init(&conv_dir.join(&stem))?;
+      let start_idx = conversation_history.lock().unwrap().len();
+      crate::html_export::init(&conv_dir.join(&stem), start_idx)?;
     }
     *state.start_date.lock().unwrap() = date_str;
   }

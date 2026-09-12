@@ -42,10 +42,16 @@ struct Export {
   /// Last metadata rendered, so the page can be rewritten on exit without the
   /// conversation thread having to hand it over again.
   meta: Option<SaveMetadata>,
-  /// Wav file name per conversation history index; `None` for a turn that has
-  /// no audio (a typed prompt, or a reply that was only code).
+  /// Wav file name per turn *since this export started* (index 0 is this
+  /// export's first turn, not necessarily the conversation's); `None` for a
+  /// turn that has no audio (a typed prompt, or a reply that was only code).
   audio: Vec<Option<String>>,
   open: Option<OpenTurn>,
+  /// The conversation history's length when this export started: `-s-html`
+  /// can activate mid-conversation (late, or re-armed after a history
+  /// reset), and every turn already in history by then is neither this
+  /// export's to show nor to number - turn 1 is always the next one.
+  start_idx: usize,
 }
 
 static EXPORT: OnceLock<Mutex<Option<Export>>> = OnceLock::new();
@@ -63,7 +69,10 @@ pub fn is_active() -> bool {
 }
 
 /// Create (or re-create) the export folder. Any previous export is closed.
-pub fn init(dir: &Path) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+/// `start_idx` is the conversation history's current length: turns already
+/// in history when this export starts are excluded from it entirely, so its
+/// first turn is always numbered 1.
+pub fn init(dir: &Path, start_idx: usize) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   std::fs::create_dir_all(dir)?;
   let mut slot = export();
   *slot = Some(Export {
@@ -71,6 +80,7 @@ pub fn init(dir: &Path) -> Result<(), Box<dyn std::error::Error + Send + Sync>> 
     meta: None,
     audio: Vec::new(),
     open: None,
+    start_idx,
   });
   Ok(())
 }
@@ -113,6 +123,7 @@ pub fn open_turn(idx: usize, label: &str) {
   let mut slot = export();
   let Some(exp) = slot.as_mut() else { return };
   exp.close_open();
+  let idx = idx.saturating_sub(exp.start_idx);
   let file = format!("turn-{:03}-{}.wav", idx + 1, slugify(label));
   let tx = crate::audio::init_wav_writer(&exp.dir.join(&file), 0);
   exp.set_audio(idx, Some(file));
@@ -156,6 +167,9 @@ pub fn record_audio_turn(idx: usize, label: &str, chunk: &AudioChunk) {
 pub fn render(history: &[ChatMessage], meta: &SaveMetadata) {
   let mut slot = export();
   let Some(exp) = slot.as_mut() else { return };
+  // Only the turns since this export started are its to show, matching the
+  // relative numbering `open_turn` gives their audio files.
+  let history = &history[exp.start_idx.min(history.len())..];
   // History shrinks on undo: drop the audio of turns that no longer exist.
   exp.audio.truncate(history.len());
   exp.meta = Some(meta.clone());
