@@ -696,6 +696,16 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     .max_turns
     .store(args.max_turns.unwrap_or(0), Ordering::SeqCst);
   state::GLOBAL_STATE.set(state.clone()).unwrap();
+  // Set here rather than left for conversation_thread's own seeding: that
+  // only runs after crate::stt::init loads the Whisper model, which can take
+  // a few seconds, and the bottom bar (started right below) would otherwise
+  // render without the SAVING tag until it does.
+  if args.save {
+    state.save_enabled.store(true, Ordering::Relaxed);
+  }
+  if args.save_html {
+    state.save_html_enabled.store(true, Ordering::Relaxed);
+  }
 
   // If initial prompt provided, process it before starting conversation thread
   // (initial prompt handling moved after TTS thread starts to avoid deadlock)

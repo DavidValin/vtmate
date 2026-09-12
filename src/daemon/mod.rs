@@ -433,6 +433,16 @@ pub fn run_foreground(args: &Args) -> ! {
   // the daemon only opens the mic while a combo is held, whatever the file says
   *state.ptt_override.lock().unwrap() = args.ptt;
   GLOBAL_STATE.set(state.clone()).ok();
+  // Set here rather than left for conversation_thread's own seeding: that
+  // only runs after crate::stt::init loads the Whisper model, which can take
+  // a few seconds, and an attaching client's bottom bar would otherwise miss
+  // the SAVING tag until it does.
+  if args.save {
+    state.save_enabled.store(true, Ordering::Relaxed);
+  }
+  if args.save_html {
+    state.save_html_enabled.store(true, Ordering::Relaxed);
+  }
 
   // ---------------------------------------------------
   // assets, channels, threads
