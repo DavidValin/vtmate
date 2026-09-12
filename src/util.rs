@@ -371,6 +371,28 @@ mod tts_text_tests {
   }
 
   #[test]
+  fn an_indented_line_is_its_own_item_even_with_no_bullet() {
+    // What a browser hands back for a rendered `<li>` list copied to plain
+    // text: no bullet character at all, just a few spaces of indentation
+    // per entry - real text copied from a Wikipedia portal page.
+    let text = "Actualidad\n\n    Guerras y conflictos: Estados Unidos-Ir\u{e1}n\n    13-26 de septiembre: WXV Global Series Challenger\n    12-26 de septiembre: Juegos Suramericanos";
+    let shape = |t: &str| -> Vec<(usize, String)> {
+      split_text_for_tts(t, false)
+        .into_iter()
+        .map(|p| (p.line, p.tts))
+        .collect()
+    };
+    // strip_special_chars drops '-' along with the other punctuation it
+    // filters out; unrelated to indentation, just how any hyphen is spoken.
+    assert_eq!(shape(text), [
+      (0, "Actualidad".to_string()),
+      (1, "Guerras y conflictos: Estados UnidosIr\u{e1}n".to_string()),
+      (2, "1326 de septiembre: WXV Global Series Challenger".to_string()),
+      (3, "1226 de septiembre: Juegos Suramericanos".to_string()),
+    ]);
+  }
+
+  #[test]
   fn a_heading_ends_its_own_block_even_without_a_blank_line() {
     let shape = |t: &str| -> Vec<(usize, String, String)> {
       split_text_for_tts(t, false)
@@ -577,13 +599,18 @@ pub fn split_text_for_tts(content: &str, skip_code: bool) -> Vec<SpokenPhrase> {
   let mut block_display: Vec<&str> = Vec::new();
   let mut block_spoken = String::new();
 
-  for (i, line) in raw_lines.iter().enumerate() {
-    let line = line.trim();
+  for (i, &raw) in raw_lines.iter().enumerate() {
+    // A browser copying a rendered `<li>` to plain text commonly indents it
+    // a few spaces instead of (or as well as) giving it a bullet character,
+    // so indentation is its own "this is a list entry" signal, same as a
+    // leading `-`/`*`/number.
+    let is_indented = raw.starts_with(' ') || raw.starts_with('\t');
+    let line = raw.trim();
     if line.is_empty() {
       continue;
     }
     let is_list = is_list_line(line);
-    let is_standalone = is_list || is_all_caps_line(line);
+    let is_standalone = is_list || is_all_caps_line(line) || is_indented;
 
     // A list item or a heading is always its own block: flush whatever was
     // accumulating before it first, so it splits off instead of trailing on
