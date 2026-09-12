@@ -182,10 +182,7 @@ pub fn spawn_detached(args: &Args) -> ! {
         "\r\x1b[K✓ vtmate daemon started (pid {}), agent '{}'",
         status.pid, status.agent
       );
-      for (setting, combo) in daemon_settings.combos() {
-        println!("   {:<36} {}", setting, combo);
-      }
-      println!("   Run `vtmate` to attach, `vtmate --daemon-stop` to stop.");
+      print_shortcut_help(&daemon_settings);
       plain_exit(0);
     }
     if Instant::now() >= deadline {
@@ -197,6 +194,57 @@ pub fn spawn_detached(args: &Args) -> ! {
     }
     thread::sleep(Duration::from_millis(100));
   }
+}
+
+/// One `How: <colored combo in the middle>` line, wrapping the rest of the
+/// sentence in yellow and the shortcut itself in green.
+fn how_line(before: &str, combo: &str, after: &str) {
+  println!("    How: \x1b[33m{}\x1b[32m{}\x1b[33m{}\x1b[0m", before, combo, after);
+}
+
+/// What each [daemon] shortcut does and how to use it, printed once right
+/// after the daemon starts. `--daemon-status` shows the bare combos instead
+/// (see `print_status_view`) - this is the one-time onboarding version.
+fn print_shortcut_help(d: &config::DaemonSettings) {
+  println!();
+  println!("  llm_background_ptt_combo:");
+  how_line(
+    "Push ",
+    &d.llm_background_ptt_combo,
+    " while you talk and then release (select a text to add context)",
+  );
+  println!("    What: Ask the selected agent via voice and listen the reply");
+  println!(
+    "    e.g. ai voice conversation, find information, ask about a specific text selection, ..."
+  );
+  println!();
+
+  println!("  llm_background_reset:");
+  how_line("Press ", &d.llm_background_reset, " once");
+  println!("    What: stops ongoing playback");
+  println!();
+  how_line("Press ", &d.llm_background_reset, " twice");
+  println!("    What: resets the llm conversation");
+  println!();
+
+  println!("  tts_background_combo:");
+  how_line("Select a text and press ", &d.tts_background_combo, " once");
+  println!("    What: Reads with voice the selected text");
+  println!("    e.g. read emails, books, articles, websites, ...");
+  println!();
+
+  println!("  stt_and_paste_background_ptt_combo:");
+  how_line(
+    "Push ",
+    &d.stt_and_paste_background_ptt_combo,
+    " while you talk and then release",
+  );
+  println!("    What: turns your voice speech into text and pastes it in the screen");
+  println!("    e.g. write emails with voice, write notes quickly with voice, ...");
+  println!();
+
+  println!("vtmate is running in background, use shortcuts above to use it or");
+  println!("run vtmate to attach, vtmate --daemon-stop to stop.");
 }
 
 /// `vtmate --daemon-stop`
