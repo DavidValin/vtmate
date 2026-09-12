@@ -414,9 +414,12 @@ pub fn conversation_thread(
     //  –––––––––––––––––––––––––––––––––––––
     if !state.debate_enabled.load(Ordering::SeqCst) {
       if let Some(user_msg) = pending_user_msg.take() {
+        // Read fresh from state every turn, so a Ctrl+S save applies to the
+        // very next reply in both bare and daemon mode.
+        let live_settings = state.live_agent_settings();
         handle_reply(
           state,
-          &settings,
+          &live_settings,
           &conversation_history,
           &tx_ui,
           &tts_tx,
@@ -433,7 +436,8 @@ pub fn conversation_thread(
         if let Ok(command) = cmd {
           match command {
             Command::Undo => {
-              handle_undo(state, &tx_ui, &conversation_history, &interrupt_counter, &stop_play_tx, &settings);
+              let live_settings = state.live_agent_settings();
+              handle_undo(state, &tx_ui, &conversation_history, &interrupt_counter, &stop_play_tx, &live_settings);
             }
           }
         }
