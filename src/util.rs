@@ -321,6 +321,42 @@ mod tts_text_tests {
   }
 
   #[test]
+  fn a_hard_wrapped_paragraph_is_one_block_split_into_its_sentences() {
+    // Four source lines, none ending its own paragraph until the last:
+    // wrapped mid-sentence at every line break except the final one.
+    let text = "Logic is founded on certain thought, which\n\
+                were first formulated by a philosopher, an ancient\n\
+                thinker. We shall describe them separately here, and\n\
+                later consider their collective significance.";
+    let out = split_text_for_tts(text, false);
+    // One block: every phrase points at the same (line, text).
+    assert!(out.iter().all(|p| p.line == 0 && p.text == text));
+    // Split into its two sentences for speech, each keeping its full stop.
+    assert_eq!(
+      out.iter().map(|p| p.tts.as_str()).collect::<Vec<_>>(),
+      [
+        "Logic is founded on certain thought, which were first formulated by a philosopher, an ancient thinker.",
+        "We shall describe them separately here, and later consider their collective significance."
+      ]
+    );
+
+    // A blank line still ends the paragraph even without a full stop, and a
+    // list item is always its own block.
+    let with_break_and_list = "No stop here\nand still none\n\n- item one\n- item two";
+    let shape = |t: &str| -> Vec<(usize, String, String)> {
+      split_text_for_tts(t, false)
+        .into_iter()
+        .map(|p| (p.line, p.text, p.tts))
+        .collect()
+    };
+    assert_eq!(shape(with_break_and_list), [
+      (0, "No stop here\nand still none".to_string(), "No stop here and still none".to_string()),
+      (1, "- item one".to_string(), "item one".to_string()),
+      (2, "- item two".to_string(), "item two".to_string()),
+    ]);
+  }
+
+  #[test]
   fn special_chars_stripped_but_punctuation_kept() {
     let mut in_code = false;
     assert_eq!(tts_text("Hola, ¿qué tal? *bien* (ok)!", &mut in_code), "Hola, ¿qué tal? bien ok!");
@@ -351,84 +387,126 @@ pub fn _strip_ansi(s: &str) -> String {
 /// so a question keeps its rise and a sentence its fall.
 const TTS_DELIMITERS: [char; 4] = ['.', '!', '?', ';'];
 
-/// Split free text for reading aloud. Returns `(display_line, tts_text)` pairs.
+/// Split free text for reading aloud. Returns `(display_block, tts_text)`
+/// pairs.
 ///
-/// The two are split differently on purpose. Speaking breaks at every line and
-/// at every `. ! ? ;` inside one, because each phrase is synthesized on its own
-/// and that is what gives the reading its pauses. Displaying breaks at lines
-/// only: a line split into several spoken phrases is shown once, as it was
-/// written, so the text on screen still looks like the text that was selected.
+/// The two are split differently on purpose. Speaking breaks at every
+/// `. ! ? ;`, because each phrase is synthesized on its own and that is what
+/// gives the reading its pauses. Displaying breaks at paragraphs instead: a
+/// hard-wrapped source line only ends its block when it reads as a genuine
+/// paragraph boundary - the line itself ends with '.', a blank line follows,
+/// or it is a list item (a `-`/`*` bullet or a numbered entry, always its own
+/// block so a list still highlights item by item) - so a paragraph wrapped
+/// across several source lines still highlights, and is navigated, as one.
 ///
-/// `tts_text` has special characters stripped and can be empty, for a line with
-/// nothing to say (a rule, a row of dashes, code that is being skipped); such a
-/// line is still returned so it can be shown and stepped over.
+/// `tts_text` has special characters stripped and can be empty, for a block
+/// with nothing to say (a rule, a row of dashes, code that is being skipped);
+/// such a block is still returned so it can be shown and stepped over.
 ///
 /// `skip_code` decides whether fenced ``` code is spoken. An agent's reply
 /// skips it, since hearing brackets and punctuation read out is useless. Text
 /// you asked to have read, with `-r` or the read-aloud shortcut, keeps it: the
 /// code is part of what you asked for.
 pub struct SpokenPhrase {
-  /// Which display line this phrase belongs to. Several phrases share a line
-  /// when it holds more than one sentence.
+  /// Which display block this phrase belongs to. Several phrases share a
+  /// block when it holds more than one sentence.
   pub line: usize,
-  /// The line as written: what gets displayed and navigated through.
+  /// The block as written (its source lines joined by '\n'): what gets
+  /// displayed and navigated through.
   pub text: String,
-  /// What to speak; empty for a line with nothing to say.
+  /// What to speak; empty for a block with nothing to say.
   pub tts: String,
+}
+
+/// A `-`/`*` bullet, or a numbered entry like "1." or "1)", each followed by
+/// a space: always its own block, whatever it ends with, so a list still
+/// highlights and is spoken item by item.
+fn is_list_line(line: &str) -> bool {
+  if let Some(rest) = line.strip_prefix('-').or_else(|| line.strip_prefix('*')) {
+    return rest.starts_with(' ');
+  }
+  let digits = line.len() - line.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+  if digits == 0 {
+    return false;
+  }
+  let mut rest = line[digits..].chars();
+  matches!(rest.next(), Some('.') | Some(')')) && rest.as_str().starts_with(' ')
 }
 
 pub fn split_text_for_tts(content: &str, skip_code: bool) -> Vec<SpokenPhrase> {
   let mut phrases: Vec<SpokenPhrase> = Vec::new();
-  let mut line_no = 0usize;
+  let mut block_no = 0usize;
   // Fence state carries across lines, in order.
   let mut in_code = false;
-  for line in content.lines() {
+
+  let raw_lines: Vec<&str> = content.lines().collect();
+  let mut block_display: Vec<&str> = Vec::new();
+  let mut block_spoken = String::new();
+
+  for (i, line) in raw_lines.iter().enumerate() {
     let line = line.trim();
     if line.is_empty() {
       continue;
     }
-    // Cleaned a whole line at a time, so the fence state stays in step however
-    // the line is broken up afterwards.
-    let spoken = if skip_code {
+    // Cleaned a whole source line at a time, so the fence state stays in step
+    // however the line is broken up afterwards.
+    let cleaned = if skip_code {
       tts_text(line, &mut in_code)
     } else {
       // keep the code, only drop the fence markers themselves
       strip_special_chars(&line.replace("```", " "))
     };
+
+    block_display.push(line);
+    if !block_spoken.is_empty() && !cleaned.is_empty() {
+      block_spoken.push(' ');
+    }
+    block_spoken.push_str(&cleaned);
+
+    let is_last = i + 1 >= raw_lines.len();
+    let next_is_blank = !is_last && raw_lines[i + 1].trim().is_empty();
+    let block_ends = is_list_line(line) || line.ends_with('.') || next_is_blank || is_last;
+    if !block_ends {
+      continue;
+    }
+
+    let display = block_display.join("\n");
     let before = phrases.len();
     let mut current = String::new();
-    for ch in spoken.chars() {
+    for ch in block_spoken.chars() {
       current.push(ch);
       if TTS_DELIMITERS.contains(&ch) {
-        push_spoken(&mut phrases, line_no, line, &mut current);
+        push_spoken(&mut phrases, block_no, &display, &mut current);
       }
     }
-    push_spoken(&mut phrases, line_no, line, &mut current);
+    push_spoken(&mut phrases, block_no, &display, &mut current);
     if phrases.len() == before {
       phrases.push(SpokenPhrase {
-        line: line_no,
-        text: line.to_string(),
+        line: block_no,
+        text: display,
         tts: String::new(),
       });
     }
-    line_no += 1;
+    block_no += 1;
+    block_display.clear();
+    block_spoken.clear();
   }
   phrases
 }
 
-/// Move what has been collected into `phrases` as one spoken phrase of `line`,
-/// unless there is nothing in it to say.
+/// Move what has been collected into `phrases` as one spoken phrase of
+/// `block_no`, unless there is nothing in it to say.
 fn push_spoken(
   phrases: &mut Vec<SpokenPhrase>,
-  line_no: usize,
-  line: &str,
+  block_no: usize,
+  display: &str,
   current: &mut String,
 ) {
   let spoken = current.trim();
   if spoken.chars().any(char::is_alphanumeric) {
     phrases.push(SpokenPhrase {
-      line: line_no,
-      text: line.to_string(),
+      line: block_no,
+      text: display.to_string(),
       tts: spoken.to_string(),
     });
   }
