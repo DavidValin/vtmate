@@ -228,6 +228,28 @@ impl AppState {
     self.recording_paused.store(agent.ptt, Ordering::Relaxed);
   }
 
+  /// The inverse of `apply_agent`: an `AgentSettings` built from the current
+  /// live state fields, always up to date with the last Ctrl+S save.
+  pub fn live_agent_settings(&self) -> crate::config::AgentSettings {
+    crate::config::AgentSettings {
+      name: self.agent_name.lock().unwrap().clone(),
+      language: self.language.lock().unwrap().clone(),
+      tts: self.tts.lock().unwrap().clone(),
+      voice: self.voice.lock().unwrap().clone(),
+      provider: self.provider.lock().unwrap().clone(),
+      baseurl: self.baseurl.lock().unwrap().clone(),
+      model: self.model.lock().unwrap().clone(),
+      api_key: self.api_key.lock().unwrap().clone(),
+      system_prompt: self.system_prompt.lock().unwrap().clone(),
+      ptt: self.ptt.load(Ordering::Relaxed),
+      whisper_model_path: self.whisper_model_path.lock().unwrap().clone(),
+      sound_threshold_peak: self.vad_threshold(),
+      end_silence_ms: self.end_silence_ms.load(Ordering::Relaxed),
+      voice_speed: self.speed.load(Ordering::Relaxed) as f32 / 10.0,
+      system_prompt_name: None,
+    }
+  }
+
   /// Voice detection peak the recorder compares buffers against.
   pub fn vad_threshold(&self) -> f32 {
     self.sound_threshold_peak.load(Ordering::Relaxed) as f32 / 1000.0
@@ -282,5 +304,50 @@ pub fn decrease_voice_speed() {
   if cur > 5 {
     cur -= 1;
     state.speed.store(cur, Ordering::Relaxed);
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::config::AgentSettings;
+
+  fn sample_agent() -> AgentSettings {
+    AgentSettings {
+      name: "agent-a".to_string(),
+      language: "en".to_string(),
+      tts: "kokoro".to_string(),
+      voice: "af_heart".to_string(),
+      provider: "openai".to_string(),
+      baseurl: "https://api.openai.com".to_string(),
+      model: "gpt-4o".to_string(),
+      api_key: "sk-test".to_string(),
+      system_prompt: "be terse".to_string(),
+      ptt: true,
+      whisper_model_path: "base.en.bin".to_string(),
+      sound_threshold_peak: 0.125,
+      end_silence_ms: 900,
+      voice_speed: 1.5,
+      system_prompt_name: None,
+    }
+  }
+
+  #[test]
+  fn live_agent_settings_round_trips_apply_agent() {
+    let state = AppState::new();
+    let agent = sample_agent();
+    state.apply_agent(&agent);
+    assert_eq!(state.live_agent_settings(), agent);
+  }
+
+  #[test]
+  fn live_agent_settings_reflects_a_later_change() {
+    let state = AppState::new();
+    state.apply_agent(&sample_agent());
+    let mut edited = sample_agent();
+    edited.system_prompt = "be verbose".to_string();
+    edited.model = "gpt-4o-mini".to_string();
+    state.apply_agent(&edited);
+    assert_eq!(state.live_agent_settings(), edited);
   }
 }

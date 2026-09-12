@@ -332,6 +332,16 @@ fn save(state: &AppState) -> Vec<String> {
     .find(|a| a.name == selected.name)
     .cloned()
     .unwrap_or(selected);
+  // `debate_agents` is a separate snapshot of the two participants, taken
+  // when the debate started; refresh whichever of them this save touched.
+  {
+    let mut debate_agents = state.debate_agents.lock().unwrap();
+    for da in debate_agents.iter_mut() {
+      if let Some(fresh) = reloaded.iter().find(|a| a.name == da.name) {
+        *da = fresh.clone();
+      }
+    }
+  }
   *state.agents.lock().unwrap() = reloaded;
   state.apply_agent(&active);
   // Saving can change the active agent's tts, not just pick another agent.
