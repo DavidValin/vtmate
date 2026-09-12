@@ -39,6 +39,9 @@ pub enum Screen {
   ConfirmDelete,
   /// "Throw away the changes?" for the whole popup.
   ConfirmDiscard,
+  /// ENTER on an agent row while the list is dirty: that also saves every
+  /// pending edit, not only the row picked, so it asks first.
+  ConfirmSaveSelect,
 }
 
 /// One editable value of an agent, in the order the form shows them. The TTS
@@ -232,6 +235,7 @@ pub fn handle_key(state: &AppState, k: &KeyEvent) -> Vec<String> {
       Screen::Form => form_key(&mut ui, k),
       Screen::ConfirmDelete => confirm_delete_key(&mut ui, k),
       Screen::ConfirmDiscard => confirm_discard_key(&mut ui, k),
+      Screen::ConfirmSaveSelect => confirm_save_select_key(&mut ui, k, &mut commit),
     }
     if !ui.open {
       messages.push("settings_hide|".to_string());
@@ -369,16 +373,21 @@ fn check_agents(agents: &[AgentSettings]) -> Result<(), String> {
   Ok(())
 }
 
-/// Whether `agent` (from the working list) differs from what is on disk:
-/// `None` when it matches an entry of `saved` with the same name exactly,
-/// `Some("edited")` when that entry exists but differs, `Some("new")` when
-/// no entry of `saved` has that name (a fresh agent, or one renamed from
-/// something `saved` still holds under its old name).
-fn agent_status(agent: &AgentSettings, saved: &[AgentSettings]) -> Option<&'static str> {
-  match saved.iter().find(|s| s.name == agent.name) {
-    Some(s) if s == agent => None,
-    Some(_) => Some("edited"),
-    None => Some("new"),
+/// Whether `agent` (at `index` in the working list) differs from what is on
+/// disk: `None` when it matches an entry of `saved` with the same name
+/// exactly, `Some("updated")` when that entry exists but differs, or when no
+/// entry of `saved` has this name but one existed at this same position (a
+/// rename - `close_form` always edits an existing row in place, so its
+/// position in `saved` is still this one), and `Some("new")` only when
+/// `index` itself is past the end of `saved` (a row `close_form` appended).
+fn agent_status(index: usize, agent: &AgentSettings, saved: &[AgentSettings]) -> Option<&'static str> {
+  if let Some(s) = saved.iter().find(|s| s.name == agent.name) {
+    return if s == agent { None } else { Some("updated") };
+  }
+  if index < saved.len() {
+    Some("updated")
+  } else {
+    Some("new")
   }
 }
 
@@ -431,6 +440,11 @@ fn list_key(ui: &mut SettingsUi, k: &KeyEvent, commit: &mut bool) {
         } else {
           ui.open = false;
         }
+      } else if ui.cursor < ui.agents.len() && ui.dirty() {
+        // Picking a row also saves every pending edit across the whole
+        // list, not only this one - worth asking first rather than
+        // committing it all on a single ENTER.
+        ui.screen = Screen::ConfirmSaveSelect;
       } else {
         // On the Save button this keeps whichever agent was already active;
         // on an agent row it makes that one the active agent instead - see
@@ -532,6 +546,17 @@ fn confirm_discard_key(ui: &mut SettingsUi, k: &KeyEvent) {
   }
 }
 
+fn confirm_save_select_key(ui: &mut SettingsUi, k: &KeyEvent, commit: &mut bool) {
+  match k.code {
+    KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => ui.screen = Screen::List,
+    // `list_key`'s ENTER already left `ui.cursor` on the row that was
+    // picked, so committing from here selects exactly what accepting was
+    // supposed to mean.
+    KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => *commit = true,
+    _ => {}
+  }
+}
+
 /// ESCAPE out of the form, back to the list. There is no separate "commit"
 /// step: each field already writes straight into `form.draft` as it is
 /// typed, so leaving just puts that draft into the working list (an update
@@ -550,14 +575,10 @@ fn close_form(ui: &mut SettingsUi) {
   let dirty = ui.form.dirty();
   match ui.form.editing {
     Some(index) if index < ui.agents.len() => {
-      if dirty {
-        ui.set_info(format!("'{}' edited - not saved yet", draft.name));
-      }
       ui.agents[index] = draft;
       ui.cursor = index;
     }
     _ if dirty => {
-      ui.set_info(format!("'{}' added - not saved yet", draft.name));
       ui.cursor = ui.agents.len();
       ui.agents.push(draft);
     }
@@ -1355,7 +1376,9 @@ pub fn draw<W: Write>(out: &mut W, ui: &SettingsUi, buffer: &[String], active_na
   let (title, lines, footer) = match ui.screen {
     Screen::List => list_lines(&ui, inner, rows, active_name),
     Screen::Form => form_lines(&ui, inner, rows),
-    Screen::ConfirmDelete | Screen::ConfirmDiscard => confirm_lines(&ui, inner),
+    Screen::ConfirmDelete | Screen::ConfirmDiscard | Screen::ConfirmSaveSelect => {
+      confirm_lines(&ui, inner)
+    }
   };
 
   // the bottom bar keeps the last row; the footer (buttons, shortcuts) is
@@ -1446,19 +1469,20 @@ fn list_lines(
 
   // Room for the agent rows. `draw` gives the body `rows - 3` lines (the
   // bottom bar and the two borders are its own), and out of those the footer
-  // takes its separator, shortcuts, buttons and any notice, while the list
-  // itself spends one line on the header, one under it, one on the scroll
-  // hint, one on the edited-agents summary and one above the footer.
-  // Reserving the hint and summary lines whether or not they are used keeps
-  // the count from depending on its own outcome.
-  let footer_len = 3 + usize::from(ui.notice.is_some());
-  let room = (rows as usize).saturating_sub(8 + footer_len).max(1);
+  // takes its separator, shortcuts, a blank line, the buttons and any
+  // notice, while the list itself spends one line on the header, one under
+  // it, one on the scroll hint, a blank line, one on the edited-agents
+  // summary and one above the footer. Reserving the hint and summary lines
+  // whether or not they are used keeps the count from depending on its own
+  // outcome.
+  let footer_len = 4 + usize::from(ui.notice.is_some());
+  let room = (rows as usize).saturating_sub(9 + footer_len).max(1);
   let scroll = scroll_for(ui.cursor.min(ui.agents.len()), ui.agents.len(), room);
 
   let mut lines = vec![format!("{}{}{}", DIM, header, OFF), String::new()];
   let mut edited_count = 0;
   for (i, agent) in ui.agents.iter().enumerate() {
-    let status = agent_status(agent, &ui.saved);
+    let status = agent_status(i, agent, &ui.saved);
     if status.is_some() {
       edited_count += 1;
     }
@@ -1488,9 +1512,10 @@ fn list_lines(
     ));
   }
   if edited_count > 0 {
+    lines.push(String::new());
     lines.push(format!(
       "{}{} agent{} edited. Press Save to apply the changes.{}",
-      YELLOW,
+      RED,
       edited_count,
       if edited_count == 1 { "" } else { "s" },
       OFF
@@ -1504,6 +1529,7 @@ fn list_lines(
       "{}n{} new agent   {}e{} edit agent   {}ENTER{} select   {}d{} delete agent   {}↑/↓{} move",
       YELLOW, DIM, YELLOW, DIM, YELLOW, DIM, YELLOW, DIM, FG, DIM
     ),
+    String::new(),
     format!(
       "  {}   {}",
       button("Save", ui.on_save()),
@@ -1564,7 +1590,7 @@ fn agent_row(
     let prompt = agent.system_prompt.replace('\n', " ");
     row.push_str(&format!("{}{}{}", DIM, cut(&prompt, prompt_width), OFF));
     if let Some(tag) = tag {
-      row.push_str(&format!("{}{}{}", YELLOW, tag, OFF));
+      row.push_str(&format!("{}{}{}", RED, tag, OFF));
     }
   }
   if selected {
@@ -2092,6 +2118,18 @@ fn confirm_lines(ui: &SettingsUi, inner: usize) -> (String, Vec<String>, Vec<Str
         "Delete agent".to_string(),
         format!("Delete the agent '{}'?", name),
         "It is removed from the list; the file is only written when you save.".to_string(),
+      )
+    }
+    Screen::ConfirmSaveSelect => {
+      let name = ui
+        .agents
+        .get(ui.cursor)
+        .map(|a| a.name.clone())
+        .unwrap_or_default();
+      (
+        "Unsaved changes".to_string(),
+        format!("Save all changes and switch to '{}'?", name),
+        "Every pending edit in the list is saved, not only this row.".to_string(),
       )
     }
     _ => (

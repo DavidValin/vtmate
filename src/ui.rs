@@ -1207,7 +1207,7 @@ fn render_bottom_bar<W: Write>(
       let agent1_name = debate_agents[0].name.chars().take(8).collect::<String>();
       let agent2_name = debate_agents[1].name.chars().take(8).collect::<String>();
       format!(
-        "\x1b[44m\x1b[37m DEBATE \x1b[0m {} -- {}",
+        "\x1b[46m\x1b[30m DEBATE \x1b[0m {} -- {}",
         agent1_name, agent2_name
       )
     } else {
@@ -1227,6 +1227,19 @@ fn render_bottom_bar<W: Write>(
     format!("\x1b[43m\x1b[30m{}\x1b[0m", centred(">paused", TAG_WIDTH))
   } else {
     format!("\x1b[41m\x1b[37m{}\x1b[0m", centred("recording", TAG_WIDTH))
+  };
+
+  // `-s`/`--save-html`: purple, so it reads as a separate "exporting to
+  // disk" condition rather than a third state alongside recording/paused.
+  // Folded into `recording_paused_str` (not a field of its own passed to
+  // `bar_layout`) so the one width already counted for the meter's room and
+  // the right-hand group's position picks it up for free.
+  let saving = state.save_enabled.load(Ordering::Relaxed)
+    || state.save_html_enabled.load(Ordering::Relaxed);
+  let recording_paused_str = if saving {
+    format!("\x1b[45m\x1b[37m SAVING \x1b[0m {}", recording_paused_str)
+  } else {
+    recording_paused_str
   };
 
   let internal_status = format!(
@@ -1531,8 +1544,8 @@ fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
 
   // Agent 1 dropdown
   let dropdown1_width = modal_width as usize - 4 - agent1_label.len();
-  let agent1_display = if agents[agent1_idx].name.len() > dropdown1_width - 4 {
-    format!("{}...", &agents[agent1_idx].name[..dropdown1_width - 7])
+  let agent1_display = if agents[agent1_idx].name.len() > dropdown1_width - 5 {
+    format!("{}...", &agents[agent1_idx].name[..dropdown1_width - 8])
   } else {
     agents[agent1_idx].name.clone()
   };
@@ -1547,7 +1560,7 @@ fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
       } else {
         "\x1b[97;48;5;237m"
       },
-      format!(" {} ▼", agent1_display),
+      format!("◀ {} ▶", agent1_display),
       width = dropdown1_width
     ))
   )
@@ -1568,8 +1581,8 @@ fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
 
   // Agent 2 dropdown
   let dropdown2_width = modal_width as usize - 4 - agent2_label.len();
-  let agent2_display = if agents[agent2_idx].name.len() > dropdown2_width - 4 {
-    format!("{}...", &agents[agent2_idx].name[..dropdown2_width - 7])
+  let agent2_display = if agents[agent2_idx].name.len() > dropdown2_width - 5 {
+    format!("{}...", &agents[agent2_idx].name[..dropdown2_width - 8])
   } else {
     agents[agent2_idx].name.clone()
   };
@@ -1584,7 +1597,7 @@ fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
       } else {
         "\x1b[97;48;5;237m"
       },
-      format!(" {} ▼", agent2_display),
+      format!("◀ {} ▶", agent2_display),
       width = dropdown2_width
     ))
   )
@@ -1618,7 +1631,7 @@ fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
     out,
     MoveTo(modal_x + 2, instructions_y + 1),
     Print(format!(
-      "\x1b[48;5;234m\x1b[97m Tab/←/→ \x1b[90m Switch focus\x1b[0m"
+      "\x1b[48;5;234m\x1b[97m Tab/↑/↓ \x1b[90m Switch focus\x1b[0m"
     ))
   )
   .unwrap();
@@ -1627,7 +1640,7 @@ fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
     out,
     MoveTo(modal_x + 2, instructions_y + 2),
     Print(format!(
-      "\x1b[48;5;234m\x1b[97m ↑/↓     \x1b[90m Change selection\x1b[0m"
+      "\x1b[48;5;234m\x1b[97m ←/→     \x1b[90m Change selection\x1b[0m"
     ))
   )
   .unwrap();

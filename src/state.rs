@@ -104,6 +104,12 @@ pub struct AppState {
   pub debate_modal_selected_agent2: Arc<Mutex<usize>>,
   pub debate_modal_focus: Arc<Mutex<u8>>, // 0 = agent1, 1 = agent2, 2 = confirm
   pub save_path: Arc<Mutex<Option<std::path::PathBuf>>>,
+  /// `-s`/`--save`, live for the process: starts true when given on the
+  /// command line, and can also be flipped on later by an attach client
+  /// sending `ClientMsg::StartSave` to an already-running daemon.
+  pub save_enabled: Arc<AtomicBool>,
+  /// `--save-html`, same lifecycle as `save_enabled`.
+  pub save_html_enabled: Arc<AtomicBool>,
   pub start_date: Arc<Mutex<String>>,
   pub undo_pending: Arc<AtomicBool>,
   /// Settings file in use ([general]/[daemon]); `selected_agent` is written
@@ -178,6 +184,8 @@ impl AppState {
       debate_modal_selected_agent2: Arc::new(Mutex::new(1)),
       debate_modal_focus: Arc::new(Mutex::new(0)),
       save_path: Arc::new(Mutex::new(None)),
+      save_enabled: Arc::new(AtomicBool::new(false)),
+      save_html_enabled: Arc::new(AtomicBool::new(false)),
       start_date: Arc::new(Mutex::new(String::new())),
       undo_pending: Arc::new(AtomicBool::new(false)),
       settings_path: Arc::new(Mutex::new(PathBuf::new())),
@@ -287,6 +295,12 @@ impl AppState {
     self.conversation_history.lock().unwrap().clear();
     *self.save_path.lock().unwrap() = None;
     *self.start_date.lock().unwrap() = String::new();
+    // Dropping the sender is what makes the wav writer thread finalize the
+    // file (see `playback::clear_wav_tx`) - without this it would otherwise
+    // sit open, unfinalized, for the rest of the process's life, since
+    // nothing else ever drops it once conversation.rs stops resaving (see
+    // `save_enabled`/`save_html_enabled` in daemon-mode reset paths).
+    crate::playback::clear_wav_tx();
     crate::html_export::reset();
   }
 }
@@ -302,6 +316,7 @@ pub fn increase_voice_speed() {
   if cur < 80 {
     cur += 1;
     state.speed.store(cur, Ordering::Relaxed);
+    persist_current_voice_speed(state);
   }
 }
 
@@ -311,6 +326,30 @@ pub fn decrease_voice_speed() {
   if cur > 5 {
     cur -= 1;
     state.speed.store(cur, Ordering::Relaxed);
+    persist_current_voice_speed(state);
+  }
+}
+
+/// Write the speed a live Up/Down just set back into the active agent's
+/// `voice_speed` in the agents file, the same way switching agents with
+/// Left/Right persists that live change too (see `keyboard::switch_agent`).
+fn persist_current_voice_speed(state: &AppState) {
+  let agents_path = state.agents_path.lock().unwrap().clone();
+  if agents_path.as_os_str().is_empty() {
+    // no agents file in use (e.g. attached client mirror)
+    return;
+  }
+  let agent_name = state.agent_name.lock().unwrap().clone();
+  let voice_speed = get_speed();
+  if let Err(e) = crate::config::persist_voice_speed(&agents_path, &agent_name, voice_speed) {
+    crate::log::log(
+      "warning",
+      &format!(
+        "Could not save voice_speed to {}: {}",
+        agents_path.display(),
+        e
+      ),
+    );
   }
 }
 

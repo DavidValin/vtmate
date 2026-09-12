@@ -3,7 +3,7 @@
 //
 //  Writes a self-contained folder per conversation:
 //
-//    2026-09-09_12-00-00_ab12cd34/
+//    CONVERSATION-2026-09-09_12-00-00_ab12cd34/   (or DEBATE-... for a debate)
 //      index.html          the player: every turn, playable in order
 //      turn-001-user.wav   one file per turn that produced audio
 //      turn-002-nova.wav
@@ -14,8 +14,9 @@
 //  is re-rendered after each turn from the conversation history, so the folder
 //  is valid (and playable) mid-conversation, not only once vtmate exits.
 //
-//  This is independent from `-s`, which writes a single .txt plus one .wav for
-//  the whole session; both options can be used at the same time.
+//  This is independent from `-s`, which writes conversation.txt plus
+//  conversation.wav for the whole session into that same folder; both
+//  options can be used at the same time (see conversation::maybe_setup_and_save).
 // ------------------------------------------------------------------
 
 use crate::audio::AudioChunk;
@@ -42,10 +43,16 @@ struct Export {
   /// Last metadata rendered, so the page can be rewritten on exit without the
   /// conversation thread having to hand it over again.
   meta: Option<SaveMetadata>,
-  /// Wav file name per conversation history index; `None` for a turn that has
-  /// no audio (a typed prompt, or a reply that was only code).
+  /// Wav file name per turn *since this export started* (index 0 is this
+  /// export's first turn, not necessarily the conversation's); `None` for a
+  /// turn that has no audio (a typed prompt, or a reply that was only code).
   audio: Vec<Option<String>>,
   open: Option<OpenTurn>,
+  /// The conversation history's length when this export started: `-s-html`
+  /// can activate mid-conversation (late, or re-armed after a history
+  /// reset), and every turn already in history by then is neither this
+  /// export's to show nor to number - turn 1 is always the next one.
+  start_idx: usize,
 }
 
 static EXPORT: OnceLock<Mutex<Option<Export>>> = OnceLock::new();
@@ -63,7 +70,10 @@ pub fn is_active() -> bool {
 }
 
 /// Create (or re-create) the export folder. Any previous export is closed.
-pub fn init(dir: &Path) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+/// `start_idx` is the conversation history's current length: turns already
+/// in history when this export starts are excluded from it entirely, so its
+/// first turn is always numbered 1.
+pub fn init(dir: &Path, start_idx: usize) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   std::fs::create_dir_all(dir)?;
   let mut slot = export();
   *slot = Some(Export {
@@ -71,6 +81,7 @@ pub fn init(dir: &Path) -> Result<(), Box<dyn std::error::Error + Send + Sync>> 
     meta: None,
     audio: Vec::new(),
     open: None,
+    start_idx,
   });
   Ok(())
 }
@@ -113,6 +124,7 @@ pub fn open_turn(idx: usize, label: &str) {
   let mut slot = export();
   let Some(exp) = slot.as_mut() else { return };
   exp.close_open();
+  let idx = idx.saturating_sub(exp.start_idx);
   let file = format!("turn-{:03}-{}.wav", idx + 1, slugify(label));
   let tx = crate::audio::init_wav_writer(&exp.dir.join(&file), 0);
   exp.set_audio(idx, Some(file));
@@ -156,6 +168,9 @@ pub fn record_audio_turn(idx: usize, label: &str, chunk: &AudioChunk) {
 pub fn render(history: &[ChatMessage], meta: &SaveMetadata) {
   let mut slot = export();
   let Some(exp) = slot.as_mut() else { return };
+  // Only the turns since this export started are its to show, matching the
+  // relative numbering `open_turn` gives their audio files.
+  let history = &history[exp.start_idx.min(history.len())..];
   // History shrinks on undo: drop the audio of turns that no longer exist.
   exp.audio.truncate(history.len());
   exp.meta = Some(meta.clone());
@@ -459,10 +474,14 @@ header{
   position:sticky; top:0; z-index:10;
   background:var(--bg); border-bottom:1px solid var(--line);
   display:flex; align-items:center; gap:14px; flex-wrap:wrap;
-  padding:12px max(16px,calc(50vw - 420px));
+  padding:12px max(16px,calc(50vw - 460px));
 }
-.brand{font-weight:700; letter-spacing:.02em; white-space:nowrap}
-.brand small{font-weight:400; color:var(--dim)}
+.brand{display:flex; align-items:center; gap:10px; font-weight:700; font-size:20px; letter-spacing:.02em; white-space:nowrap}
+.brand img{width:70px; height:70px; display:block}
+.brand .logo-dark{display:none}
+:root[data-theme="dark"] .logo-light{display:none}
+:root[data-theme="dark"] .logo-dark{display:block}
+.brand small{font-weight:400; font-size:16px; color:var(--dim)}
 .who{color:var(--dim); font-size:13px; flex:1; min-width:120px}
 .controls{display:flex; align-items:center; gap:6px}
 button,select{
@@ -476,7 +495,7 @@ button:disabled{opacity:.4; cursor:default}
 #play{min-width:96px; font-weight:700}
 #counter{color:var(--dim); font-size:14px; min-width:62px; text-align:center}
 #theme{min-width:78px; text-align:left}
-main{max-width:840px; margin:0 auto; padding:26px 16px 0}
+main{max-width:920px; margin:0 auto; padding:26px 16px 0}
 .turn{
   --accent:var(--user);
   position:relative; margin:0 0 12px; padding:12px 14px 14px;
@@ -511,7 +530,7 @@ main{max-width:840px; margin:0 auto; padding:26px 16px 0}
 .bar{height:2px; margin-top:11px; background:var(--line); border-radius:2px; overflow:hidden; opacity:0}
 .turn.active .bar{opacity:1}
 .bar i{display:block; height:100%; width:0; background:var(--accent)}
-footer{max-width:840px; margin:34px auto 0; padding:20px 16px 60px; border-top:1px solid var(--line); color:var(--dim); font-size:13px}
+footer{max-width:920px; margin:34px auto 0; padding:20px 16px 60px; border-top:1px solid var(--line); color:var(--dim); font-size:13px}
 .cards{display:flex; flex-wrap:wrap; gap:10px; margin:14px 0}
 .card{flex:1 1 250px; background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:11px 13px}
 .card h3{margin:0 0 8px; font-size:13px; letter-spacing:.08em; text-transform:uppercase; color:var(--fg)}
@@ -526,7 +545,11 @@ kbd{border:1px solid var(--line); border-bottom-width:2px; border-radius:4px; pa
 </head>
 <body>
 <header>
-  <div class="brand">vtmate <small>__KIND__</small></div>
+  <div class="brand">
+    <img class="logo-light" alt="" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNDAgMTQwIj48cGF0aCBkPSJNMjcgNTBMNDUgNzBMMjcgOTAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzBGNkU1NiIgc3Ryb2tlLXdpZHRoPSIxMSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PHJlY3QgeD0iNjEiIHk9IjU1IiB3aWR0aD0iOSIgaGVpZ2h0PSIzMCIgcng9IjQuNSIgZmlsbD0iIzFFMjMyNyIvPjxyZWN0IHg9Ijc3IiB5PSI0MSIgd2lkdGg9IjkiIGhlaWdodD0iNTgiIHJ4PSI0LjUiIGZpbGw9IiMxRTIzMjciLz48cmVjdCB4PSI5MyIgeT0iNDkiIHdpZHRoPSI5IiBoZWlnaHQ9IjQyIiByeD0iNC41IiBmaWxsPSIjMUUyMzI3Ii8+PHJlY3QgeD0iMTA5IiB5PSI1OSIgd2lkdGg9IjkiIGhlaWdodD0iMjIiIHJ4PSI0LjUiIGZpbGw9IiMxRTIzMjciLz48L3N2Zz4=">
+    <img class="logo-dark" alt="" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNDAgMTQwIj48cGF0aCBkPSJNMjcgNTBMNDUgNzBMMjcgOTAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzRGRDZBOSIgc3Ryb2tlLXdpZHRoPSIxMSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PHJlY3QgeD0iNjEiIHk9IjU1IiB3aWR0aD0iOSIgaGVpZ2h0PSIzMCIgcng9IjQuNSIgZmlsbD0iI0VERUJFNCIvPjxyZWN0IHg9Ijc3IiB5PSI0MSIgd2lkdGg9IjkiIGhlaWdodD0iNTgiIHJ4PSI0LjUiIGZpbGw9IiNFREVCRTQiLz48cmVjdCB4PSI5MyIgeT0iNDkiIHdpZHRoPSI5IiBoZWlnaHQ9IjQyIiByeD0iNC41IiBmaWxsPSIjRURFQkU0Ii8+PHJlY3QgeD0iMTA5IiB5PSI1OSIgd2lkdGg9IjkiIGhlaWdodD0iMjIiIHJ4PSI0LjUiIGZpbGw9IiNFREVCRTQiLz48L3N2Zz4=">
+    vtmate <small>__KIND__</small>
+  </div>
   <div class="who">__WHO__ · __DATE__</div>
   <div class="controls">
     <button id="prev" title="previous turn" aria-label="previous turn">⏮</button>

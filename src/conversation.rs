@@ -68,9 +68,10 @@ pub fn conversation_thread(
     state.stt_ready.store(true, Ordering::SeqCst);
   }
 
-  // WAV writer thread: activated when -s option is used
-  // WAV writer will be started lazily when the first save path is created.
-  let mut wav_tx_opt: Option<crossbeam_channel::Sender<crate::audio::AudioChunk>> = None;
+  // WAV writer thread: activated when -s option is used, started lazily when
+  // the first save path is created. Held in crate::playback's shared slot,
+  // not a local variable here, so a reset from any thread can close it
+  // immediately by clearing that slot (see AppState::reset_conversation).
 
   crate::log::log("info", &format!("LLM model: {}", settings.model));
 
@@ -84,13 +85,7 @@ pub fn conversation_thread(
 
     // Setup save path and WAV writer if saving is requested
     if save || save_html {
-      maybe_setup_and_save(
-        &mut wav_tx_opt,
-        &conversation_history,
-        &settings_clone,
-        save,
-        save_html,
-      )?;
+      maybe_setup_and_save(&conversation_history, &settings_clone, save, save_html)?;
     }
 
     let rt = TokioBuilder::new_current_thread()
@@ -167,6 +162,16 @@ pub fn conversation_thread(
   let mut prev_debate_enabled = false;
 
   let state = GLOBAL_STATE.get().expect("AppState not initialized");
+  // Seed the live flags from the CLI switches; a daemon-attach client can
+  // also flip these on later (ClientMsg::StartSave) once the daemon is
+  // already running, which is why the loop below re-reads them each turn
+  // instead of trusting the `save`/`save_html` parameters directly.
+  if save {
+    state.save_enabled.store(true, Ordering::Relaxed);
+  }
+  if save_html {
+    state.save_html_enabled.store(true, Ordering::Relaxed);
+  }
   if state.debate_enabled.load(Ordering::SeqCst) {
     // render the initial user message for the debate
     if let Some(msg) = &pending_user_msg {
@@ -202,17 +207,7 @@ pub fn conversation_thread(
     }
     prev_debate_enabled = current_debate_enabled;
 
-    let needs_setup = (save && state.save_path.lock().unwrap().is_none())
-      || (save_html && !crate::html_export::is_active());
-    if needs_setup {
-      maybe_setup_and_save(
-        &mut wav_tx_opt,
-        &conversation_history,
-        &settings_clone,
-        save,
-        save_html,
-      )?;
-    }
+    ensure_save_setup(&conversation_history, &settings_clone)?;
 
     if !state.debate_enabled.load(Ordering::SeqCst) {
       if let Some(ref prompt) = pending_user_msg {
@@ -250,6 +245,7 @@ pub fn conversation_thread(
           recv(rx_utt) -> utt_result => {
             if let Ok(utt) = utt_result {
               // User provided input - process it
+              ensure_save_setup(&conversation_history, &settings_clone)?;
               let state = GLOBAL_STATE.get().expect("AppState not initialized");
               state.conversation_paused.store(false, Ordering::Relaxed);
               // Resume debate if it was paused
@@ -451,7 +447,8 @@ pub fn conversation_thread(
           crate::log::log("debug", "Utterance discarded (reset)");
           continue;
         }
-        if let Some(ref wav_tx) = wav_tx_opt {
+        ensure_save_setup(&conversation_history, &settings_clone)?;
+        if let Some(wav_tx) = crate::playback::wav_tx() {
           wav_tx.send(utt.audio.clone()).unwrap_or(());
         }
 
@@ -735,6 +732,28 @@ fn build_metadata(state: &AppState, settings: &crate::config::AgentSettings) -> 
   }
 }
 
+/// Turn `-s`/`--save-html` on if newly requested (`state.save_enabled`/
+/// `save_html_enabled`, flipped by a daemon-attach client's `StartSave`)
+/// and not already set up. Called both at the top of the main loop and again
+/// at the very start of each utterance received: the flag can flip between
+/// one call and the next while the loop sits blocked in `select!` waiting on
+/// exactly the utterance that would otherwise go unsaved, so the loop-top
+/// call alone is one full turn too late for whichever utterance woke it.
+fn ensure_save_setup(
+  conversation_history: &ConversationHistory,
+  settings_clone: &crate::config::AgentSettings,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  let state = GLOBAL_STATE.get().expect("AppState not initialized");
+  let save_now = state.save_enabled.load(Ordering::Relaxed);
+  let save_html_now = state.save_html_enabled.load(Ordering::Relaxed);
+  let needs_setup = (save_now && state.save_path.lock().unwrap().is_none())
+    || (save_html_now && !crate::html_export::is_active());
+  if needs_setup {
+    maybe_setup_and_save(conversation_history, settings_clone, save_now, save_html_now)?;
+  }
+  Ok(())
+}
+
 /// Give the last pushed user message its own wav file (`--save-html`).
 fn record_user_audio(conversation_history: &ConversationHistory, audio: &crate::audio::AudioChunk) {
   if !crate::html_export::is_active() {
@@ -745,7 +764,6 @@ fn record_user_audio(conversation_history: &ConversationHistory, audio: &crate::
 }
 
 fn maybe_setup_and_save(
-  wav_tx_opt: &mut Option<crossbeam_channel::Sender<crate::audio::AudioChunk>>,
   conversation_history: &ConversationHistory,
   settings_clone: &crate::config::AgentSettings,
   save: bool,
@@ -772,27 +790,44 @@ fn maybe_setup_and_save(
         started
       }
     };
-    // -s and --save-html name their output after the same session, so
-    // `<stem>.txt`, `<stem>.wav` and `<stem>/` sit together in the folder
-    let stem = state
+    // -s and --save-html name their output after the same session, so both
+    // sit in one `CONVERSATION-<stem>/` (or `DEBATE-<stem>/`) folder: reuse
+    // whichever of the two is already running rather than starting a second
+    // folder for it.
+    let folder_name = state
       .save_path
       .lock()
       .unwrap()
       .as_ref()
-      .and_then(|p| p.file_stem())
+      .and_then(|p| p.parent())
+      .and_then(|p| p.file_name())
       .map(|s| s.to_string_lossy().to_string())
       .or_else(crate::html_export::dir_name)
-      .unwrap_or_else(|| format!("{}_{}", date_str, &Uuid::new_v4().to_string()[..8]));
+      .unwrap_or_else(|| {
+        let kind = if state.debate_enabled.load(Ordering::SeqCst) {
+          "DEBATE"
+        } else {
+          "CONVERSATION"
+        };
+        format!(
+          "{}-{}_{}",
+          kind,
+          date_str,
+          &Uuid::new_v4().to_string()[..8]
+        )
+      });
+    let session_dir = conv_dir.join(&folder_name);
 
     if need_txt {
-      let path = conv_dir.join(format!("{}.txt", stem));
+      fs::create_dir_all(&session_dir)?;
+      let path = session_dir.join("conversation.txt");
       *state.save_path.lock().unwrap() = Some(path.clone());
-      let wav_tx = crate::audio::init_wav_writer(&path.with_extension("wav"), 500);
-      set_wav_tx(wav_tx.clone());
-      *wav_tx_opt = Some(wav_tx);
+      let wav_tx = crate::audio::init_wav_writer(&session_dir.join("conversation.wav"), 500);
+      set_wav_tx(wav_tx);
     }
     if need_html {
-      crate::html_export::init(&conv_dir.join(&stem))?;
+      let start_idx = conversation_history.lock().unwrap().len();
+      crate::html_export::init(&session_dir, start_idx)?;
     }
     *state.start_date.lock().unwrap() = date_str;
   }

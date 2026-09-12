@@ -332,6 +332,11 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
   // Handle modal keyboard navigation
   let modal_visible = state.debate_modal_visible.load(Ordering::SeqCst);
   if modal_visible {
+    // A terminal reporting the Kitty keyboard protocol sends a Release event
+    // too; without this, every key here would also fire again on release.
+    if k.kind != KeyEventKind::Press {
+      return KeyOutcome::Continue;
+    }
     match k.code {
       KeyCode::Esc => {
         // Close modal without starting debate
@@ -368,12 +373,23 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
           let _ = ctx.tx_ui.send("line|\n\x1b[33m» Speak to set the debate topic or change the subject at any time\x1b[0m\n".to_string());
         }
       }
-      KeyCode::Up => {
+      KeyCode::Up | KeyCode::Down | KeyCode::Tab => {
+        // Switch focus between agent1, agent2, and confirm button - the same
+        // convention the agent settings form uses (Tab/↑/↓ move between
+        // fields, ←/→ change the current field's value).
+        let mut focus = state.debate_modal_focus.lock().unwrap();
+        if k.code == KeyCode::Up {
+          *focus = if *focus == 0 { 2 } else { *focus - 1 };
+        } else {
+          *focus = (*focus + 1) % 3;
+        }
+        let _ = ctx.tx_ui.send("modal_update|".to_string());
+      }
+      KeyCode::Left => {
         let focus = *state.debate_modal_focus.lock().unwrap();
         let agent_count = state.agents.lock().unwrap().len();
 
         if focus == 0 {
-          // Agent 1 selection - move up
           let mut agent1_idx = state.debate_modal_selected_agent1.lock().unwrap();
           *agent1_idx = if *agent1_idx == 0 {
             agent_count - 1
@@ -382,7 +398,6 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
           };
           let _ = ctx.tx_ui.send("modal_update|".to_string());
         } else if focus == 1 {
-          // Agent 2 selection - move up
           let mut agent2_idx = state.debate_modal_selected_agent2.lock().unwrap();
           *agent2_idx = if *agent2_idx == 0 {
             agent_count - 1
@@ -392,31 +407,19 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
           let _ = ctx.tx_ui.send("modal_update|".to_string());
         }
       }
-      KeyCode::Down => {
+      KeyCode::Right => {
         let focus = *state.debate_modal_focus.lock().unwrap();
         let agent_count = state.agents.lock().unwrap().len();
 
         if focus == 0 {
-          // Agent 1 selection - move down
           let mut agent1_idx = state.debate_modal_selected_agent1.lock().unwrap();
           *agent1_idx = (*agent1_idx + 1) % agent_count;
           let _ = ctx.tx_ui.send("modal_update|".to_string());
         } else if focus == 1 {
-          // Agent 2 selection - move down
           let mut agent2_idx = state.debate_modal_selected_agent2.lock().unwrap();
           *agent2_idx = (*agent2_idx + 1) % agent_count;
           let _ = ctx.tx_ui.send("modal_update|".to_string());
         }
-      }
-      KeyCode::Left | KeyCode::Right | KeyCode::Tab => {
-        // Switch focus between agent1, agent2, and confirm button
-        let mut focus = state.debate_modal_focus.lock().unwrap();
-        if k.code == KeyCode::Left {
-          *focus = if *focus == 0 { 2 } else { *focus - 1 };
-        } else {
-          *focus = (*focus + 1) % 3;
-        }
-        let _ = ctx.tx_ui.send("modal_update|".to_string());
       }
       _ => {}
     }
@@ -486,6 +489,14 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
           st.last_esc = None;
           state.reset_conversation();
           if state.daemon_mode.load(Ordering::Relaxed) {
+            // A history reset starts a new session: `-s`/`--save-html`
+            // exported the one that just got cleared, and must be asked for
+            // again (rather than silently resuming) to export whatever
+            // comes next. This is the reset an attached client's own Esc-Esc
+            // triggers over IPC; the global-hotkey reset has the same rule
+            // in daemon::controller::Controller::reset_conversation.
+            state.save_enabled.store(false, Ordering::Relaxed);
+            state.save_html_enabled.store(false, Ordering::Relaxed);
             crate::daemon::desktop::notify("vtmate", "Conversation restarted!");
           }
           let _ = ctx.tx_ui.send("line|".to_string());
