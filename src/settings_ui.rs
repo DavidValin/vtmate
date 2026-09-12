@@ -575,9 +575,6 @@ fn close_form(ui: &mut SettingsUi) {
   let dirty = ui.form.dirty();
   match ui.form.editing {
     Some(index) if index < ui.agents.len() => {
-      if dirty {
-        ui.set_info(format!("'{}' edited - not saved yet", draft.name));
-      }
       ui.agents[index] = draft;
       ui.cursor = index;
     }
@@ -1475,11 +1472,11 @@ fn list_lines(
   // bottom bar and the two borders are its own), and out of those the footer
   // takes its separator, shortcuts, buttons and any notice, while the list
   // itself spends one line on the header, one under it, one on the scroll
-  // hint, one on the edited-agents summary and one above the footer.
-  // Reserving the hint and summary lines whether or not they are used keeps
-  // the count from depending on its own outcome.
+  // hint, a blank line, one on the edited-agents summary and one above the
+  // footer. Reserving the hint and summary lines whether or not they are
+  // used keeps the count from depending on its own outcome.
   let footer_len = 3 + usize::from(ui.notice.is_some());
-  let room = (rows as usize).saturating_sub(8 + footer_len).max(1);
+  let room = (rows as usize).saturating_sub(9 + footer_len).max(1);
   let scroll = scroll_for(ui.cursor.min(ui.agents.len()), ui.agents.len(), room);
 
   let mut lines = vec![format!("{}{}{}", DIM, header, OFF), String::new()];
@@ -1515,9 +1512,10 @@ fn list_lines(
     ));
   }
   if edited_count > 0 {
+    lines.push(String::new());
     lines.push(format!(
       "{}{} agent{} edited. Press Save to apply the changes.{}",
-      YELLOW,
+      RED,
       edited_count,
       if edited_count == 1 { "" } else { "s" },
       OFF

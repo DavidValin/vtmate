@@ -316,6 +316,7 @@ pub fn increase_voice_speed() {
   if cur < 80 {
     cur += 1;
     state.speed.store(cur, Ordering::Relaxed);
+    persist_current_voice_speed(state);
   }
 }
 
@@ -325,6 +326,30 @@ pub fn decrease_voice_speed() {
   if cur > 5 {
     cur -= 1;
     state.speed.store(cur, Ordering::Relaxed);
+    persist_current_voice_speed(state);
+  }
+}
+
+/// Write the speed a live Up/Down just set back into the active agent's
+/// `voice_speed` in the agents file, the same way switching agents with
+/// Left/Right persists that live change too (see `keyboard::switch_agent`).
+fn persist_current_voice_speed(state: &AppState) {
+  let agents_path = state.agents_path.lock().unwrap().clone();
+  if agents_path.as_os_str().is_empty() {
+    // no agents file in use (e.g. attached client mirror)
+    return;
+  }
+  let agent_name = state.agent_name.lock().unwrap().clone();
+  let voice_speed = get_speed();
+  if let Err(e) = crate::config::persist_voice_speed(&agents_path, &agent_name, voice_speed) {
+    crate::log::log(
+      "warning",
+      &format!(
+        "Could not save voice_speed to {}: {}",
+        agents_path.display(),
+        e
+      ),
+    );
   }
 }
 

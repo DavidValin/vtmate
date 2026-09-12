@@ -917,6 +917,25 @@ pub fn persist_selected_agent(settings_path: &std::path::Path, name: &str) -> st
   write_atomically(settings_path, &out)
 }
 
+/// Write a live Up/Down speed adjustment back into `agent_name`'s
+/// `voice_speed` in the agents file - the same live-persists-to-disk
+/// treatment `persist_selected_agent` gives a live agent switch. Reads the
+/// file fresh (not the in-memory working copy, which may hold a settings
+/// popup's own unsaved edits) and rewrites only if that agent is still in it.
+pub fn persist_voice_speed(
+  agents_path: &std::path::Path,
+  agent_name: &str,
+  voice_speed: f32,
+) -> std::io::Result<()> {
+  let mut agents = try_load_settings(agents_path, &plain_args())
+    .map_err(|e| std::io::Error::other(e.to_string()))?;
+  let Some(agent) = agents.iter_mut().find(|a| a.name == agent_name) else {
+    return Ok(());
+  };
+  agent.voice_speed = voice_speed;
+  save_settings(agents_path, &agents)
+}
+
 /// Replace `settings_path` with `contents` in one step: write a sibling
 /// `.tmp`, flush it to disk and rename it over the file, so a full disk or a
 /// crash halfway through never leaves a truncated file behind.
