@@ -31,6 +31,7 @@
   --link:#2979ff;
   --grey:#808080;
   --yellow:#e8f2a1;
+  --light-green:#c9f2c0;
   --stripe-1:#eee;
   --stripe-2:#ddd;
   --green:#069a2e;
@@ -54,7 +55,7 @@ body{display:flex;justify-content:center;padding:16px}
 
 .sheet{
   position:relative;
-  width:992px;height:1392.98px;
+  width:992px;height:1418px;
   background:#fff;color:#000;
   font-family:var(--mono);
   box-shadow:0 2px 14px rgba(0,0,0,.18);
@@ -69,16 +70,16 @@ body{display:flex;justify-content:center;padding:16px}
          display:flex;align-items:center;transform:translateY(-22px)}
 .tagline .logo{width:52px;height:52px;margin-right:8px}
 .tagline .name{font-size:22px}
-.footer{position:absolute;left:0;right:0;top:1369.91px;text-align:center;
+.footer{position:absolute;left:0;right:0;top:1395px;text-align:center;
         font-family:var(--mono);font-size:9.33px;color:var(--grey)}
 :root{--t-title:18.1px;--t-head:24.1px}
 
 /* ---------------- mode panels ---------------- */
 .panel{position:absolute;left:14px;width:484px;border:1.9px solid #000;background:#fff;overflow:hidden}
 .panel.p1{top:51.9px;height:505.35px}
-.panel.p2{top:600.93px;height:464.71px}
-.panel.p3{top:1109.32px;height:216.12px}
-.panel.p4{top:49.9px;left:17.6px;width:440px;height:194px}
+.panel.p2{top:577.25px;height:464.71px}
+.panel.p3{top:1061.96px;height:216.12px}
+.panel.p4{top:49.9px;left:17.6px;width:452.4px;height:194px}
 
 h2,h3{font-family:var(--black);font-weight:900;font-size:13.33px;line-height:1;
       position:absolute;left:0;white-space:pre}
@@ -106,8 +107,8 @@ h2.tagged .tag-label{color:#000;padding-left:6px}
    blend-mode support and renders identically everywhere. */
 .diagram{position:absolute;display:block}
 .diagram.d1{left:278.1px;top:59.9px;width:210px;height:136.83px}
-.diagram.d2{left:278.1px;top:608.93px;width:210px;height:137.22px}
-.diagram.d3{left:278.1px;top:1117.32px;width:210px;height:122.02px}
+.diagram.d2{left:278.1px;top:585.25px;width:210px;height:137.22px}
+.diagram.d3{left:278.1px;top:1069.96px;width:210px;height:122.02px}
 
 /* ---------------- keyboard tables ---------------- */
 .modeline{position:absolute;line-height:15px;white-space:pre}
@@ -123,6 +124,10 @@ h2.tagged .tag-label{color:#000;padding-left:6px}
    font-family:var(--mono);font-size:9.33px}
 .r.s1{background-image:linear-gradient(var(--stripe-1) var(--band),transparent 0)}
 .r.s2{background-image:linear-gradient(var(--stripe-2) var(--band),transparent 0)}
+/* the actual push-to-talk row: PTT mode's SPACE, and daemon mode's hold-to-
+   talk shortcuts - overrides s1/s2 by coming after them, wins regardless of
+   which stripe it landed on */
+.r.ptt-space{background-image:linear-gradient(var(--light-green) var(--band),transparent 0)}
 .r > span{display:inline-block;vertical-align:top;line-height:var(--band)}
 .key{font-family:var(--hand);font-size:10.67px;background:var(--yellow);position:relative;top:0.8px}
 .s1{background:var(--stripe-1)}
@@ -130,7 +135,7 @@ h2.tagged .tag-label{color:#000;padding-left:6px}
 .hl{background:var(--yellow)}
 
 /* ---------------- right hand column ---------------- */
-.col-right{position:absolute;left:508px;top:0;right:16.7px;height:100%}
+.col-right{position:absolute;left:508px;top:0;right:4.3px;height:100%}
 
 .sect{position:absolute;font-family:var(--black);font-weight:900;font-size:13.33px;
       line-height:1;white-space:pre;display:flex;align-items:flex-end}
@@ -141,8 +146,12 @@ h2.tagged .tag-label{color:#000;padding-left:6px}
 .sect.s-settings{left:17.6px;top:var(--t-sect1);right:9.7px}
 .sect.s-cli{left:19.6px;top:var(--t-sect2);right:9.7px}
 .sect.s-examples{left:19.6px;top:var(--t-sect3);right:9.7px}
-.sect.s-ptt{left:19.6px;top:var(--t-sect4);right:9.7px}
-:root{--t-sect1:258.9px;--t-sect2:322.53px;--t-sect3:913.06px;--t-sect4:1220.63px}
+:root{--t-sect1:258.9px;--t-sect2:322.53px;--t-sect3:959.06px}
+
+/* full width: below both columns, not confined to col-right like the
+   sections above */
+.sect.s-ptt{left:17.6px;top:var(--t-sect4);right:14px}
+:root{--t-sect4:1298.08px}
 
 .opt{white-space:pre;line-height:var(--band);font-family:var(--mono);font-size:9.33px}
 .opt > span{display:inline-block;vertical-align:top;line-height:var(--band)}
@@ -170,18 +179,18 @@ h2.tagged .tag-label{color:#000;padding-left:6px}
 
 .examples{position:absolute;left:16.8px;top:var(--t-ex);white-space:pre;
           font-family:var(--mono);font-size:9.33px;line-height:12.47px}
-:root{--t-ex:942.06px}
+:root{--t-ex:988.06px}
 
-.ptt-explain{position:absolute;left:16.8px;right:9.7px;top:var(--t-ptt);white-space:pre-wrap;
+.ptt-explain{position:absolute;left:17.6px;right:14px;top:var(--t-ptt);white-space:pre-wrap;
              font-family:var(--mono);font-size:9.33px;line-height:12.47px;
              background:#fbdcdc;padding:6px}
-:root{--t-ptt:1250.63px}
+:root{--t-ptt:1313.08px}
 
 @media print{
   html,body{background:#fff}
   body{padding:0}
   .sheet{box-shadow:none}
-  @page{size:10.33in 14.51in;margin:0}
+  @page{size:10.33in 14.77in;margin:0}
 }
 </style>
 </head>
@@ -201,7 +210,7 @@ During the conversation, the user can change the agent, or start a new conversat
       <h3 style="top:165px;left:8px">KEYBOARD</h3>
       <div class="modeline" style="top:181.1px;left:12.1px"><span class="badge ptt">PTT</span><span class="lbl"> MODE</span></div>
       <div class="rows" style="top:196.1px">
-        <div class="r s1"><span class="key">SPACE</span><span>         (push to talk)   records audio until space is released </span></div>
+        <div class="r s1 ptt-space"><span class="key">SPACE</span><span>         (push to talk)   records audio until space is released </span></div>
         <div class="r s2"><span class="key">ESCAPE</span><span>        (press once)    stops current response                 </span></div>
         <div class="r s1"><span class="key">ESCAPE</span><span>        (press twice)   restart the session with no history    </span></div>
         <div class="r s2"><span class="key">U</span><span>                               undo last response/message                      </span></div>
@@ -238,7 +247,7 @@ The debate runs indefinitely until stopped, or until max turns is reached (if co
       <h3 style="top:153.22px;left:8px">KEYBOARD</h3>
       <div class="modeline" style="top:169.32px;left:12.1px"><span class="badge ptt">PTT</span><span class="lbl"> MODE</span></div>
       <div class="rows" style="top:184.32px">
-        <div class="r s2"><span class="key">SPACE</span><span>         (push to talk)   records audio until space is released </span></div>
+        <div class="r s2 ptt-space"><span class="key">SPACE</span><span>         (push to talk)   records audio until space is released </span></div>
         <div class="r s1"><span class="key">ESCAPE</span><span>        (press once)    pause debate until next user input      </span></div>
         <div class="r s2"><span class="key">ESCAPE</span><span>        (press twice)   restarts the debate with no history     </span></div>
         <div class="r s1"><span class="key">U</span><span>                               undo last response/message                      </span></div>
@@ -291,9 +300,9 @@ focused in the terminal. To start the background mode use
 vtmate --daemon</div>
       <h3 style="top:99.9px;left:8px">KEYBOARD</h3>
       <div class="rows" style="top:115.7px;left:6px">
-        <div class="r s1"><span class="key">CTRL + ALT + A</span><span>              push to talk, ask the agent by voice    </span></div>
+        <div class="r s1 ptt-space"><span class="key">CTRL + ALT + A</span><span>              push to talk (selecting text adds context)</span></div>
         <div class="r s2"><span class="key">CTRL + ALT + R</span><span>              select text, then read it aloud         </span></div>
-        <div class="r s1"><span class="key">CTRL + ALT + S</span><span>              push to talk, paste speech as text      </span></div>
+        <div class="r s1 ptt-space"><span class="key">CTRL + ALT + S</span><span>              push to talk, paste speech as text      </span></div>
         <div class="r s2"><span class="key">CONTROL + Q</span><span>                 (press once)   stops current speech     </span></div>
         <div class="r s1"><span class="key">CONTROL + Q</span><span>                 (press twice)  resets the conversation   </span></div>
       </div>
@@ -323,6 +332,8 @@ vtmate --daemon</div>
       <div class="gap"></div>
       <div class="opt s2"><span class="flagcol"><span class="flag hl">-r &lt;file.txt&gt;</span></span><span>read a file with voice, phrase by phrase (no llm)</span></div>
       <div class="opt s1"><span class="flagcol"><span class="flag hl">-r –</span></span><span>read text from STDIN with voice, phrase by phrase</span></div>
+      <div class="opt s2"><span class="flagcol"><span class="flag hl">-r-stdout &lt;file.txt&gt;</span></span><span>no screen/nav: speech to STDOUT as wav (no llm)</span></div>
+      <div class="opt s1"><span class="flagcol"><span class="flag hl">-r-stdout –</span></span><span>same, but reads the text to speak from STDIN</span></div>
       <div class="opt s2"><span class="flagcol"><span class="flag hl">--stt &lt;WAV_FILE&gt;</span></span><span>speech to text from a wav file (no llm, no tts)</span></div>
       <div class="opt s1"><span class="flagcol"><span class="flag hl">--stt –</span></span><span>speech to text from STDIN wav (no llm, no tts)</span></div>
       <div class="opt s2"><span class="flagcol"><span class="flag hl">-c &lt;agents_file&gt;</span></span><span>use a specific agents file instead of</span></div>
@@ -364,19 +375,20 @@ echo "What to improve: \n\n $(cat article.txt)" | vtmate -i - -q -s
 
 vtmate --debate Aristoteles Budda "How to find ever lasting peace?"
 vtmate --debate Budda Aristoteles "Teach me about logic" -s-html
-vtmate --debate Aristoteles Budda -i article.txt
+vtmate --debate Aristoteles Budda -i article.txt --max-turns 10 -s-html
 echo “Thoughts? $(cat article.txt)” | vtmate --debate Budda Hegel -i -
 
 vtmate -r article.txt
-vtmate -r article.txt -s
+vtmate -a Budda -r article.txt -s
 echo “One phrase. Second phrase” | vtmate -r - -s
 vtmate --stt recording.wav</div>
 
-    <div class="sect s-ptt"><span class="red">PTT / LIVE MODES EXPLAINED</span><span class="rule red"></span></div>
-
-    <div class="ptt-explain">LIVE mode (hands free) requires configuring audio level threshold and end silence to detect your voice (depends on ambient noise and mic levels). You can do that in each agent settings (Control+S) or editing the agents definition file directly. In LIVE mode, vtmate continuously records but only submits the audio on a certain audio level threshold and after a certain silence time. Keep PTT mode for all agents if you struggle with configuration.</div>
-
   </div>
+
+  <div class="sect s-ptt"><span class="red">PTT / LIVE MODES EXPLAINED</span><span class="rule red"></span></div>
+
+  <div class="ptt-explain">LIVE mode is a hands free functionality, which continuously records and only submits the audio on a certain audio level threshold and after a certain silence time; it requires configuring audio level threshold and end silence to detect your voice (depends on ambient noise and mic levels). To set it up set your agent settings to ptt=off and adjust sound_threshold_peak and end_silence_ms fields. LIVE mode is the default mode and to talk you have to keep SPACE pressed and then release.
+Keep PTT mode for all agents if you struggle with configuration (ptt=on)</div>
 
   <div class="footer">vtmate – https://github.com/DavidValin/vtmate</div>
 </div>
