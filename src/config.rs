@@ -85,6 +85,14 @@ pub struct Args {
   pub list_voices: bool,
 
   #[arg(
+    long = "render-quicksheet-pdf",
+    action = clap::ArgAction::SetTrue,
+    conflicts_with_all = ["read_file", "read_file_stdout", "quiet", "prompt", "prompt_file", "debate", "list_voices", "daemon", "daemon_foreground", "daemon_stop", "daemon_status", "clone_voice", "refine_voice", "stt"],
+    help = "write the printable quicksheet PDF to the current folder and exit"
+  )]
+  pub render_quicksheet_pdf: bool,
+
+  #[arg(
     short = 'c',
     long = "config",
     value_name = "AGENTS_FILE",
@@ -873,6 +881,10 @@ const OPTIONS: &[(&str, &str)] = &[
   ("--verbose", "run the program in verbose mode"),
   ("--nb", "do not render the vtmate banner"),
   ("--list-voices", "list all voices for all languages and tts systems"),
+  (
+    "--render-quicksheet-pdf",
+    "write the printable quicksheet PDF to the current folder and exit",
+  ),
   (
     "-c, --config <AGENTS_FILE>",
     "use a specific agents file instead of ~/.vtmate/agents",

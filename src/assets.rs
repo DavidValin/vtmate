@@ -58,6 +58,14 @@ pub fn ensure_assets_env() {
   }
 }
 
+/// The printable quicksheet, embedded straight from the repo (it is small
+/// and already committed, unlike the downloaded model assets above, so it
+/// needs no build.rs step to land in OUT_DIR first). Used by
+/// `--render-quicksheet-pdf`.
+pub fn quicksheet_pdf_bytes() -> &'static [u8] {
+  include_bytes!("../docs/en/quicksheet.pdf")
+}
+
 // PRIVATE
 // ------------------------------------------------------------------
 

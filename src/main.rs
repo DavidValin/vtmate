@@ -65,6 +65,23 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   .expect("Error setting Ctrl-C handler");
 
   // ---------------------------------------------------
+  // handle --render-quicksheet-pdf
+  // ---------------------------------------------------
+  if args.render_quicksheet_pdf {
+    let out_path = std::path::Path::new("quicksheet.pdf");
+    match std::fs::write(out_path, assets::quicksheet_pdf_bytes()) {
+      Ok(()) => {
+        println!("quicksheet.pdf saved in the current directory");
+        util::terminate(0);
+      }
+      Err(e) => {
+        eprintln!("✗ failed to write {}: {}", out_path.display(), e);
+        util::terminate(1);
+      }
+    }
+  }
+
+  // ---------------------------------------------------
   // daemon mode: control commands, the daemon itself, auto-attach
   // ---------------------------------------------------
   if args.daemon_status {

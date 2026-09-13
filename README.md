@@ -296,6 +296,8 @@ All cli options:
                                         selected agent (-a)
   -c <agents_file>                      use a specific agents file instead of ~/.vtmate/agents
   --list-voices                         list all voices for all languages and tts systems
+  --render-quicksheet-pdf               write the printable quicksheet PDF to the current
+                                        folder and exit
   --ptt <true/false>                    override for this session the ptt setting for all agents
                                         independently of its settings
   --daemon                              start vtmate in the background, driven by global shortcuts

@@ -146,7 +146,7 @@ h2.tagged .tag-label{color:#000;padding-left:6px}
 .sect.s-settings{left:17.6px;top:var(--t-sect1);right:9.7px}
 .sect.s-cli{left:19.6px;top:var(--t-sect2);right:9.7px}
 .sect.s-examples{left:19.6px;top:var(--t-sect3);right:9.7px}
-:root{--t-sect1:258.9px;--t-sect2:322.53px;--t-sect3:959.06px}
+:root{--t-sect1:258.9px;--t-sect2:322.53px;--t-sect3:974.06px}
 
 /* full width: below both columns, not confined to col-right like the
    sections above */
@@ -179,7 +179,7 @@ h2.tagged .tag-label{color:#000;padding-left:6px}
 
 .examples{position:absolute;left:16.8px;top:var(--t-ex);white-space:pre;
           font-family:var(--mono);font-size:9.33px;line-height:12.47px}
-:root{--t-ex:988.06px}
+:root{--t-ex:1003.06px}
 
 .ptt-explain{position:absolute;left:17.6px;right:14px;top:var(--t-ptt);white-space:pre-wrap;
              font-family:var(--mono);font-size:9.33px;line-height:12.47px;
@@ -294,10 +294,8 @@ The debate runs indefinitely until stopped, or until max turns is reached (if co
     <!-- ===================== background mode ===================== -->
     <section class="panel p4">
       <h2 class="tagged"><span class="tag green">BACKGROUND</span><span class="tag-label">MODE</span></h2>
-      <div class="desc" style="top:32px;padding-left:8px">When vtmate runs in background mode you can use the next
-functionality from anywhere in your computer. No need to be
-focused in the terminal. To start the background mode use
-vtmate --daemon</div>
+      <div class="desc" style="top:32px;padding-left:8px">When vtmate runs in background mode (also called daemon mode) you can use the next functionality from anywhere in your computer. No need to be focused in the terminal. To start the background mode use
+vtmate --daemon.</div>
       <h3 style="top:99.9px;left:8px">KEYBOARD</h3>
       <div class="rows" style="top:115.7px;left:6px">
         <div class="r s1 ptt-space"><span class="key">CTRL + ALT + A</span><span>              push to talk (selecting text adds context)</span></div>
@@ -308,11 +306,11 @@ vtmate --daemon</div>
       </div>
     </section>
 
-    <div class="sect s-settings"><span class="blue">SETTINGS</span><span> FILES</span><span class="rule"></span></div>
-    <div class="settings-row opt" style="top:var(--t-set)"><span class="flag hl">~/.vtmate/agents</span><span>agents definition file</span></div>
-    <div class="settings-row opt" style="top:calc(var(--t-set) + 13.53px)"><span class="flag hl">~/.vtmate/settings</span><span>global shortcuts (daemon mode)</span></div>
+    <div class="sect s-settings"><span>SETTINGS</span><span> FILES</span><span class="rule"></span></div>
+    <div class="settings-row opt" style="top:var(--t-set)"><span class="flag hl">~/.vtmate/agents</span><span>agents definition file (llm, language, voice, system prompt...)</span></div>
+    <div class="settings-row opt" style="top:calc(var(--t-set) + 13.53px)"><span class="flag hl">~/.vtmate/settings</span><span>global shortcuts customization file used in background mode</span></div>
 
-    <div class="sect s-cli"><span>CLI </span><span class="blue">OPTIONS</span><span class="rule"></span></div>
+    <div class="sect s-cli"><span>CLI </span><span>OPTIONS</span><span class="rule"></span></div>
 
     <div class="cli">
       <div class="opt s1"><span class="flagcol"><span class="flag hl">-a &lt;agent_name&gt;</span></span><span>set a specific initial agent</span></div>
@@ -339,26 +337,27 @@ vtmate --daemon</div>
       <div class="opt s2"><span class="flagcol"><span class="flag hl">-c &lt;agents_file&gt;</span></span><span>use a specific agents file instead of</span></div>
       <div class="opt wrap s2"><span></span><span>~/.vtmate/agents</span></div>
       <div class="opt s1"><span class="flagcol"><span class="flag hl">--list-voices</span></span><span>list all voices for all languages and tts systems</span></div>
-      <div class="opt s2"><span class="flagcol"><span class="flag hl">--ptt &lt;true/false&gt;</span></span><span>override for this session the ptt setting for all</span></div>
-      <div class="opt wrap s2"><span></span><span>agents independently of its settings</span></div>
+      <div class="opt s2 free"><span class="flag hl">--render-quicksheet-pdf</span><span>save this printable quicksheet as PDF</span></div>
+      <div class="opt s1"><span class="flagcol"><span class="flag hl">--ptt &lt;true/false&gt;</span></span><span>override for this session the ptt setting for all</span></div>
+      <div class="opt wrap s1"><span></span><span>agents independently of its settings</span></div>
       <div class="gap"></div>
-      <div class="opt s1"><span class="flagcol"><span class="flag hl">--daemon</span></span><span>start vtmate in the background</span></div>
-      <div class="opt wrap s1"><span></span><span>(global hotkeys, voice only)</span></div>
-      <div class="opt s2"><span class="flagcol"><span class="flag hl">--daemon-stop</span></span><span>stop the running daemon</span></div>
-      <div class="opt s1"><span class="flagcol"><span class="flag hl">--daemon-status</span></span><span>show whether a daemon is running</span></div>
-      <div class="opt wrap s1"><span></span><span>and its hotkeys</span></div>
+      <div class="opt s2"><span class="flagcol"><span class="flag hl">--daemon</span></span><span>start vtmate in the background</span></div>
+      <div class="opt wrap s2"><span></span><span>(global hotkeys, voice only)</span></div>
+      <div class="opt s1"><span class="flagcol"><span class="flag hl">--daemon-stop</span></span><span>stop the running daemon</span></div>
+      <div class="opt s2"><span class="flagcol"><span class="flag hl">--daemon-status</span></span><span>show whether a daemon is running</span></div>
+      <div class="opt wrap s2"><span></span><span>and its hotkeys</span></div>
       <div class="gap"></div>
-      <div class="opt s2 free"><span class="flag hl">--clone-voice &lt;NAME&gt; &lt;LANG&gt; &lt;WAV&gt; &lt;REF_TEXT&gt;</span><span>train new voice from .wav</span></div>
-      <div class="opt s1 free"><span class="flag hl">--refine-voice &lt;NAME&gt; &lt;LANG&gt; &lt;WAV&gt; &lt;REF_TEXT&gt;</span><span>refine an existing voice</span></div>
+      <div class="opt s1 free"><span class="flag hl">--clone-voice &lt;NAME&gt; &lt;LANG&gt; &lt;WAV&gt; &lt;REF_TEXT&gt;</span><span>train new voice from .wav</span></div>
+      <div class="opt s2 free"><span class="flag hl">--refine-voice &lt;NAME&gt; &lt;LANG&gt; &lt;WAV&gt; &lt;REF_TEXT&gt;</span><span>refine an existing voice</span></div>
       <div class="gap"></div>
-      <div class="opt s2"><span class="flagcol"><span class="flag hl">--version</span></span><span>print version</span></div>
+      <div class="opt s1"><span class="flagcol"><span class="flag hl">--version</span></span><span>print version</span></div>
       <div class="gap"></div>
-      <div class="opt s1"><span class="flagcol"><span class="flag hl">--nb</span></span><span>do not render the vtmate banner</span></div>
-      <div class="opt s2"><span class="flagcol"><span class="flag hl">--verbose</span></span><span>run the program in verbose mode</span></div>
-      <div class="opt s1"><span class="flagcol"><span class="flag hl">--help</span></span><span>show help</span></div>
+      <div class="opt s2"><span class="flagcol"><span class="flag hl">--nb</span></span><span>do not render the vtmate banner</span></div>
+      <div class="opt s1"><span class="flagcol"><span class="flag hl">--verbose</span></span><span>run the program in verbose mode</span></div>
+      <div class="opt s2"><span class="flagcol"><span class="flag hl">--help</span></span><span>show help</span></div>
     </div>
 
-    <div class="sect s-examples"><span class="blue">EXAMPLES</span><span> COMMANDS</span><span class="rule"></span></div>
+    <div class="sect s-examples"><span>COMMAND EXAMPLES</span><span class="rule"></span></div>
 
     <div class="examples">vtmate
 vtmate -s
