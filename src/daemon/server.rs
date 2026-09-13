@@ -163,6 +163,72 @@ pub fn ui_sink_thread(rx_ui: Receiver<String>, state: Arc<AppState>) {
 // PRIVATE
 // ------------------------------------------------------------------
 
+/// `-a`/`-c` given while attaching to an already-running daemon: reload the
+/// agents file from `agents_path` (if given) and/or make `agent_name` (if
+/// given) the active one, live, instead of the old silent "ignored".
+///
+/// The two are independent: `-c` alone reloads the file but stays on
+/// whichever agent was already running - refreshing its (possibly edited)
+/// settings in place, no conversation reset, exactly like the Settings
+/// popup's own save - unless that agent no longer exists in the new file,
+/// in which case a fallback is picked the same way a fresh start would
+/// (`[general] selected_agent`, else the first agent). `-a` (with or
+/// without `-c`) names the agent explicitly. Either way, ending up on a
+/// *different* agent than before is a real switch - `keyboard::switch_agent`
+/// - with its usual conversation reset, `selected_agent` persisted, and its
+/// own announcement line.
+fn apply_attach_overrides(
+  state: &AppState,
+  agent_name: Option<String>,
+  agents_path: Option<String>,
+) -> Result<(), String> {
+  let previous = state.agent_name.lock().unwrap().clone();
+
+  if let Some(path_str) = agents_path {
+    let new_path = std::path::PathBuf::from(path_str);
+    let mut loaded = crate::config::try_load_settings(&new_path, &crate::config::plain_args())
+      .map_err(|e| format!("cannot load {}: {}", new_path.display(), e))?;
+    // the command line still has the last word, as it does at startup
+    if let Some(ptt) = *state.ptt_override.lock().unwrap() {
+      for a in loaded.iter_mut() {
+        a.ptt = ptt;
+      }
+    }
+    *state.agents.lock().unwrap() = loaded;
+    *state.agents_path.lock().unwrap() = new_path;
+  }
+
+  let agents = state.agents();
+  if agents.is_empty() {
+    return Err("no agents left after reload".to_string());
+  }
+
+  let target = if let Some(name) = agent_name {
+    agents.iter().find(|a| a.name == name).cloned().ok_or_else(|| {
+      format!(
+        "Agent '{}' not found. Available agents: {}",
+        name,
+        agents.iter().map(|a| a.name.as_str()).collect::<Vec<_>>().join(", ")
+      )
+    })?
+  } else {
+    agents.iter().find(|a| a.name == previous).cloned().unwrap_or_else(|| {
+      let settings_path = state.settings_path.lock().unwrap().clone();
+      let general = crate::config::load_general_settings(&settings_path).unwrap_or_default();
+      crate::config::select_agent(&agents, None, &general).unwrap_or_else(|_| agents[0].clone())
+    })
+  };
+
+  if target.name == previous {
+    state.apply_agent(&target);
+    crate::tts::apply_residency(state);
+  } else {
+    let tx_ui = crate::log::tx_ui_sender().unwrap_or_else(|| unbounded().0);
+    crate::keyboard::switch_agent(state, &target, &tx_ui);
+  }
+  Ok(())
+}
+
 fn handle_connection(stream: interprocess::local_socket::Stream, tx_client: Sender<ClientEvent>) {
   let (reader, mut writer) = stream.split();
   let mut reader = BufReader::new(reader);
@@ -205,7 +271,7 @@ fn handle_connection(stream: interprocess::local_socket::Stream, tx_client: Send
         &ServerMsg::Status(status_view(state, registry.len())),
       );
     }
-    ClientMsg::Attach { version } => {
+    ClientMsg::Attach { version, agent, agents_path } => {
       if version != env!("CARGO_PKG_VERSION") {
         crate::log::log(
           "warning",
@@ -215,6 +281,12 @@ fn handle_connection(stream: interprocess::local_socket::Stream, tx_client: Send
             env!("CARGO_PKG_VERSION")
           ),
         );
+      }
+      if agent.is_some() || agents_path.is_some() {
+        if let Err(message) = apply_attach_overrides(state, agent, agents_path) {
+          let _ = write_msg(&mut writer, &ServerMsg::Error { message });
+          return;
+        }
       }
       let (tx, rx) = unbounded::<ServerMsg>();
       let (id, snapshot) = registry.attach(state, tx);

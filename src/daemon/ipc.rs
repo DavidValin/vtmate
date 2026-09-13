@@ -18,7 +18,13 @@ use std::time::{Duration, Instant};
 #[serde(tag = "t", content = "d")]
 pub enum ClientMsg {
   /// Become an attached viewer: expect a Snapshot, then Ui/State/History.
-  Attach { version: String },
+  /// `agent`/`agents_path` mirror `-a`/`-c` given at attach time (`None` for
+  /// a plain attach) - see `server::apply_attach_overrides`.
+  Attach {
+    version: String,
+    agent: Option<String>,
+    agents_path: Option<String>,
+  },
   /// One-shot status query (reply: Status).
   Status,
   /// Orderly daemon shutdown (reply: Bye). Used by `--daemon-stop`.

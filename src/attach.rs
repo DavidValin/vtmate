@@ -20,12 +20,19 @@ use std::time::Duration;
 
 /// Attach to the running daemon. Returns only by terminating the process.
 pub fn run(args: &crate::config::Args) -> ! {
-  if args.agent.is_some() || args.config.is_some() {
-    println!(
-      "\x1b[36m•\x1b[0m a vtmate daemon is running: attaching to it (-a / -c ignored; switch agents with LEFT/RIGHT)"
-    );
-    thread::sleep(Duration::from_millis(800));
-  }
+  // Resolved here (against this client's own cwd), not the daemon's: `-c`
+  // takes a path the same way it would for a fresh, non-daemon run.
+  let agents_path = if args.config.is_some() {
+    match crate::config::resolve_agents_path(args) {
+      Ok(p) => Some(p.to_string_lossy().into_owned()),
+      Err(e) => {
+        println!("✗ {}", e);
+        util::terminate(1);
+      }
+    }
+  } else {
+    None
+  };
   let stream = match ipc::connect() {
     Ok(s) => s,
     Err(e) => {
@@ -39,6 +46,8 @@ pub fn run(args: &crate::config::Args) -> ! {
     &mut writer,
     &ClientMsg::Attach {
       version: env!("CARGO_PKG_VERSION").to_string(),
+      agent: args.agent.clone(),
+      agents_path,
     },
   ) {
     println!("✗ daemon connection failed: {}", e);
