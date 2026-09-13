@@ -1,0 +1,51 @@
+# vtmate in the background, started at login - the XDG autostart way.
+#
+# FreeBSD has no user-session equivalent of systemd --user: rc.d (its
+# native service framework) only manages system services, which have no
+# $HOME, no display and no audio, so it could not do the global
+# push-to-talk shortcut, the sounds, or anything this is actually for.
+#
+# The XDG Desktop Entry Autostart Specification is the practical
+# alternative: it is honoured by every desktop environment (GNOME, KDE
+# Plasma, XFCE, MATE...) that runs on FreeBSD, the same way it is on Linux,
+# regardless of the underlying OS or init system.
+#
+#   install:  ./install-autostart.sh
+#             (or by hand: mkdir -p ~/.config/autostart
+#              cp vtmate-autostart.desktop ~/.config/autostart/vtmate.desktop)
+#   remove:   ./uninstall-autostart.sh
+#
+# Best-effort: installer.sh does not target FreeBSD (its OS detection only
+# recognises Linux, macOS and Windows), so there is no official prebuilt
+# vtmate binary or default install path for it, and vtmate's audio/global-
+# hotkey dependencies have not been verified to build or run here. You will
+# need to build vtmate from source yourself (see the "Build vtmate from
+# source code" section of ../../../README.md) and adjust `Exec` below to
+# wherever that build ends up.
+#
+# `Exec` just names `vtmate`, resolved via PATH - if your shell's PATH
+# already includes wherever you put the binary, and your desktop session
+# inherits that (most do), this needs no changes; otherwise replace it with
+# the full path to the binary you built.
+#
+# Plain `--daemon`, not `--daemon-foreground`: nothing here supervises or
+# restarts the process, so vtmate is left to do what it always does on
+# `--daemon` - fork itself detached and let this launcher exit once it has
+# confirmed the daemon is up.
+#
+# The global push-to-talk shortcut needs an X11 session (vtmate's hotkey
+# and desktop-selection code assumes X11 on every OS that isn't macOS or
+# Windows); it needs DISPLAY and usually XAUTHORITY, which autostart entries
+# normally already have from your desktop session.
+#
+# See ../../../README.md
+
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=vtmate
+Comment=vtmate background daemon (global push-to-talk, voice)
+Exec=vtmate --daemon
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

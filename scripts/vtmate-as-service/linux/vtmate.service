@@ -1,0 +1,68 @@
+# vtmate in the background, started at login.
+#
+# A **user** service, not a system one: a system unit has no $HOME, no
+# display and no audio, so it could not do the global push-to-talk
+# shortcut, the sounds, or the desktop notifications - which is most of
+# the point of running vtmate this way.
+#
+# Needs systemd (specifically `systemd --user`). Not covered here: distros
+# that don't have it at all (musl-based ones like Alpine can't run it -
+# systemd depends on glibc internals musl doesn't provide) or use a
+# different init by default (Void, Devuan, artix...).
+#
+#   install:  ./install-systemd.sh
+#             (or by hand: cp vtmate.service ~/.config/systemd/user/
+#              systemctl --user daemon-reload
+#              systemctl --user enable --now vtmate)
+#   watch:    systemctl --user status vtmate
+#             journalctl --user -u vtmate -f
+#   remove:   ./uninstall-systemd.sh
+#
+# This unit deliberately carries no configuration of its own. Set the
+# daemon up once by hand with the flags you want -
+#
+# On X11 the shortcut needs DISPLAY and XAUTHORITY in the user manager's
+# environment. Most desktop sessions do this already; if yours does not:
+#
+#   systemctl --user import-environment DISPLAY XAUTHORITY
+#
+# Under Wayland the daemon connects, focuses and can be attached to
+# normally, but the global shortcut cannot fire - no application-level
+# workaround exists. It says so at startup rather than failing silently.
+#
+# See ../../../README.md
+
+[Unit]
+Description=vtmate daemon
+Documentation=https://github.com/DavidValin/vtmate
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+# --foreground because systemd supervises the process itself: without it
+# the daemon would re-launch detached and exit, and systemd would see the
+# start as having failed.
+Type=simple
+# Resolved at start, not hardcoded: installer.sh's default (no --scope/
+# --prefix, i.e. the plain `curl ... | sh` from the README) installs to
+# ~/.local/bin, which is NOT on systemd --user's own default PATH - only
+# `--scope system` (root, /usr/local/bin) is. `command -v` checks PATH
+# first (covering a system-wide install, or anywhere else you already added
+# to it) and falls back to the installer's user-scope default. A custom
+# `--prefix DIR` install matches neither: edit this line to that DIR/bin
+# path directly if that's what you used.
+ExecStart=/bin/sh -c 'exec "$(command -v vtmate 2>/dev/null || echo %h/.local/bin/vtmate)" --daemon-foreground'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+# graphical-session.target, not default.target: default.target is reached
+# on *any* login to this user, including a plain SSH session with no
+# display at all. After=graphical-session.target above only orders this
+# unit relative to that target when both start - it does not pull it in -
+# so WantedBy=default.target would start this on a headless login too, fail
+# to grab a display for the hotkey, and crash-loop forever on
+# Restart=on-failure. graphical-session.target is what desktop environments
+# with systemd integration (GNOME, KDE Plasma 5.20+, ...) activate once an
+# actual graphical session is up.
+WantedBy=graphical-session.target

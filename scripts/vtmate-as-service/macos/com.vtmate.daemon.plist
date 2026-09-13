@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  vtmate in the background, started at login - a per-user launchd agent.
+
+  A LaunchAgent (~/Library/LaunchAgents), not a LaunchDaemon (/Library/
+  LaunchDaemons): a system daemon runs outside any user's session, with no
+  $HOME, no display and no audio, so it could not do the global push-to-talk
+  shortcut, the sounds, or anything this is actually for.
+
+    install:  ./install-launchd.sh
+              (or by hand: mkdir -p ~/Library/LaunchAgents
+               cp com.vtmate.daemon.plist ~/Library/LaunchAgents/
+               launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.vtmate.daemon.plist)
+    watch:    launchctl print gui/$(id -u)/com.vtmate.daemon
+              tail -f ~/Library/Logs/vtmate.log
+    remove:   ./uninstall-launchd.sh
+    (older macOS: `launchctl load`/`unload` the plist path instead of
+    bootstrap/bootout)
+
+  This agent deliberately carries no configuration of its own. Set the
+  daemon up once by hand with the flags you want.
+
+  ProgramArguments runs vtmate through /bin/sh so it can be resolved at
+  start rather than hardcoded: installer.sh's default (no scope/prefix
+  flags given, i.e. the plain `curl ... | sh` from the README) installs to
+  ~/.local/bin, which launchd's own minimal PATH for agents does not
+  include - only a system scope install (/usr/local/bin) is on it.
+  `command -v` checks PATH first (covering a system-wide install, or
+  anywhere else you already added to it) and falls back to the installer's
+  user-scope default. A custom install prefix matches neither: edit the
+  command string below to that prefix's bin/vtmate path directly if that's
+  what you used.
+
+  vtmate needs the Accessibility permission (System Settings -> Privacy and
+  Security -> Accessibility) to simulate the keystrokes behind reading a
+  desktop selection and pasting dictated text. Grant it to the vtmate
+  binary itself; since launchd starts it before you'd normally get prompted,
+  you may need to run vtmate's daemon mode by hand once first so macOS
+  asks, or add it manually in that Accessibility list (+ button, then
+  locate the binary).
+
+  Output is appended to ~/Library/Logs/vtmate.log by the shell command
+  itself, not a plist-level StandardOutPath/StandardErrorPath: those are
+  static strings launchd cannot expand "~" or "$HOME" in, so a fixed path
+  like /tmp/vtmate.log would be shared (and its ownership fought over) by
+  every user on a shared Mac who installs this same file.
+
+  See ../../../README.md
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.vtmate.daemon</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/sh</string>
+		<string>-c</string>
+		<string>mkdir -p "$HOME/Library/Logs" 2>/dev/null; exec "$(command -v vtmate 2>/dev/null || echo "$HOME/.local/bin/vtmate")" --daemon-foreground >>"$HOME/Library/Logs/vtmate.log" 2>&amp;1</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>ProcessType</key>
+	<string>Interactive</string>
+</dict>
+</plist>
