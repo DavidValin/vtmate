@@ -18,23 +18,31 @@ The program self-contains all TTS models and voices and necessary files to recog
 * [🎥 Video Overview](https://www.youtube.com/watch?v=TfNcgVsR3oc)
 
 ### Video demonstration
+
 <details>
 <summary>(🇬🇧 English) Conversation mode demo</summary>
 
-https://github.com/user-attachments/assets/8baef926-59dd-4887-b51c-b64efc885fb2
+https://github.com/user-attachments/assets/b60b46a4-e8f6-4197-af1d-86cafd34a701
 
 </details>
 <details>
 <summary>(🇬🇧 English) Debate mode demo</summary>
 
-https://github.com/user-attachments/assets/063b069a-38aa-472c-b477-7382bb063008
+https://github.com/user-attachments/assets/1b0a8030-96c9-4c14-ad31-ae2bab1f9c73
 
 </details>
 
 <details>
 <summary>(🇬🇧 English) Reading mode demo</summary>
 
-https://github.com/user-attachments/assets/8b9e982c-ba97-4aeb-8e55-1db6a92bc164
+https://github.com/user-attachments/assets/925186c2-8424-40aa-8a52-14fa6c7ee536
+
+</details>
+
+<details>
+<summary>(🇬🇧 English) Background mode (--daemon)</summary>
+
+https://github.com/user-attachments/assets/e295a496-d7cf-486e-a561-eea42277d8de
 
 </details>
 
