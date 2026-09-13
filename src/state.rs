@@ -9,6 +9,11 @@ use std::sync::{Arc, Mutex, OnceLock};
 // API
 // ------------------------------------------------------------------
 
+/// Valid range for the debate modal's "Max turns" field (and `--max-turns`
+/// generally): a debate needs at least 2 replies to be a back-and-forth, and
+/// this is the highest value the field's 13-digit input cap allows for.
+pub const DEBATE_MAX_TURNS_RANGE: std::ops::RangeInclusive<u64> = 2..=1_000_000_000_000;
+
 #[derive(Clone, Debug)]
 pub struct UiState {
   pub thinking: Arc<AtomicBool>,
@@ -93,16 +98,54 @@ pub struct AppState {
   pub end_silence_ms: Arc<AtomicU64>,
   pub whisper_model_path: Arc<Mutex<String>>,
   pub debate_enabled: Arc<AtomicBool>,
+  /// Set whenever a debate (re)starts - `--debate` on the CLI, or the Ctrl+D
+  /// popup - and its initial subject still needs to be submitted as turn 0.
+  /// `conversation_thread`'s loop consumes this with a swap the moment it
+  /// next runs, so it cannot be missed regardless of exactly when that
+  /// happens relative to `debate_enabled` being set - unlike watching for a
+  /// false-to-true edge on `debate_enabled` itself, which only works if the
+  /// loop is observing at precisely the right instant.
+  pub debate_pending_submit: Arc<AtomicBool>,
   pub debate_subject: Arc<Mutex<String>>,
   pub debate_agents: Arc<Mutex<Vec<crate::config::AgentSettings>>>,
   pub debate_turn: Arc<AtomicU64>,
-  /// `--max-turns`: debate replies to run before exiting; 0 means no limit.
+  /// `--max-turns`: debate replies to run before ending the debate; 0 means
+  /// no limit.
   pub max_turns: Arc<AtomicU64>,
+  /// True while the running debate was started with `--debate` on the
+  /// command line (as opposed to the Ctrl+D popup): `--max-turns` reaching
+  /// its limit then exits the process (the original, scriptable behavior)
+  /// instead of switching back to conversation mode. Set at CLI startup and
+  /// cleared whenever the popup starts a debate instead.
+  pub debate_started_via_cli: Arc<AtomicBool>,
   pub debate_paused: Arc<AtomicBool>,
   pub debate_modal_visible: Arc<AtomicBool>,
   pub debate_modal_selected_agent1: Arc<Mutex<usize>>,
   pub debate_modal_selected_agent2: Arc<Mutex<usize>>,
-  pub debate_modal_focus: Arc<Mutex<u8>>, // 0 = agent1, 1 = agent2, 2 = confirm
+  pub debate_modal_focus: Arc<Mutex<u8>>, // 0 = agent1, 1 = agent2, 2 = max turns, 3 = subject text field
+  /// Typed initial-message text of the debate modal, the same role as
+  /// `--debate`'s trailing `<subject>` argument. Committed to
+  /// `debate_subject` when the modal is confirmed.
+  pub debate_modal_subject: Arc<Mutex<String>>,
+  /// Caret position (in chars) inside `debate_modal_subject`.
+  pub debate_modal_caret: Arc<Mutex<usize>>,
+  /// Typed `--max-turns` value of the debate modal (digits only; blank means
+  /// no limit). Committed to `max_turns` when the modal is confirmed.
+  pub debate_modal_max_turns: Arc<Mutex<String>>,
+  /// Caret position (in chars) inside `debate_modal_max_turns`.
+  pub debate_modal_max_turns_caret: Arc<Mutex<usize>>,
+  /// The Ctrl+E save popup: open/closed.
+  pub save_modal_visible: Arc<AtomicBool>,
+  /// "[ ] Save as .txt and single .wav" checkbox.
+  pub save_modal_check_txt: Arc<AtomicBool>,
+  /// "[ ] Save as html with playable turns" checkbox.
+  pub save_modal_check_html: Arc<AtomicBool>,
+  pub save_modal_focus: Arc<Mutex<u8>>, // 0 = txt checkbox, 1 = html checkbox
+  /// Folder name of the save session currently running, if any - refreshed
+  /// by the keyboard handler whenever the popup opens or a save is stopped,
+  /// and mirrored to an attached client via `StateView` so it can render the
+  /// "stop recording" screen without access to the daemon's own `save_path`.
+  pub save_modal_folder: Arc<Mutex<Option<String>>>,
   pub save_path: Arc<Mutex<Option<std::path::PathBuf>>>,
   /// `-s`/`--save`, live for the process: starts true when given on the
   /// command line, and can also be flipped on later by an attach client
@@ -174,15 +217,26 @@ impl AppState {
       end_silence_ms: Arc::new(AtomicU64::new(0)),
       whisper_model_path: Arc::new(Mutex::new(String::new())),
       debate_enabled: Arc::new(AtomicBool::new(false)),
+      debate_pending_submit: Arc::new(AtomicBool::new(false)),
       debate_subject: Arc::new(Mutex::new(String::new())),
       debate_agents: Arc::new(Mutex::new(Vec::new())),
       debate_turn: Arc::new(AtomicU64::new(0)),
       max_turns: Arc::new(AtomicU64::new(0)),
+      debate_started_via_cli: Arc::new(AtomicBool::new(false)),
       debate_paused: Arc::new(AtomicBool::new(false)),
       debate_modal_visible: Arc::new(AtomicBool::new(false)),
       debate_modal_selected_agent1: Arc::new(Mutex::new(0)),
       debate_modal_selected_agent2: Arc::new(Mutex::new(1)),
       debate_modal_focus: Arc::new(Mutex::new(0)),
+      debate_modal_subject: Arc::new(Mutex::new(String::new())),
+      debate_modal_caret: Arc::new(Mutex::new(0)),
+      debate_modal_max_turns: Arc::new(Mutex::new(String::new())),
+      debate_modal_max_turns_caret: Arc::new(Mutex::new(0)),
+      save_modal_visible: Arc::new(AtomicBool::new(false)),
+      save_modal_check_txt: Arc::new(AtomicBool::new(true)),
+      save_modal_check_html: Arc::new(AtomicBool::new(false)),
+      save_modal_focus: Arc::new(Mutex::new(0)),
+      save_modal_folder: Arc::new(Mutex::new(None)),
       save_path: Arc::new(Mutex::new(None)),
       save_enabled: Arc::new(AtomicBool::new(false)),
       save_html_enabled: Arc::new(AtomicBool::new(false)),

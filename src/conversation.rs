@@ -159,7 +159,6 @@ pub fn conversation_thread(
   let mut last_interrupt = interrupt_counter.load(Ordering::SeqCst);
   let mut debate_interrupted = false;
   let mut pending_user_msg: Option<String> = init_prompt;
-  let mut prev_debate_enabled = false;
 
   let state = GLOBAL_STATE.get().expect("AppState not initialized");
   // Seed the live flags from the CLI switches; a daemon-attach client can
@@ -172,40 +171,39 @@ pub fn conversation_thread(
   if save_html {
     state.save_html_enabled.store(true, Ordering::Relaxed);
   }
-  if state.debate_enabled.load(Ordering::SeqCst) {
-    // render the initial user message for the debate
-    if let Some(msg) = &pending_user_msg {
-      if !msg.is_empty() {
-        send_user_message_ui(&tx_ui, msg, false);
-        push_user_message(&conversation_history, msg);
-        perform_save(&conversation_history, &settings_clone);
-      }
-    } else {
-      // If no initial prompt, use debate subject as first user message
-      let subject = state.debate_subject.lock().unwrap();
-      if !subject.is_empty() {
-        let msg = subject.clone();
-        send_user_message_ui(&tx_ui, &msg, false);
-        push_user_message(&conversation_history, &msg);
-        perform_save(&conversation_history, &settings_clone);
-      }
-    }
-  }
 
   //  –––––––––––––––––––––––––––––––––––––
   //   loop
   //  –––––––––––––––––––––––––––––––––––––
   loop {
-    // Detect transition to debate mode
-    let current_debate_enabled = state.debate_enabled.load(Ordering::SeqCst);
-    if current_debate_enabled && !prev_debate_enabled {
-      // Reset state for new debate: clear pending message and interrupt flag
+    // A debate (re)started - `--debate` on the CLI (set in main.rs, before
+    // this thread's loop, sometimes before this thread has even finished
+    // loading the whisper model) or the Ctrl+D popup (mid-session) - flags
+    // this with `debate_pending_submit` rather than watching `debate_enabled`
+    // for a false-to-true edge: an edge check only works if this loop
+    // happens to observe the exact instant it flips, which a slow-starting
+    // thread or a fast keyboard-thread sequence can each miss silently. The
+    // swap below can't be missed - whoever starts the debate sets this
+    // before `debate_enabled`, and it is consumed exactly once, whenever
+    // this loop next gets here, regardless of timing.
+    if state.debate_enabled.load(Ordering::SeqCst)
+      && state.debate_pending_submit.swap(false, Ordering::SeqCst)
+    {
       pending_user_msg = None;
       debate_interrupted = false;
-      // Also reset last_interrupt to avoid false interruption detection
       last_interrupt = interrupt_counter.load(Ordering::SeqCst);
+
+      // Submit the debate's initial message, if any, as a real first turn -
+      // shown, recorded, and handed to turn 0 via `pending_user_msg` exactly
+      // like a spoken interruption would.
+      let subject = state.debate_subject.lock().unwrap().clone();
+      if !subject.is_empty() {
+        send_user_message_ui(&tx_ui, &subject, false);
+        push_user_message(&conversation_history, &subject);
+        perform_save(&conversation_history, &settings_clone);
+        pending_user_msg = Some(subject);
+      }
     }
-    prev_debate_enabled = current_debate_enabled;
 
     ensure_save_setup(&conversation_history, &settings_clone)?;
 
@@ -267,7 +265,17 @@ pub fn conversation_thread(
               }
               let user_text = match &utt.text {
                 Some(t) => t.clone(),
-                None => transcribe_utterance(whisper, &utt.audio, &state.language.lock().unwrap())?,
+                None => {
+                  // Spinner while STT runs, same as the LLM step already gets -
+                  // otherwise the bar just shows "paused"/"recording" through a
+                  // window where the mic is actually done and something is
+                  // busy, which reads as stuck rather than working.
+                  ui.thinking.store(true, Ordering::Relaxed);
+                  let result =
+                    transcribe_utterance(whisper, &utt.audio, &state.language.lock().unwrap());
+                  ui.thinking.store(false, Ordering::Relaxed);
+                  result?
+                }
               };
               let user_text = user_text.trim().to_string();
               if utt.kind == UtteranceKind::Paste {
@@ -321,25 +329,26 @@ pub fn conversation_thread(
         let turn = state.debate_turn.load(Ordering::SeqCst) as usize;
         let agent_count = debate_agents.len();
 
-        // Determine current agent and message
+        // Determine current agent and message. Turn 0's initial message
+        // (--debate's own <subject> or -p/-i, or the popup's typed text)
+        // always arrives here as `pending_user_msg`, the same as a spoken
+        // interruption - see the pre-loop handling and the transition
+        // detection above - so there is no turn-0 special case left: every
+        // turn either responds to a submitted message or, lacking one,
+        // continues from the last assistant reply.
         let (current_agent, user_msg) = if let Some(msg) = pending_user_msg.take() {
           // User interrupted - current agent responds to user
           (&debate_agents[turn % agent_count], msg)
         } else {
           let current_agent = &debate_agents[turn % agent_count];
-          let subject = state.debate_subject.lock().unwrap().clone();
-          let user_msg = if turn == 0 && !subject.is_empty() {
-            format!("{}. Respond as short as possible", subject)
-          } else {
-            // Get last assistant message as the prompt for next agent
-            let hist = conversation_history.lock().unwrap();
-            hist
-              .iter()
-              .rev()
-              .find(|m| m.role == "assistant")
-              .map(|m| m.content.clone())
-              .unwrap_or_else(|| subject.clone())
-          };
+          // Get last assistant message as the prompt for next agent
+          let hist = conversation_history.lock().unwrap();
+          let user_msg = hist
+            .iter()
+            .rev()
+            .find(|m| m.role == "assistant")
+            .map(|m| m.content.clone())
+            .unwrap_or_else(|| state.debate_subject.lock().unwrap().clone());
           (current_agent, user_msg)
         };
 
@@ -383,15 +392,49 @@ pub fn conversation_thread(
               let turns_done = state.debate_turn.fetch_add(1, Ordering::SeqCst) + 1;
               let max_turns = state.max_turns.load(Ordering::SeqCst);
               // the reply is saved and its audio has drained by now, so this is
-              // where --max-turns can end the debate without cutting anything
+              // where --max-turns ends the debate without cutting anything
               if max_turns > 0 && turns_done >= max_turns {
+                if state.debate_started_via_cli.load(Ordering::SeqCst) {
+                  // A `--debate ... --max-turns N` CLI run stays script-friendly:
+                  // it exits the process once its turn limit is reached, same as
+                  // always. Only a debate (re)started from the Ctrl+D popup
+                  // switches back to conversation mode instead (see below).
+                  crate::log::notice(
+                    "info",
+                    &format!("--max-turns {} reached, ending the debate", max_turns),
+                  );
+                  crate::util::EXIT_LINE_PRINTED.store(true, Ordering::Relaxed);
+                  thread::sleep(Duration::from_millis(50));
+                  terminate(0);
+                }
                 crate::log::notice(
                   "info",
-                  &format!("--max-turns {} reached, ending the debate", max_turns),
+                  &format!("--max-turns {} reached, switching to conversation mode", max_turns),
                 );
-                crate::util::EXIT_LINE_PRINTED.store(true, Ordering::Relaxed);
-                thread::sleep(Duration::from_millis(50));
-                terminate(0);
+                // Finalize the just-finished debate's html export (if any)
+                // before `reset_conversation` below forgets it - the same
+                // finalization `terminate()` does on the way out, needed here
+                // too since this path doesn't exit the process.
+                crate::html_export::finish();
+                state.debate_enabled.store(false, Ordering::SeqCst);
+                state.debate_agents.lock().unwrap().clear();
+                state.debate_turn.store(0, Ordering::SeqCst);
+                *state.debate_subject.lock().unwrap() = String::new();
+                state.reset_conversation();
+                // Back to the pre-debate agent: `handle_reply` already
+                // restores it via `restore_agent_settings` after every turn,
+                // so this just frees whichever debate-only engine(s) that
+                // agent doesn't itself use.
+                crate::tts::apply_residency(state);
+                interrupt_counter.fetch_add(1, Ordering::SeqCst);
+                state.playback.playback_active.store(false, Ordering::Relaxed);
+                let _ = stop_play_tx.try_send(());
+                let _ = tx_ui.send(format!(
+                  "line|\n\x1b[33mDebate ended at {} max turns. Switched to conversation mode.\nYou can start a new debate by pressing Control+D\n\x1b[0m",
+                  max_turns
+                ));
+                debate_interrupted = false;
+                continue;
               }
             }
           }
@@ -461,7 +504,16 @@ pub fn conversation_thread(
         crate::log::log("debug", "Transcribing utterance...");
         let user_text = match &utt.text {
           Some(t) => t.clone(),
-          None => transcribe_utterance(whisper, &utt.audio, &state.language.lock().unwrap())?,
+          None => {
+            // Spinner while STT runs, same as the LLM step already gets -
+            // otherwise the bar just shows "paused"/"recording" through a
+            // window where the mic is actually done and something is busy,
+            // which reads as stuck rather than working.
+            ui.thinking.store(true, Ordering::Relaxed);
+            let result = transcribe_utterance(whisper, &utt.audio, &state.language.lock().unwrap());
+            ui.thinking.store(false, Ordering::Relaxed);
+            result?
+          }
         };
         crate::log::log("info", &format!("Transcribed: '{}'", user_text));
         let user_text = user_text.trim().to_string();
@@ -541,7 +593,6 @@ pub fn conversation_thread(
 
         // Snapshot interruption counter for this assistant turn.
         let speaker_arc = std::sync::Arc::new(std::sync::Mutex::new(PhraseSpeaker::new()));
-        let mut got_any_token = false;
 
         let _ = tx_ui.send("line|".to_string());
         let _ = tx_ui.send(format!("line|{}", crate::ui::ASSIST_LABEL));
@@ -550,9 +601,11 @@ pub fn conversation_thread(
         let speaker_arc_cloned_for_closure = speaker_arc.clone();
         let tx_ui_cloned_for_closure = tx_ui.clone();
         let tts_tx_cloned_for_closure = tts_tx.clone();
+        // Cleared once this whole reply (request + streaming) is done, not on
+        // the first token: the spinner should stay up through the entire
+        // "busy generating" window, only stepping aside for the play icon
+        // once audio actually starts (the bottom bar checks `play` first).
         let ui_thinking_cloned_for_closure = ui.thinking.clone();
-        // clones for closure
-        let ui_thinking_for_closure = ui_thinking_cloned_for_closure.clone();
         // Capture conversation history and assistant name for history updates
         let conv_hist_for_closure = conversation_history.clone();
         let assistant_name_for_closure = settings_clone.name.clone();
@@ -568,10 +621,6 @@ pub fn conversation_thread(
         let on_piece = move |piece: &str| {
           if piece.is_empty() {
             return;
-          }
-          if !got_any_token && !piece.is_empty() {
-            got_any_token = true;
-            ui_thinking_for_closure.store(false, Ordering::Relaxed);
           }
           // Short-lived lock: the guard is dropped at the end of this statement.
           let phrase = speaker_arc_cloned_for_closure.lock().unwrap().push_text(piece);
@@ -666,6 +715,15 @@ pub fn conversation_thread(
         // Persist conversation after streaming (same as handle_reply does at line 970)
         perform_save(&conversation_history, &settings_clone);
       }
+      // Without this, the loop parks here indefinitely whenever it's idle in
+      // conversation mode: nothing about starting a debate (from the Ctrl+D
+      // popup, or --max-turns switching back to conversation mode and then
+      // straight into a new debate) sends anything on `rx_cmd`/`rx_utt`, so
+      // the top-of-loop checks above (including `debate_pending_submit`)
+      // never got a chance to run again until the user happened to speak -
+      // which is also why a spoken utterance "unstuck" it, but by then it
+      // had already overwritten the typed subject with what was said.
+      default(std::time::Duration::from_millis(100)) => {}
     }
   }
   Ok(())
@@ -794,28 +852,14 @@ fn maybe_setup_and_save(
     // sit in one `CONVERSATION-<stem>/` (or `DEBATE-<stem>/`) folder: reuse
     // whichever of the two is already running rather than starting a second
     // folder for it.
-    let folder_name = state
-      .save_path
-      .lock()
-      .unwrap()
-      .as_ref()
-      .and_then(|p| p.parent())
-      .and_then(|p| p.file_name())
-      .map(|s| s.to_string_lossy().to_string())
-      .or_else(crate::html_export::dir_name)
-      .unwrap_or_else(|| {
-        let kind = if state.debate_enabled.load(Ordering::SeqCst) {
-          "DEBATE"
-        } else {
-          "CONVERSATION"
-        };
-        format!(
-          "{}-{}_{}",
-          kind,
-          date_str,
-          &Uuid::new_v4().to_string()[..8]
-        )
-      });
+    let folder_name = active_save_folder(state).unwrap_or_else(|| {
+      let kind = if state.debate_enabled.load(Ordering::SeqCst) {
+        "DEBATE"
+      } else {
+        "CONVERSATION"
+      };
+      format!("{}-{}_{}", kind, date_str, &Uuid::new_v4().to_string()[..8])
+    });
     let session_dir = conv_dir.join(&folder_name);
 
     if need_txt {
@@ -834,6 +878,37 @@ fn maybe_setup_and_save(
 
   perform_save(conversation_history, settings_clone);
   Ok(())
+}
+
+/// Folder currently receiving `-s`/`--save-html` output, if either is
+/// running: the `-s` text/wav export's own folder, or `--save-html`'s if
+/// only that one is active. Used both to reuse one shared folder between the
+/// two (see `maybe_setup_and_save` above) and by the Ctrl+E save popup to
+/// show where the running session is being written.
+pub fn active_save_folder(state: &AppState) -> Option<String> {
+  state
+    .save_path
+    .lock()
+    .unwrap()
+    .as_ref()
+    .and_then(|p| p.parent())
+    .and_then(|p| p.file_name())
+    .map(|s| s.to_string_lossy().to_string())
+    .or_else(crate::html_export::dir_name)
+}
+
+/// Stop `-s`/`--save-html` mid-conversation (the Ctrl+E popup's "Stop
+/// recording"): finalizes whatever is currently open and clears the flags,
+/// without touching the conversation itself - unlike
+/// `AppState::reset_conversation`, which a full history reset also goes
+/// through and which throws the transcript away too.
+pub fn stop_save(state: &AppState) {
+  crate::html_export::finish();
+  crate::playback::clear_wav_tx();
+  crate::html_export::reset();
+  *state.save_path.lock().unwrap() = None;
+  state.save_enabled.store(false, Ordering::Relaxed);
+  state.save_html_enabled.store(false, Ordering::Relaxed);
 }
 
 /// A phrase emitted by `PhraseSpeaker`.
@@ -965,6 +1040,11 @@ fn handle_reply(
     create_full_context_messages(system_prompt, user_msg.clone(), conversation_history);
 
   let my_interrupt = interrupt_counter.load(Ordering::SeqCst);
+  // Spinner for the request + streaming window - debate mode otherwise shows
+  // no "busy" indicator at all here. Cleared once streaming ends (below),
+  // not held through playback: the bottom bar already shows the play icon
+  // for that, checked ahead of the spinner.
+  state.ui.thinking.store(true, Ordering::Relaxed);
   // Speaker for incremental buffering
   let speaker_arc = Arc::new(Mutex::new(PhraseSpeaker::new()));
   let reply_accum = Arc::new(Mutex::new(String::new()));
@@ -1020,8 +1100,19 @@ fn handle_reply(
         let cleaned = phrase.tts.clone();
         if !cleaned.trim().is_empty() {
           let _ = tts_tx.send((cleaned, my_interrupt, voice.clone()));
+          // Deliberately unbounded: `wait_for_playback` (further down this
+          // turn) trusts that every phrase has already been fully
+          // synthesized and handed to the playback queue by the time it
+          // starts polling for "done". A timeout here lets `on_piece` move
+          // on to the next phrase while this one is still stuck (e.g.
+          // behind a slow engine load), which desyncs that assumption -
+          // `wait_for_playback` then sees a stray gap in the queue, decides
+          // the turn is over, and the next turn's `stop_play_tx` clears the
+          // queue out from under audio that was still in flight, cutting it
+          // off. Slow-but-not-hung engine loads are handled at the source
+          // now (the per-engine mutex in src/tts/*.rs is held for the whole
+          // build), so this can just wait.
           let _ = tts_done_rx.recv();
-        } else {
         }
       }
       if interrupt_counter_clone.load(Ordering::SeqCst) != my_interrupt_clone {
@@ -1040,6 +1131,7 @@ fn handle_reply(
     my_interrupt,
     &mut on_piece,
   ));
+  state.ui.thinking.store(false, Ordering::Relaxed);
   if let Err(e) = stream_result {
     crate::log::log("error", &format!("Streaming error: {}", e));
     // Drop the assistant placeholder if the request failed before any content

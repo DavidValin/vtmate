@@ -101,14 +101,14 @@ pub struct Args {
   )]
   pub ptt: Option<bool>,
 
-  #[arg(long, num_args=2.., value_name = "AGENT1 AGENT2 SUBJECT", help = "enable debate mode with two agents and a subject")]
+  #[arg(long, num_args=2.., value_name = "AGENT1 AGENT2 SUBJECT", help = "enable debate mode with two agents and an initial subject; the subject can be given here or via -p/-i instead, never both")]
   pub debate: Option<Vec<String>>,
 
   #[arg(
     long = "max-turns",
     value_name = "N",
     value_parser = clap::value_parser!(u64).range(1..),
-    help = "end the program after N debate turns (one agent reply is one turn)"
+    help = "end the program after N debate turns (one agent reply is one turn); a debate (re)started from the Ctrl+D popup instead switches to conversation mode"
   )]
   pub max_turns: Option<u64>,
 
@@ -733,7 +733,11 @@ const SHORTCUTS_BODY: &str = "  \x1b[90mCtrl+S\x1b[0m
       a different one by pressing ENTER on it.
   \x1b[90mCtrl+D\x1b[0m
     Opens the debate popup, to start a debate between
-      two agents.
+      two agents with an optional initial subject.
+  \x1b[90mCtrl+E\x1b[0m
+    Opens the save popup, to start saving the
+      conversation (.txt/.wav, html, or both) or stop
+      a running save, without leaving the conversation.
   \x1b[90mESCAPE (once)\x1b[0m
     Stops ongoing playback. In debate mode, this also
       pauses the debate - speak again to continue.
@@ -859,11 +863,11 @@ const OPTIONS: &[(&str, &str)] = &[
   ),
   (
     "--debate <AGENT1 AGENT2 SUBJECT> <AGENT1 AGENT2 SUBJECT>...",
-    "enable debate mode with two agents and a subject",
+    "enable debate mode with two agents and an initial subject; the subject can be given here or via -p/-i instead, never both",
   ),
   (
     "--max-turns <N>",
-    "end the program after N debate turns (one agent reply is one turn)",
+    "end the program after N debate turns (one agent reply is one turn); a debate (re)started from the Ctrl+D popup instead switches to conversation mode",
   ),
   (
     "-r, --read-file <FILENAME>",

@@ -654,10 +654,20 @@ fn rebuild_on_cpu() -> Result<Arc<TtsEngine>, Box<dyn std::error::Error + Send +
 }
 
 fn get_or_init_engine() -> Result<Arc<TtsEngine>, Box<dyn std::error::Error + Send + Sync>> {
-  if let Ok(slot) = SUPERTONIC3_ENGINE.lock() {
-    if let Some(e) = slot.as_ref() {
-      return Ok(e.clone());
-    }
+  // Held for the whole build, not just the check-and-store: two threads
+  // racing to build this same not-yet-loaded engine concurrently (the
+  // residency thread and a speaker's own lazy load, typically) used to run
+  // `TtsEngine::on_device` twice at once - wasted work at best, and at worst
+  // a way to hit the underlying onnx runtime's own session/init path from
+  // two threads simultaneously, which can make a load look hung rather than
+  // just slow. A different, already-loaded engine's speaker never touches
+  // this lock, so it stays unaffected; only a second caller wanting this
+  // exact engine now waits for the first build instead of starting its own.
+  let mut slot = SUPERTONIC3_ENGINE
+    .lock()
+    .unwrap_or_else(|e| e.into_inner());
+  if let Some(e) = slot.as_ref() {
+    return Ok(e.clone());
   }
   let base = model_root();
   let onnx_dir = base.join("onnx");
@@ -669,9 +679,6 @@ fn get_or_init_engine() -> Result<Arc<TtsEngine>, Box<dyn std::error::Error + Se
   } else {
     Device::Auto
   };
-  // Built without the lock held: model loading takes seconds, and blocking
-  // every other speaker on it is worse than the rare double build, where both
-  // engines are valid and the last one stored wins.
   let engine = runtime()?
     .block_on(TtsEngine::on_device(onnx_dir.clone(), base, false, device))
     .map_err(|e| {
@@ -688,9 +695,7 @@ fn get_or_init_engine() -> Result<Arc<TtsEngine>, Box<dyn std::error::Error + Se
     &format!("[supertonic3_tts] running on {}", engine.backend()),
   );
   let engine = Arc::new(engine);
-  if let Ok(mut slot) = SUPERTONIC3_ENGINE.lock() {
-    *slot = Some(engine.clone());
-  }
+  *slot = Some(engine.clone());
   Ok(engine)
 }
 

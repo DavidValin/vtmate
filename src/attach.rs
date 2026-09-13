@@ -108,7 +108,15 @@ pub fn run(args: &crate::config::Args) -> ! {
     "line|\x1b[36m↔ attached to vtmate daemon (pid {}) - Ctrl+C detaches, the daemon keeps running\x1b[0m",
     status.pid
   ));
-  let _ = tx_ui.send("redraw_full_history|".to_string());
+  // A fresh session (0 turns, conversation or debate) has nothing to
+  // rebuild, and `redraw_full_history` unconditionally clears the screen and
+  // reprints only from `conversation_history` - sending it here would wipe
+  // the banner and the greeting above for nothing. Once there is real
+  // history, it still needs this to lay out at the attached terminal's own
+  // width.
+  if !state.conversation_history.lock().unwrap().is_empty() {
+    let _ = tx_ui.send("redraw_full_history|".to_string());
+  }
 
   let exit_reason: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 

@@ -44,22 +44,24 @@ pub struct StreamingTts {
   gain: f32,
 }
 
-/// The shared engine, loading it if it is not resident. Built without the slot
-/// locked: loading takes seconds, and a rare double build - the stored engine
-/// wins, so callers still share one - beats blocking every other speaker.
+/// The shared engine, loading it if it is not resident. Held for the whole
+/// build, not just the check-and-store: two threads racing to build this
+/// same not-yet-loaded engine concurrently (the residency thread and a
+/// speaker's own lazy load, typically) used to run `load_engine` twice at
+/// once - wasted work at best, and at worst a way to hit the underlying onnx
+/// runtime's own session/init path from two threads simultaneously, which
+/// can make a load look hung rather than just slow. A different,
+/// already-loaded engine's speaker never touches this lock, so it stays
+/// unaffected; only a second caller wanting this exact engine now waits for
+/// the first build instead of starting its own.
 fn engine_handle() -> Result<Arc<Mutex<TtsEngine>>, Box<dyn std::error::Error + Send + Sync>> {
-  if let Some(e) = SUPERTONIC2_ENGINE
+  let mut slot = SUPERTONIC2_ENGINE
     .lock()
-    .unwrap_or_else(|e| e.into_inner())
-    .as_ref()
-  {
-    return Ok(e.clone());
-  }
-  let engine = Arc::new(Mutex::new(load_engine()?));
-  let mut slot = SUPERTONIC2_ENGINE.lock().unwrap_or_else(|e| e.into_inner());
+    .unwrap_or_else(|e| e.into_inner());
   if let Some(e) = slot.as_ref() {
     return Ok(e.clone());
   }
+  let engine = Arc::new(Mutex::new(load_engine()?));
   *slot = Some(engine.clone());
   Ok(engine)
 }

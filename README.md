@@ -280,7 +280,9 @@ All cli options:
   --debate <AGENT1> <AGENT2> -i –       initialize a debate between 2 agents with an initial prompt
                                         from STDIN
   --max-turns <N>                       end the program after N debate turns
-                                        (one agent reply is one turn)
+                                        (one agent reply is one turn); a debate
+                                        (re)started from the Ctrl+D popup
+                                        instead switches to conversation mode
   -r <file.txt>                         read a file with voice, phrase by phrase (no llm involved)
   -r -                                  read text from STDIN with voice, phrase by phrase
                                         (no llm involved). Use - for STDIN (runs in quiet mode)
@@ -363,6 +365,7 @@ echo "How to fly without wings?" | vtmate -i -
 * You can switch agents in realtime by pressing `ARROW_LEFT` / `ARROW_RIGHT` keyword arrows (you need at least 2 agents defined in `~/vtmate/settings`).
 * You can change the voice speed by pressing `ARROW_UP` / `ARROW_DOWN`
 * Press `Control+S` to add, edit or remove agents without leaving the conversation (see [Configure agents](#configure-agents))
+* Press `Control+E` to start (or stop) saving the running conversation without leaving it or restarting it: pick `.txt` + `.wav`, the html player, or both, from a popup. While a save is running, the same popup shows the folder it is writing to and a "Stop recording" button
 * Be able to save the conversation in a wav and text file by adding `-s` option. It will save it in `~/.vtmate/conversations` folder
 * Be able to save the debate as an html player with one audio file per turn by adding `-s-html` option. Each agent gets its own colour, and the whole debate can be played back from the browser
 * Save the conversation / debate as .html with playable blocks using `--save-html`. It will save it in `~/.vtmate/conversations` folder
@@ -374,6 +377,8 @@ echo "How to fly without wings?" | vtmate -i -
 
 Initialize a debate between two agents and be able to participate in the debate by speaking at any time. To create a good debate adjust the system prompts of each agent and give a detailed initial input.
 In debate mode is good idea to set `--ptt <true/false>` option so that the ptt value is not switched on each agent turn.
+
+The debate's initial subject and `-p`/`-i`'s initial prompt are the same thing: whichever one you give becomes turn 0. Give only one - a trailing `<subject>` together with `-p`/`-i` is rejected, since they would both be trying to set the same message.
 
 Start a debate with an initial subject (with forced ptt mode)
 ```
@@ -401,9 +406,9 @@ vtmate --debate "God" "Devil" "How to succeed in life?" --ptt true --max-turns 1
 * Press `SCAPE` **once** during a mid response to cancel it and stop the debate
 * Press `SCAPE` **twice** for resetting the session
 * Press double `u` to undo last response
-* You can also start/stop a debate from conversation mode by pressing `Control+D` and picking the debate agents.
+* You can also start/stop a debate from conversation mode by pressing `Control+D` and picking the debate agents. The popup also has a text field for the initial subject (the same role as the trailing `<subject>` argument above) - leave it blank to provide the topic by voice instead.
 * Be able to save the conversation in a wav and text file by adding `-s` option. It will save it in `~/.vtmate/conversations` folder
-* Add `--max-turns <N>` to end the program by itself after N turns, where one agent reply is one turn. The debate stops after that reply is spoken and saved, so nothing is cut mid sentence. A debate restarted with `Control+D` gets the same limit again
+* Add `--max-turns <N>` to end the program by itself after N turns, where one agent reply is one turn. The debate stops after that reply is spoken and saved, so nothing is cut mid sentence. The `Control+D` popup has its own "Max turns" field too (blank for no limit, or 2-1000000000000, prefilled with whatever limit is already in effect) - but reaching it there switches back to conversation mode instead of exiting, so you can keep going and start a new debate with `Control+D` right away
 * [Here is an example](https://gist.github.com/DavidValin/58cf130c4f7b2ea9a6a033bf37bc1cda) on how to create automated audio debates from youtube videos using vtmate in combination with other tools
 * For quick reference get the printable [Quicksheet (PDF)](https://raw.githubusercontent.com/DavidValin/vtmate/refs/heads/main/docs/en/quicksheet.pdf)
 
@@ -464,7 +469,7 @@ Shortcuts (change them in the `[daemon]` section of `~/.vtmate/settings`):
 Shortcuts are written as modifiers joined by `+`: `ctrl`, `alt` (or `option`), `shift`, `cmd` (or `super`), `cmdorctrl`, plus a key: letters, digits, `f1`..`f12`, `escape`, `space`, `tab`, arrows... e.g. `ctrl+alt+a`, `shift+f5`, `cmd+alt+r`.
 
 * When starting, the daemon grabs all four shortcuts. If any is already taken by another application (some desktops bind `ctrl+q` or `ctrl+alt` combinations, for example) the daemon does not start and `vtmate --daemon` lists the taken shortcuts so you can change them.
-* The agent that replies is the daemon's selected agent: run `vtmate` to attach, press `ARROW_LEFT` / `ARROW_RIGHT` to switch (this is remembered in `selected_agent`), then `Ctrl+C` to detach. Attached you get the full terminal view: the live transcript, the status bar and the usual keys (`SPACE` push-to-talk, `ESCAPE`, `u`, arrows, `Ctrl+D`). `Ctrl+C` only detaches; the daemon keeps running until `vtmate --daemon-stop`.
+* The agent that replies is the daemon's selected agent: run `vtmate` to attach, press `ARROW_LEFT` / `ARROW_RIGHT` to switch (this is remembered in `selected_agent`), then `Ctrl+C` to detach. Attached you get the full terminal view: the live transcript, the status bar and the usual keys (`SPACE` push-to-talk, `ESCAPE`, `u`, arrows, `Ctrl+D`, `Ctrl+S`, `Ctrl+E`). `Ctrl+C` only detaches; the daemon keeps running until `vtmate --daemon-stop`.
 * Only one daemon runs at a time. Its files live in `~/.vtmate`: `daemon.pid`, `daemon.sock` (Linux/macOS) and `daemon.log` (diagnostics only, never the conversation).
 * The daemon always works in push-to-talk mode: the microphone is only open while a shortcut is held.
 
