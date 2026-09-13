@@ -53,7 +53,7 @@ def slugify(text):
 # one unit, so "LLM integration" right after it is pushed to its own page
 # too rather than trailing into whatever room is left; "How to use it"
 # should likewise not trail whatever came before it.
-PAGE_START = {'How it works', 'LLM integration', 'How to use it'}
+PAGE_START = {'How it works', 'LLM integration', 'How to use it', 'Language support'}
 
 def heading(m):
     tag, text = m.group(1), m.group(2)

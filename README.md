@@ -255,61 +255,12 @@ vtmate --help
 
 ## How to use it
 
-The first agent defined in `~/.vtmate/agents` will always be selected agent when running vtmate, unless `-a <agent_name>` is used.
-
-Before running vtmate make sure ollama is running: `ollama serve`.
-Optionally, if you want to use llama.cpp make sure llama-server is running.
-With a hosted provider nothing needs to run locally, only the `api_key` must be set.
-
-All cli options:
-
+Start vtmate and press SPACE while you talk and then release (PTT mode):
 ```
-  -a <agent_name>                       set a specific initial agent
-  -p <prompt>                           initialize with a text prompt
-  -q                                    quiet mode: produces a single response and exit
-                                        (requires `-p` or `-i`)
-  -i <file.txt>                         initialize with a file prompt
-  -i -                                  initialize with prompt from STDIN (runs in quiet mode)
-  -s                                    save the conversation to text and audio file in
-                                        ~/.vtmate/conversations or ~/.vtmate/read-files
-  -s-html, --save-html                  save the conversation to a folder in ~/.vtmate/conversations
-                                        with an html player and one audio file per turn
-  --debate <AGENT1> <AGENT2> [SUBJECT]  initialize a debate between 2 agents with an initial prompt
-  --debate <AGENT1> <AGENT2> -i <FILE>  initialize a debate between 2 agents with an initial prompt
-                                        from file
-  --debate <AGENT1> <AGENT2> -i –       initialize a debate between 2 agents with an initial prompt
-                                        from STDIN
-  --max-turns <N>                       end the program after N debate turns
-                                        (one agent reply is one turn); a debate
-                                        (re)started from the Ctrl+D popup
-                                        instead switches to conversation mode
-  -r <file.txt>                         read a file with voice, phrase by phrase (no llm involved)
-  -r -                                  read text from STDIN with voice, phrase by phrase
-                                        (no llm involved). Use - for STDIN (runs in quiet mode)
-  -r-stdout <file.txt>                  like -r, but with no on-screen text or navigation:
-                                        streams the synthesized speech as a wav to STDOUT
-                                        instead, for piping (no llm involved)
-  -r-stdout -                           same, reading the text from STDIN instead of a file
-  --stt <wav_file>                      transcribe a wav file to text and exit (no llm, no tts)
-  --stt -                               transcribe wav audio from STDIN to text and exit
-                                        (no llm, no tts). Uses the whisper model of the
-                                        selected agent (-a)
-  -c <agents_file>                      use a specific agents file instead of ~/.vtmate/agents
-  --list-voices                         list all voices for all languages and tts systems
-  --render-quicksheet-pdf               write the printable quicksheet PDF to the current
-                                        folder and exit
-  --ptt <true/false>                    override for this session the ptt setting for all agents
-                                        independently of its settings
-  --daemon                              start vtmate in the background, driven by global shortcuts
-                                        (see daemon mode)
-  --daemon-stop                         stop the background daemon
-  --daemon-status                       show whether the daemon is running and its shortcuts
-  --verbose                             run the program in verbose mode
-  --version                             print the vtmate installed version
-  --help                                show help
+vtmate
 ```
 
-For quick reference get the printable [Quicksheet (PDF)](https://raw.githubusercontent.com/DavidValin/vtmate/refs/heads/main/docs/en/quicksheet.pdf)
+See [Quicksheet (PDF)](https://raw.githubusercontent.com/DavidValin/vtmate/refs/heads/main/docs/en/quicksheet.pdf) to learn how to use it.
 
 ### Conversation mode
 
