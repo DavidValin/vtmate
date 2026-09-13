@@ -37,7 +37,6 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DIST_DIR="${PROJECT_ROOT}/dist"
 PKG_DIR="${DIST_DIR}/packages"
 ASSETS_DIR="${PROJECT_ROOT}/assets"
-ESPEAK_ARCHIVE="${ASSETS_DIR}/espeak-ng-data.tar.gz"
 
 DO_PACKAGE=1
 DOCKER_NO_CACHE=1
@@ -215,53 +214,6 @@ can_run_amd64() { docker run --rm --platform=linux/amd64 alpine:3.19 uname -m >/
 FORCE_AMD64_DOCKER=0
 if [[ "$docker_ok" -eq 1 ]] && can_run_amd64; then FORCE_AMD64_DOCKER=1; fi
 
-# Ensure embedded eSpeak-ng data archive exists
-ensure_espeak_data_archive() {
-  if [[ -f "${ESPEAK_ARCHIVE}" ]]; then
-    echo "✔ Found embedded asset: ${ESPEAK_ARCHIVE}"
-    return 0
-  fi
-
-  echo "== Generating embedded asset: ${ESPEAK_ARCHIVE} =="
-
-  if [[ "$docker_ok" -ne 1 ]]; then
-    echo "ERROR: Docker not found and ${ESPEAK_ARCHIVE} is missing."
-    exit 1
-  fi
-  local tmp img df
-  tmp="$(mktemp -d)"
-  df="${tmp}/Dockerfile.espeak.asset"
-  img="local/${BIN_NAME}-espeak-asset:cache"
-  cat > "$df" <<'DOCKERFILE'
-FROM ubuntu:noble
-ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates tar gzip espeak-ng-data \
- && rm -rf /var/lib/apt/lists/*
-WORKDIR /out
-DOCKERFILE
-
-  local build_args=(--pull)
-  [[ "${DOCKER_NO_CACHE}" -eq 1 ]] && build_args+=(--no-cache)
-  docker build "${build_args[@]}" --platform=linux/amd64 -f "$df" -t "$img" "$tmp"
-
-  docker run --rm --platform=linux/amd64 \
-    -v "${ASSETS_DIR}:/out" -w /out \
-    "$img" \
-    bash -lc '
-      set -euo pipefail
-      cp -a /usr/share/espeak-ng-data ./espeak-ng-data
-      rm -rf ./espeak-ng-data/voices
-      tar -czf espeak-ng-data.tar.gz espeak-ng-data
-      rm -rf ./espeak-ng-data
-    '
-
-  docker image rm -f "$img" >/dev/null 2>&1 || true
-  rm -rf "$tmp" >/dev/null 2>&1 || true
-  [[ -f "${ESPEAK_ARCHIVE}" ]] || { echo "ERROR: failed to generate ${ESPEAK_ARCHIVE}"; exit 1; }
-  echo "✔ Generated: ${ESPEAK_ARCHIVE}"
-}
-
 # -----------------------------
 # Linux copy helper
 # -----------------------------
@@ -371,7 +323,7 @@ RUN set -eux; \
     x86_64-linux-musl-gfortran --version; \
     x86_64-linux-musl-g++ --version
 
-# bindgen (espeak-rs-sys, whisper-rs-sys) loads libclang at build-script run
+# bindgen (whisper-rs-sys) loads libclang at build-script run
 # time; without this it panics with "Unable to find libclang". Resolve the
 # directory rather than hardcoding an LLVM version, and fail here if absent.
 RUN set -eux; \
@@ -479,29 +431,6 @@ RUN set -eux; \
 ENV OPENBLAS_PATH=/usr/local
 ENV BLAS_LIBRARIES=/usr/local/lib/libopenblas.a
 ENV BLAS_INCLUDE_DIRS=/usr/local/include
-
-# ----------------------------------------------------------
-# Build espeak-ng musl version (amd64)
-# ----------------------------------------------------------
-RUN set -eux; \
-    git clone --depth 1 https://github.com/espeak-ng/espeak-ng.git /espeak-ng; \
-    cmake -S /espeak-ng -B /espeak-ng/build \
-      -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_CXX_FLAGS="-std=c++17" \
-      -DCMAKE_EXE_LINKER_FLAGS="-static" \
-      -DCOMPILE_INTONATIONS=OFF \
-      -DENABLE_TESTS=OFF \
-      -DBUILD_SHARED_LIBS=OFF \
-      -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-      -DCMAKE_SKIP_RPATH=ON \
-      -DCMAKE_INSTALL_RPATH="" \
-      -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=OFF \
-      -DCMAKE_INSTALL_PREFIX=/usr/local; \
-    cmake --build /espeak-ng/build -j$(nproc); \
-    cmake --install /espeak-ng/build; \
-    rm -rf /espeak-ng
-
-ENV ESPEAK_NG_DIR="/usr/local/lib"
 
 # ----------------------------------------------------------
 # musl locale compatibility shim for FlatBuffers (strtoll_l)
@@ -886,7 +815,7 @@ RUN set -eux; \
     aarch64-linux-musl-gfortran --version; \
     aarch64-linux-musl-g++ --version
 
-# bindgen (espeak-rs-sys, whisper-rs-sys) loads libclang at build-script run
+# bindgen (whisper-rs-sys) loads libclang at build-script run
 # time; without this it panics with "Unable to find libclang". Resolve the
 # directory rather than hardcoding an LLVM version, and fail here if absent.
 RUN set -eux; \
@@ -1012,29 +941,6 @@ RUN set -eux; \
 ENV OPENBLAS_PATH=/usr/local
 ENV BLAS_LIBRARIES=/usr/local/lib/libopenblas.a
 ENV BLAS_INCLUDE_DIRS=/usr/local/include
-
-# ----------------------------------------------------------
-# Build espeak-ng musl version (arm64)
-# ----------------------------------------------------------
-RUN set -eux; \
-    git clone --depth 1 https://github.com/espeak-ng/espeak-ng.git /espeak-ng; \
-    cmake -S /espeak-ng -B /espeak-ng/build \
-      -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_CXX_FLAGS="-std=c++17" \
-      -DCMAKE_EXE_LINKER_FLAGS="-static" \
-      -DCOMPILE_INTONATIONS=OFF \
-      -DENABLE_TESTS=OFF \
-      -DBUILD_SHARED_LIBS=OFF \
-      -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-      -DCMAKE_SKIP_RPATH=ON \
-      -DCMAKE_INSTALL_RPATH="" \
-      -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=OFF \
-      -DCMAKE_INSTALL_PREFIX=/usr/local; \
-    cmake --build /espeak-ng/build -j$(nproc); \
-    cmake --install /espeak-ng/build; \
-    rm -rf /espeak-ng
-
-ENV ESPEAK_NG_DIR="/usr/local/lib"
 
 # ----------------------------------------------------------
 # musl locale compatibility shim for FlatBuffers (strtoll_l)
@@ -1972,7 +1878,6 @@ DOCKERFILE
 # -----------------------------
 # Run builds
 # -----------------------------
-ensure_espeak_data_archive
 
 # musl covers cpu-static only. vulkan/cuda cannot be musl - the GPU loaders the
 # user installs are glibc - so they go through build_linux_glibc_variant, and so

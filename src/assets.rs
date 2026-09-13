@@ -3,45 +3,10 @@
 // ------------------------------------------------------------------
 
 use crate::util::get_user_home_path;
-use flate2::read::GzDecoder;
-use std::{fs, io::Cursor};
-use tar::Archive;
+use std::fs;
 
 // API
 // ------------------------------------------------------------------
-
-pub fn ensure_piper_espeak_env() {
-  // Respect user override
-  if std::env::var_os("PIPER_ESPEAKNG_DATA_DIRECTORY").is_some() {
-    return;
-  }
-  let home = match get_user_home_path() {
-    Some(h) => h,
-    None => return,
-  };
-  let base = home.join(".vtmate");
-  let espeak_dir = base.join("espeak-ng-data");
-  let marker = base.join(".espeak_extracted");
-  if !(marker.exists() && espeak_dir.is_dir()) {
-    // Only the espeak data is stale, so only it goes: `base` is ~/.vtmate,
-    // which also holds the user's settings, their settings backups,
-    // read-files and conversations. The archive unpacks a single top-level
-    // espeak-ng-data/ into `base`, so dropping that directory and the marker
-    // is the same fresh start without the collateral damage.
-    let _ = fs::remove_dir_all(&espeak_dir);
-    let _ = fs::remove_file(&marker);
-    if fs::create_dir_all(&base).is_ok() {
-      let gz = GzDecoder::new(Cursor::new(embedded_espeak_archive()));
-      let mut ar = Archive::new(gz);
-      if ar.unpack(&base).is_ok() {
-        let _ = fs::write(&marker, b"ok");
-      }
-    }
-  }
-  unsafe {
-    std::env::set_var("PIPER_ESPEAKNG_DATA_DIRECTORY", base.as_os_str());
-  }
-}
 
 pub fn ensure_assets_env() {
   // Respect user override
@@ -418,18 +383,6 @@ fn embedded_supertonic3_file(rel: &str) -> &'static [u8] {
     )),
     _ => panic!("Unknown supertonic3 file {}", rel),
   }
-}
-
-/// Returns the embedded espeak-ng data archive (tar.gz) as raw bytes.
-///
-/// The archive file is embedded at compile time.
-/// Make sure this path exists when compiling:
-///   <crate>/assets/espeak-ng-data.tar.gz
-fn embedded_espeak_archive() -> &'static [u8] {
-  include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/espeak-ng-data.tar.gz"
-  ))
 }
 
 fn embedded_kokoro_0_bin() -> &'static [u8] {

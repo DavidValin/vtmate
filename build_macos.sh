@@ -5,7 +5,6 @@ BIN_NAME="vtmate"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DIST_DIR="${PROJECT_ROOT}/dist"
 ASSETS_DIR="${PROJECT_ROOT}/assets"
-ESPEAK_ARCHIVE="${ASSETS_DIR}/espeak-ng-data.tar.gz"
 
 usage() {
   cat <<'USAGE'
@@ -47,62 +46,6 @@ mkdir -p "${DIST_DIR}" "${ASSETS_DIR}"
 
 echo "Version: ${VERSION}"
 
-
-# --- Embedded eSpeak asset generation ---
-
-docker_ok=0
-command -v docker >/dev/null 2>&1 && docker_ok=1
-
-ensure_espeak_data_archive() {
-  if [[ -f "${ESPEAK_ARCHIVE}" ]]; then
-    echo "✔ Found embedded asset: ${ESPEAK_ARCHIVE}"
-    return 0
-  fi
-
-  echo "== Generating embedded asset: ${ESPEAK_ARCHIVE} =="
-
-  if [[ "$docker_ok" -ne 1 ]]; then
-    echo "ERROR: Docker not found and ${ESPEAK_ARCHIVE} is missing."
-    exit 1
-  fi
-
-  local tmp img df
-  tmp="$(mktemp -d)"
-  df="${tmp}/Dockerfile.espeak.asset"
-  img="local/${BIN_NAME}-espeak-asset:${VERSION}-$$"
-
-  cat > "$df" <<'DOCKERFILE'
-FROM ubuntu:noble
-ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates tar gzip espeak-ng-data \
- && rm -rf /var/lib/apt/lists/*
-WORKDIR /out
-DOCKERFILE
-
-  docker build --pull --platform=linux/amd64 -f "$df" -t "$img" "$tmp"
-
-  rm -f "${ESPEAK_ARCHIVE}"
-  docker run --rm --platform=linux/amd64 \
-    -v "${ASSETS_DIR}:/out" -w /out \
-    "$img" \
-    bash -lc '
-      set -euo pipefail
-      cp -a /usr/share/espeak-ng-data ./espeak-ng-data
-      rm -rf ./espeak-ng-data/voices
-      tar -czf espeak-ng-data.tar.gz espeak-ng-data
-      rm -rf ./espeak-ng-data
-    '
-
-  docker image rm -f "$img" >/dev/null 2>&1 || true
-  rm -rf "$tmp" >/dev/null 2>&1 || true
-
-  [[ -f "${ESPEAK_ARCHIVE}" ]] || { echo "ERROR: failed to generate ${ESPEAK_ARCHIVE}"; exit 1; }
-  echo "✔ Generated: ${ESPEAK_ARCHIVE}"
-}
-
-ensure_espeak_data_archive
-
 command -v cargo >/dev/null 2>&1 || { echo "ERROR: cargo not found"; exit 1; }
 
 arch="${ARCH_SEL:-$(uname -m)}"
@@ -142,11 +85,9 @@ fi
 
 echo "== Building macOS (${arch}) with features: ${FEATURES:-none} =="
 
-# espeak-ng's phoneme compiler holds paths in a fixed ~180-byte buffer and
-# silently truncates past it ("Bad vowel file: vwl_en_us_nyc/a_raised" as it
-# looks for .../a_ra). Adding --target inserts the triple into the path, which
-# alone pushed the old target-cross/macos-<arch> layout over that limit, so
-# keep the build directory short and outside the project tree.
+# A previous dependency held path buffers with a low fixed size limit that
+# --target's triple could push past; kept short and outside the project tree
+# since there is no upside to a longer path.
 CARGO_TARGET_DIR="${TARGET_ROOT:-${HOME}/t/${arch}}"
 mkdir -p "${CARGO_TARGET_DIR}"
 

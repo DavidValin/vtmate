@@ -33,10 +33,6 @@ $env:CARGO_TARGET_DIR = Join-Path (Split-Path -Qualifier $PROJECT_ROOT) "c"
 # disable it outright rather than depend on path-length budgets holding.
 $env:TrackFileAccess = "false"
 
-$ESPEAK_SRC     = Join-Path $VENDOR_DIR "espeak-ng"
-$ESPEAK_BUILD   = Join-Path $ESPEAK_SRC "build-msvc"
-$ESPEAK_INSTALL = Join-Path $ESPEAK_BUILD "install"
-
 $PROTOC_SRC     = Join-Path $PROJECT_ROOT "protobuf"
 $PROTOC_BUILD   = Join-Path $PROJECT_ROOT "protobuf\build"
 $PROTOC_INSTALL = Join-Path $PROJECT_ROOT "protobuf\install"
@@ -278,9 +274,9 @@ if (-not $genMatch) {
 $CMAKE_GENERATOR = $genMatch.Matches[0].Value
 Write-Host "CMake generator: $CMAKE_GENERATOR"
 
-# cmake-rs (espeak-rs-sys, whisper-rs-sys) reads CMAKE_GENERATOR from the
-# environment and supplies -Ax64 / -Thost=x64 itself, so this single export
-# keeps the crate sub-builds on the same toolchain as ours.
+# cmake-rs (whisper-rs-sys) reads CMAKE_GENERATOR from the environment and
+# supplies -Ax64 / -Thost=x64 itself, so this single export keeps the crate
+# sub-build on the same toolchain as ours.
 $env:CMAKE_GENERATOR = $CMAKE_GENERATOR
 
 $env:CARGO_BUILD_JOBS = 1
@@ -486,58 +482,6 @@ if ($WITH_VULKAN) {
 }
 else {
     Remove-Item Env:VULKAN_SDK -ErrorAction SilentlyContinue
-}
-
-# ==========================================================
-# BUILD ESPEAK-NG STATIC
-# ==========================================================
-$ESPEAK_LIB = Join-Path $ESPEAK_INSTALL "lib" "espeak-ng.lib"
-
-if (-not (Test-Path $ESPEAK_LIB)) {
-
-    Write-Host ""
-    Write-Host "=== Building eSpeak NG (MSVC) ==="
-
-    # Clone repository if source doesn't exist
-    if (-not (Test-Path $ESPEAK_SRC)) {
-        New-Item -ItemType Directory -Force -Path $VENDOR_DIR | Out-Null
-        git clone https://github.com/espeak-ng/espeak-ng $ESPEAK_SRC
-        if ($LASTEXITCODE -ne 0) { exit 1 }
-    }
-
-    # Change directory to source
-    Push-Location $ESPEAK_SRC
-
-    # Configure with CMake
-    cmake -S . `
-      -B $ESPEAK_BUILD `
-      -G $CMAKE_GENERATOR `
-      -A x64 `
-      -DCMAKE_BUILD_TYPE=Release `
-      -DCMAKE_CXX_STANDARD=17 `
-      -DCMAKE_CXX_STANDARD_REQUIRED=ON `
-      -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
-      -DCMAKE_C_FLAGS="/MT /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS" `
-      -DCMAKE_CXX_FLAGS="/MT /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS" `
-      -DCMAKE_C_FLAGS_RELEASE="/MT /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS" `
-      -DCMAKE_CXX_FLAGS_RELEASE="/MT /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS" `
-      -DCMAKE_C_FLAGS_RELWITHDEBINFO="/MT /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS" `
-      -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="/MT /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS" `
-      -DCMAKE_C_FLAGS_DEBUG="/MTd /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS" `
-      -DCMAKE_CXX_FLAGS_DEBUG="/MTd /D_CRT_NONSTDC_NO_DEPRECATE /D_CRT_SECURE_NO_WARNINGS" `
-      -DCMAKE_INSTALL_PREFIX="$ESPEAK_INSTALL" `
-      -DBUILD_SHARED_LIBS=OFF `
-      -DESPEAKNG_BUILD_TESTS=OFF `
-      -DESPEAKNG_BUILD_EXAMPLES=OFF `
-      -DCMAKE_EXE_LINKER_FLAGS="/DEFAULTLIB:legacy_stdio_definitions.lib /DEFAULTLIB:OLDNAMES.lib" `
-      -DCMAKE_STATIC_LINKER_FLAGS="/DEFAULTLIB:legacy_stdio_definitions.lib /DEFAULTLIB:OLDNAMES.lib"
-    if ($LASTEXITCODE -ne 0) { exit 1 }
-
-    # Build and install
-    cmake --build $ESPEAK_BUILD --config Release --target INSTALL
-    if ($LASTEXITCODE -ne 0) { exit 1 }
-
-    Pop-Location
 }
 
 # ==========================================================
@@ -1580,15 +1524,13 @@ $env:CMAKE_PREFIX_PATH       = "${PREBUILT_OPENBLAS_DIR};${ONNX_BUILD}"
 $env:CMAKE_ARGS              = "-DGGML_BLAS=$ONNX_USE_BLAS -DGGML_BLAS_STATIC=$ONNX_USE_BLAS -DGGML_VULKAN=$ONNX_VULKAN_FLAG -DGGML_BLAS_VENDOR=OpenBLAS -DBLAS_VENDOR=OpenBLAS -DOPENBLAS_PATH=$PREBUILT_OPENBLAS_DIR -DBLAS_INCLUDE_DIRS=$INCLUDE_DIR -DBLAS_LIBRARIES=$OPENBLAS_LIB -DBLA_VENDOR=OpenBLAS -DBLAS_ROOT=$PREBUILT_OPENBLAS_DIR -DBLAS_DIR=$PREBUILT_OPENBLAS_DIR -DBLAS_LIBDIR=$LIB_DIR -DBLA_STATIC=ON"
 $env:WHISPER_RS_STATIC_CRT   = "1"
 $env:ORT_SYS_STATIC_CRT      = "1"
-$env:ESPEAK_RS_STATIC_CRT    = "1"
-# Forces /MT inside espeak-rs-sys / whisper-rs-sys, which build their own
-# C deps and otherwise default to /MD (see cmake/static-msvc.toolchain.cmake).
+# Forces /MT inside whisper-rs-sys, which builds its own C deps and otherwise
+# defaults to /MD (see cmake/static-msvc.toolchain.cmake).
 $env:CMAKE_TOOLCHAIN_FILE    = Join-Path $PROJECT_ROOT "cmake\static-msvc.toolchain.cmake"
 # Pins ggml to x86-64-v3 (/arch:AVX2) instead of the runner's own CPU, which
 # whisper-rs-sys would otherwise detect via GGML_NATIVE (see cmake/ggml-portable.cmake).
 $env:CMAKE_PROJECT_INCLUDE   = Join-Path $PROJECT_ROOT "cmake\ggml-portable.cmake"
 $env:CFLAGS                  = "/MT /D_CRT_SECURE_NO_WARNINGS /D_CRT_NONSTDC_NO_DEPRECATE"
-$env:ESPEAK_NG_DIR           = $ESPEAK_INSTALL
 
 
 # $ONNX_BUILD only exists on the from-source path; the prebuilt CUDA variant
@@ -1622,9 +1564,9 @@ Write-Host "ORT_USE_OPENMP = $env:ORT_USE_OPENMP"
 # produces a flat build directory instead, cutting that subdirectory count
 # drastically. Only whisper-rs-sys/ort-sys's own internal cmake-rs builds
 # read CMAKE_GENERATOR from the environment, so switching it here - after
-# every cmake invocation this script drives directly (espeak-ng, abseil,
-# onnxruntime) has already run with the Visual Studio generator above -
-# only affects that nested build, not the rest of the script.
+# every cmake invocation this script drives directly (abseil, onnxruntime)
+# has already run with the Visual Studio generator above - only affects
+# that nested build, not the rest of the script.
 if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) {
     choco install ninja -y
     if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) {
@@ -1923,7 +1865,7 @@ if (-not $dumpbin) {
         'ucrtbase(d)?\.dll',  'api-ms-win-crt-.*\.dll',
         'vcomp\d*\.dll',
         'libopenblas\.dll',   'openblas\.dll',
-        'onnxruntime.*\.dll', 'espeak-ng\.dll', 'whisper\.dll', 'ggml.*\.dll'
+        'onnxruntime.*\.dll', 'whisper\.dll', 'ggml.*\.dll'
     )
 
     # The CUDA variant deliberately links the prebuilt shared ORT (building it

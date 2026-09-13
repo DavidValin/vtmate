@@ -106,8 +106,6 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
   }
 
-  // make sure piper phonemes are unpacked
-  assets::ensure_piper_espeak_env();
   // make sure the user has the whisper + tts models unpacked
   assets::ensure_assets_env();
   assets::ensure_supertonic2_assets();

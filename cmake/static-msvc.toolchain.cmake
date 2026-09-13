@@ -1,9 +1,9 @@
 # Forces the static MSVC runtime (/MT) on every CMake sub-build.
 #
 # Consumed via the CMAKE_TOOLCHAIN_FILE env var, which the `cmake` crate
-# forwards to CMake. This is how espeak-rs-sys and whisper-rs-sys — which
-# build their own C/C++ deps and ignore our flags - get /MT instead of /MD.
-# Without it espeak-ng links MSVCRT and drags vcruntime140.dll into the exe.
+# forwards to CMake. This is how whisper-rs-sys — which builds its own C/C++
+# deps and ignores our flags - gets /MT instead of /MD. Without it, its
+# sub-build links MSVCRT and drags vcruntime140.dll into the exe.
 
 set(CMAKE_POLICY_DEFAULT_CMP0091 NEW)
 set(CMAKE_MSVC_RUNTIME_LIBRARY

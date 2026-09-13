@@ -22,7 +22,7 @@ printf '  %s\n' $deps
 # Same denylist as the CI gate: dynamic CRT, MSVC OpenMP, vendored libs.
 # CUDA/Vulkan loaders and plain Win32 DLLs are allowed.
 bad=$(printf '%s\n' $deps | grep -iE \
-  '^(vcruntime[0-9]*\.dll|msvcp[0-9]*\.dll|msvcr[0-9]*\.dll|ucrtbased?\.dll|api-ms-win-crt-.*\.dll|vcomp[0-9]*\.dll|libopenblas\.dll|openblas\.dll|onnxruntime.*\.dll|espeak-ng\.dll|whisper\.dll|ggml.*\.dll)$' || true)
+  '^(vcruntime[0-9]*\.dll|msvcp[0-9]*\.dll|msvcr[0-9]*\.dll|ucrtbased?\.dll|api-ms-win-crt-.*\.dll|vcomp[0-9]*\.dll|libopenblas\.dll|openblas\.dll|onnxruntime.*\.dll|whisper\.dll|ggml.*\.dll)$' || true)
 
 echo
 if [[ -n $bad ]]; then

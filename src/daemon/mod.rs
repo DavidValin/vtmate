@@ -448,7 +448,6 @@ pub fn run_foreground(args: &Args) -> ! {
   // ---------------------------------------------------
   // assets, channels, threads
   // ---------------------------------------------------
-  crate::assets::ensure_piper_espeak_env();
   crate::assets::ensure_assets_env();
   crate::assets::ensure_supertonic2_assets();
   crate::assets::ensure_supertonic3_assets();

@@ -574,7 +574,7 @@ Cloning does not train a model on the speaker: it searches for the `supertonic3`
 
 ###  Model files
 
-vtmate self contains (no need for manual installation) espeak-ng-data, the whisper tiny & small models, kokoro model and voices, supertonic2 model and voices and supertonic3 (Supertonic 3) model and voices which will be autoextracted from the binary when running vtmate if they are not found in next locations:
+vtmate self contains (no need for manual installation) the whisper tiny & small models, kokoro model and voices, supertonic2 model and voices and supertonic3 (Supertonic 3) model and voices which will be autoextracted from the binary when running vtmate if they are not found in next locations:
 
 whisper models:
 ```
@@ -586,11 +586,6 @@ kokoro model files:
 ```
 ~/.cache/k/0.onnx
 ~/.cache/k/0.bin
-```
-
-espeak phonemes (used by kokoro):
-```
-- `~/.vtmate/espeak-ng-data.tar.gz`
 ```
 
 supertonic2 files:

@@ -367,25 +367,6 @@ fn main() {
   }
 
   // -----------------------------
-  // Link built eSpeak NG from PowerShell build
-  // -----------------------------
-  if let Ok(espeak_dir) = env::var("ESPEAK_NG_DIR") {
-    println!("cargo:rerun-if-env-changed=ESPEAK_NG_DIR");
-
-    let espeak_lib_dir = Path::new(&espeak_dir).join("lib");
-    println!(
-      "cargo:rustc-link-search=native={}",
-      espeak_lib_dir.display()
-    );
-    println!("cargo:rustc-link-lib=static=espeak-ng");
-
-    let espeak_include_dir = Path::new(&espeak_dir).join("include");
-    println!("cargo:include={}", espeak_include_dir.display());
-  } else {
-    println!("cargo:warning=ESPEAK_NG_DIR not set, skipping prebuilt eSpeak NG linking");
-  }
-
-  // -----------------------------
   // Optionally link ONNX Runtime
   // -----------------------------
   // Look for ONNX Runtime library location
@@ -430,9 +411,6 @@ fn main() {
     println!("cargo:include={}", ort_include_dir.display());
   }
 
-  // NOTE: espeak-ng's optional libsonic/libpcaudio linking is handled by
-  // kokoro-micro's own build script, which emits it as `rustc-link-lib` so it
-  // reaches this binary. Nothing to do here.
   let out_dir = env::var("OUT_DIR").expect("OUT_DIR not set");
   let is_release = env::var("PROFILE").unwrap_or_default() == "release";
   let dest = Path::new(&out_dir).join("embedded");
