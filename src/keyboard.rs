@@ -296,6 +296,7 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
           state.debate_agents.lock().unwrap().clear();
           state.debate_turn.store(0, Ordering::SeqCst);
           *state.debate_subject.lock().unwrap() = String::new();
+          state.debate_paused.store(false, Ordering::SeqCst);
           // Back to the selected agent alone; an engine it shares with a
           // debate agent stays loaded.
           crate::tts::apply_residency(state);
@@ -804,6 +805,11 @@ fn start_debate(
   // and have the turn it just submitted wiped out from under it a moment
   // later instead.
   state.reset_conversation();
+  // A pause left over from a previous debate (Esc sets this without clearing
+  // it on exit) would otherwise make this fresh start silently drop its
+  // typed subject at conversation_thread's pause check and sit waiting for a
+  // spoken utterance instead.
+  state.debate_paused.store(false, Ordering::SeqCst);
   state.debate_pending_submit.store(true, Ordering::SeqCst);
   state.debate_enabled.store(true, Ordering::SeqCst);
   // Both debate agents speak from here on, so both engines are wanted. Reads
