@@ -145,14 +145,37 @@ pub fn run(args: &crate::config::Args) -> ! {
           }
           Ok(Some(ServerMsg::State(v))) => {
             let was_open = crate::settings_ui::is_open(&state);
+            let was_debate_open = state.debate_modal_visible.load(Ordering::Relaxed);
+            let was_save_open = state.save_modal_visible.load(Ordering::Relaxed);
             v.apply(&state);
-            // the popup is drawn from this mirror, and a state update is what
-            // makes the daemon's last key press visible here
+            // The popup is drawn from this mirror, and a state update is what
+            // makes the daemon's last key press visible here: an explicit
+            // "*_show|"/"*_hide|" line (sent alongside the state change that
+            // opens or closes a popup) always wins that race and arrives
+            // first, but every keystroke *within* an already-open popup only
+            // ever changes state - text typed into the debate subject or
+            // max-turns field, or a save-popup checkbox toggle - with no
+            // accompanying line of its own. Without re-requesting a redraw
+            // here on every such update, the popup would keep showing
+            // whatever it last rendered until some unrelated line happened
+            // to arrive afterwards.
             let is_open = crate::settings_ui::is_open(&state);
             if is_open {
               forward("settings_update|".to_string());
             } else if was_open {
               forward("settings_hide|".to_string());
+            }
+            let is_debate_open = state.debate_modal_visible.load(Ordering::Relaxed);
+            if is_debate_open {
+              forward("modal_update|".to_string());
+            } else if was_debate_open {
+              forward("modal_hide|".to_string());
+            }
+            let is_save_open = state.save_modal_visible.load(Ordering::Relaxed);
+            if is_save_open {
+              forward("save_modal_update|".to_string());
+            } else if was_save_open {
+              forward("save_modal_hide|".to_string());
             }
           }
           Ok(Some(ServerMsg::History { history })) => {
