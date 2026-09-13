@@ -1825,11 +1825,14 @@ fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
 
   // Subject label ("Initial message"), naming the agent it will be sent to:
   // it is that agent's first turn's prompt (see
-  // conversation::conversation_thread's turn-0 handling).
+  // conversation::conversation_thread's turn-0 handling). Agent 2, not
+  // Agent 1: turn 0 is a prompt handed to whoever replies to it, and that
+  // first reply is Agent 1's (debate_agents[0], see start_debate) - so this
+  // message reads as being "said to" Agent 1 by naming Agent 2 here instead.
   let subject_focused = focus == 3;
   let subject_label = format!(
     " Initial message (in name of \"{}\"):",
-    agents[agent1_idx].name
+    agents[agent2_idx].name
   );
   execute!(
     out,
