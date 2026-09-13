@@ -80,6 +80,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     daemon::run_foreground(&args);
   }
   let bare_conversation_mode = args.read_file.is_none()
+    && args.read_file_stdout.is_none()
     && args.prompt.is_none()
     && args.prompt_file.is_none()
     && !args.quiet
@@ -132,6 +133,13 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   if args.list_voices {
     tts::print_voices();
     util::terminate(0);
+  }
+
+  // ---------------------------------------------------
+  // handle -r-stdout <FILENAME|->
+  // ---------------------------------------------------
+  if let Some(ref read_stdout_input) = args.read_file_stdout {
+    run_read_stdout_cli(read_stdout_input, &args);
   }
 
   // ---------------------------------------------------
@@ -857,6 +865,155 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   }
   let _ = ui_handle.join();
 
+  Ok(())
+}
+
+/// `-r-stdout <FILENAME|->`: like `-r`, but headless - no on-screen text, no
+/// navigation, no audio device - streaming the synthesized speech as a
+/// single wav to stdout instead, for piping (e.g. `vtmate -r-stdout
+/// notes.txt | aplay -`). Never returns.
+///
+/// The wav header is written once, up front, with the streaming-length
+/// convention (`0xFFFFFFFF` RIFF/data sizes) rather than patched afterwards:
+/// stdout cannot be seeked back to fix it once the real length is known -
+/// the same reason `hound`'s own writer (used for `-r -s`) needs a real,
+/// seekable file. Every reader this codebase decodes wav with
+/// (`stt::read_wav_mono`) already treats an oversized/placeholder `data`
+/// size as "read until the stream actually ends", for exactly this reason.
+fn run_read_stdout_cli(input: &str, args: &config::Args) -> ! {
+  use std::io::Write as _;
+
+  let _ = config::ensure_settings_file();
+  let _ = config::ensure_agents_file();
+  let settings_path = config::resolve_settings_path().unwrap_or_else(|e| {
+    eprintln!("✗ Failed to resolve settings path: {}", e);
+    std::process::exit(1);
+  });
+  let agents_path = config::resolve_agents_path(args).unwrap_or_else(|e| {
+    eprintln!("✗ Failed to resolve agents path: {}", e);
+    std::process::exit(1);
+  });
+  let agents = config::load_settings(&agents_path, args).unwrap_or_else(|e| {
+    eprintln!("✗ Failed to load settings: {}", e);
+    std::process::exit(1);
+  });
+  let general = config::load_general_settings(&settings_path).unwrap_or_default();
+  let settings =
+    config::select_agent(&agents, args.agent.as_deref(), &general).unwrap_or_else(|e| {
+      eprintln!("✗ {}", e);
+      std::process::exit(1);
+    });
+
+  if let Err(e) = tts::load_engine_named(&settings.tts) {
+    eprintln!("✗ Failed to load TTS engine '{}': {}", settings.tts, e);
+    std::process::exit(1);
+  }
+
+  // supertonic2/3 read the voice speed from GLOBAL_STATE (`state::get_speed`),
+  // which is otherwise only set up by the interactive/read-file startup path.
+  let app_state = Arc::new(state::AppState::with_agent(
+    settings.clone(),
+    agents.clone(),
+    true,
+    settings_path.clone(),
+    agents_path.clone(),
+  ));
+  state::GLOBAL_STATE.set(app_state).ok();
+
+  let content = util::read_file(input);
+  let phrases: Vec<String> = util::split_text_for_tts(&content, false)
+    .into_iter()
+    .map(|p| p.tts)
+    .filter(|t| !t.trim().is_empty())
+    .collect();
+
+  let opentts_url = if settings.tts == "opentts" {
+    config::OPENTTS_BASE_URL_DEFAULT.to_string()
+  } else {
+    settings.baseurl.clone()
+  };
+
+  let interrupt_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
+  let (tx, rx) = unbounded::<audio::AudioChunk>();
+  let stdout = std::io::stdout();
+  let mut out = stdout.lock();
+  let mut wav_sample_rate = 0u32;
+  let mut wrote_header = false;
+
+  for phrase in &phrases {
+    if let Err(e) = tts::speak(
+      phrase,
+      &settings.tts,
+      &opentts_url,
+      &settings.language,
+      &settings.voice,
+      24_000,
+      tx.clone(),
+      interrupt_counter.clone(),
+      0,
+    ) {
+      eprintln!("✗ TTS error: {}", e);
+      continue;
+    }
+    while let Ok(chunk) = rx.try_recv() {
+      if !wrote_header {
+        wav_sample_rate = chunk.sample_rate;
+        if let Err(e) = write_wav_stream_header(&mut out, wav_sample_rate) {
+          eprintln!("✗ failed writing to stdout: {}", e);
+          std::process::exit(1);
+        }
+        wrote_header = true;
+      }
+      let pcm = audio::f32_to_i16(&audio::normalize_to_mono(&chunk, wav_sample_rate));
+      let bytes: Vec<u8> = pcm.iter().flat_map(|s| s.to_le_bytes()).collect();
+      if let Err(e) = out.write_all(&bytes).and_then(|_| out.flush()) {
+        eprintln!("✗ failed writing to stdout: {}", e);
+        std::process::exit(1);
+      }
+    }
+  }
+
+  // nothing was actually spoken (empty input, or only code/punctuation
+  // lines) - still emit a minimal, valid (silent) wav rather than nothing
+  if !wrote_header {
+    if let Err(e) = write_wav_stream_header(&mut out, 24_000) {
+      eprintln!("✗ failed writing to stdout: {}", e);
+      std::process::exit(1);
+    }
+  }
+  let _ = out.flush();
+  std::process::exit(0);
+}
+
+/// Writes a canonical 44-byte mono 16-bit PCM wav header. See
+/// `run_read_stdout_cli` for why the RIFF/data sizes are the streaming
+/// placeholder rather than the real (not yet known) length.
+///
+/// The placeholder is `0xFFFF_FFFE`, not the more obvious `0xFFFF_FFFF`:
+/// hound (this codebase's own wav reader, see `stt::read_wav_mono`) requires
+/// the `data` size to be an exact multiple of the sample block size before
+/// it will even start reading, and `0xFFFF_FFFF` is odd - not a multiple of
+/// this 16-bit mono file's 2-byte block size - so it would refuse the file
+/// outright instead of reading it until the stream actually ends.
+fn write_wav_stream_header<W: std::io::Write>(out: &mut W, sample_rate: u32) -> std::io::Result<()> {
+  let channels: u16 = 1;
+  let bits_per_sample: u16 = 16;
+  let byte_rate = sample_rate * channels as u32 * bits_per_sample as u32 / 8;
+  let block_align = channels * bits_per_sample / 8;
+  let streaming_len = 0xFFFF_FFFEu32;
+  out.write_all(b"RIFF")?;
+  out.write_all(&streaming_len.to_le_bytes())?;
+  out.write_all(b"WAVE")?;
+  out.write_all(b"fmt ")?;
+  out.write_all(&16u32.to_le_bytes())?;
+  out.write_all(&1u16.to_le_bytes())?; // PCM
+  out.write_all(&channels.to_le_bytes())?;
+  out.write_all(&sample_rate.to_le_bytes())?;
+  out.write_all(&byte_rate.to_le_bytes())?;
+  out.write_all(&block_align.to_le_bytes())?;
+  out.write_all(&bits_per_sample.to_le_bytes())?;
+  out.write_all(b"data")?;
+  out.write_all(&streaming_len.to_le_bytes())?;
   Ok(())
 }
 

@@ -286,6 +286,10 @@ All cli options:
   -r <file.txt>                         read a file with voice, phrase by phrase (no llm involved)
   -r -                                  read text from STDIN with voice, phrase by phrase
                                         (no llm involved). Use - for STDIN (runs in quiet mode)
+  -r-stdout <file.txt>                  like -r, but with no on-screen text or navigation:
+                                        streams the synthesized speech as a wav to STDOUT
+                                        instead, for piping (no llm involved)
+  -r-stdout -                           same, reading the text from STDIN instead of a file
   --stt <wav_file>                      transcribe a wav file to text and exit (no llm, no tts)
   --stt -                               transcribe wav audio from STDIN to text and exit
                                         (no llm, no tts). Uses the whisper model of the
@@ -506,6 +510,12 @@ In this mode you can:
 * Move to next phrase by pressing `ARROW_DOWN`
 * Stop / Resume playback by pressing `SPACE`
 * For quick reference get the printable [Quicksheet (PDF)](https://raw.githubusercontent.com/DavidValin/vtmate/refs/heads/main/docs/en/quicksheet.pdf)
+
+`-r-stdout` is the headless, pipeable version: same text splitting and voice, but no on-screen text/navigation and no audio device - the synthesized speech streams to STDOUT as a wav instead of playing out loud, so it can be redirected to a file or piped into another program:
+```
+vtmate -r-stdout myfile.txt -a reader > myfile.wav
+echo "First phrase. Second phrase" | vtmate -r-stdout - | aplay -
+```
 
 ###  Separate agents
 

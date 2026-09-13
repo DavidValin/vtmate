@@ -122,6 +122,15 @@ pub struct Args {
   pub read_file: Option<String>,
 
   #[arg(
+    long = "r-stdout",
+    value_name = "FILENAME",
+    default_missing_value = "-",
+    conflicts_with_all = ["read_file", "quiet", "prompt", "prompt_file", "debate", "list_voices", "daemon", "daemon_foreground", "daemon_stop", "daemon_status", "clone_voice", "refine_voice", "stt"],
+    help = "like -r, but with no on-screen text or navigation: streams the synthesized speech as a wav to STDOUT instead, for piping. Use '-' for STDIN"
+  )]
+  pub read_file_stdout: Option<String>,
+
+  #[arg(
     long = "stt",
     value_name = "WAV_FILE",
     default_missing_value = "-",
@@ -184,8 +193,9 @@ pub struct Args {
   pub refine_voice: Option<Vec<String>>,
 }
 
-/// Accept `-s-html` as written on the command line: clap only knows long
-/// options behind `--`, so the single dash spelling is rewritten before parsing.
+/// Accept `-s-html` and `-r-stdout` as written on the command line: clap
+/// only knows long options behind `--`, so these single dash spellings are
+/// rewritten before parsing.
 pub fn normalize_argv<I, T>(args: I) -> Vec<std::ffi::OsString>
 where
   I: IntoIterator<Item = T>,
@@ -197,6 +207,8 @@ where
       let a: std::ffi::OsString = a.into();
       if a == std::ffi::OsStr::new("-s-html") {
         std::ffi::OsString::from("--save-html")
+      } else if a == std::ffi::OsStr::new("-r-stdout") {
+        std::ffi::OsString::from("--r-stdout")
       } else {
         a
       }
@@ -881,6 +893,10 @@ const OPTIONS: &[(&str, &str)] = &[
   (
     "-r, --read-file <FILENAME>",
     "read a file with voice, phrase by phrase (no llm involved). Use '-' for STDIN (runs in quiet mode))",
+  ),
+  (
+    "-r-stdout <FILENAME>",
+    "like -r, but with no on-screen text or navigation: streams the synthesized speech as a wav to STDOUT instead, for piping. Use '-' for STDIN",
   ),
   (
     "--stt <WAV_FILE>",
