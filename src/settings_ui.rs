@@ -671,7 +671,7 @@ fn form_key(ui: &mut SettingsUi, k: &KeyEvent) {
       if ui.form.caret > 0 {
         let caret = ui.form.caret - 1;
         let mut text = field_text(&ui.form.draft, field);
-        remove_at(&mut text, caret);
+        crate::text_field::remove_char_at(&mut text, caret);
         set_field_text(ui, field, text);
         ui.form.caret = caret;
       }
@@ -680,7 +680,7 @@ fn form_key(ui: &mut SettingsUi, k: &KeyEvent) {
       let mut text = field_text(&ui.form.draft, field);
       if ui.form.caret < text.chars().count() {
         let caret = ui.form.caret;
-        remove_at(&mut text, caret);
+        crate::text_field::remove_char_at(&mut text, caret);
         set_field_text(ui, field, text);
       }
     }
@@ -723,36 +723,13 @@ fn place_caret(ui: &mut SettingsUi, forward: bool) {
 /// Move the caret one line up or down inside the prompt. `false` when there
 /// is no such line, so the arrow moves to another field instead.
 fn move_caret_line(ui: &mut SettingsUi, down: bool) -> bool {
-  let text = ui.form.draft.system_prompt.clone();
-  let chars: Vec<char> = text.chars().collect();
-  let caret = ui.form.caret.min(chars.len());
-  let line_start = chars[..caret]
-    .iter()
-    .rposition(|c| *c == '\n')
-    .map_or(0, |i| i + 1);
-  let column = caret - line_start;
-  if down {
-    let Some(rel) = chars[caret..].iter().position(|c| *c == '\n') else {
-      return false;
-    };
-    let next_start = caret + rel + 1;
-    let next_len = chars[next_start..]
-      .iter()
-      .position(|c| *c == '\n')
-      .unwrap_or(chars.len() - next_start);
-    ui.form.caret = next_start + column.min(next_len);
-  } else {
-    if line_start == 0 {
-      return false;
+  match crate::text_field::move_caret_vertical(&ui.form.draft.system_prompt, ui.form.caret, down) {
+    Some(caret) => {
+      ui.form.caret = caret;
+      true
     }
-    let previous_start = chars[..line_start - 1]
-      .iter()
-      .rposition(|c| *c == '\n')
-      .map_or(0, |i| i + 1);
-    let previous_len = line_start - 1 - previous_start;
-    ui.form.caret = previous_start + column.min(previous_len);
+    None => false,
   }
-  true
 }
 
 fn insert_char(ui: &mut SettingsUi, c: char) {
@@ -764,20 +741,9 @@ fn insert_char(ui: &mut SettingsUi, c: char) {
     return;
   }
   let caret = ui.form.caret.min(text.chars().count());
-  let byte = text
-    .char_indices()
-    .nth(caret)
-    .map(|(i, _)| i)
-    .unwrap_or(text.len());
-  text.insert(byte, c);
+  crate::text_field::insert_char_at(&mut text, caret, c);
   set_field_text(ui, field, text);
   ui.form.caret = caret + 1;
-}
-
-fn remove_at(text: &mut String, index: usize) {
-  if let Some((byte, _)) = text.char_indices().nth(index) {
-    text.remove(byte);
-  }
 }
 
 /// Move a select one step, or a slider by one step of its range.

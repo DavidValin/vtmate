@@ -45,6 +45,30 @@ static KOKORO_ENGINE: Mutex<Option<Arc<Mutex<TtsEngine>>>> = Mutex::new(None);
 static SUPERTONIC2_ENGINE: Mutex<Option<Arc<Mutex<Supertonic2TtsEngine>>>> = Mutex::new(None);
 static SUPERTONIC3_ENGINE: Mutex<Option<Arc<supertonic3_tts_crate::TtsEngine>>> = Mutex::new(None);
 
+/// Get or build the engine held in `slot`, shared by all three loadable
+/// engines' `engine_handle`/`get_or_init_engine` functions. `slot` is locked
+/// for the whole build, not just the check-and-store: two threads racing to
+/// build the same not-yet-loaded engine (the residency thread and a
+/// speaker's own lazy load, typically) would otherwise be able to run
+/// `load` twice at once - wasted work at best, and at worst a way to hit the
+/// underlying onnx runtime's own session/init path from two threads
+/// simultaneously, which can make a load look hung rather than just slow. A
+/// different, already-loaded engine's speaker never touches this lock, so it
+/// stays unaffected; only a second caller wanting this exact engine now
+/// waits for the first build instead of starting its own.
+fn engine_handle<T>(
+  slot: &'static Mutex<Option<Arc<T>>>,
+  load: impl FnOnce() -> Result<T, Box<dyn std::error::Error + Send + Sync>>,
+) -> Result<Arc<T>, Box<dyn std::error::Error + Send + Sync>> {
+  let mut guard = slot.lock().unwrap_or_else(|e| e.into_inner());
+  if let Some(e) = guard.as_ref() {
+    return Ok(e.clone());
+  }
+  let engine = Arc::new(load()?);
+  *guard = Some(engine.clone());
+  Ok(engine)
+}
+
 // Engine residency
 // ------------------------------------------------------------------
 // Model weights are the largest thing vtmate holds, and on a CUDA build they

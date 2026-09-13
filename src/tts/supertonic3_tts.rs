@@ -653,45 +653,38 @@ fn rebuild_on_cpu() -> Result<Arc<TtsEngine>, Box<dyn std::error::Error + Send +
   get_or_init_engine()
 }
 
+/// The shared engine, loading it if it is not resident (see
+/// `super::engine_handle` for the locking convention).
 fn get_or_init_engine() -> Result<Arc<TtsEngine>, Box<dyn std::error::Error + Send + Sync>> {
-  if let Ok(slot) = SUPERTONIC3_ENGINE.lock() {
-    if let Some(e) = slot.as_ref() {
-      return Ok(e.clone());
-    }
-  }
-  let base = model_root();
-  let onnx_dir = base.join("onnx");
-  // Device::Auto takes the GPU when its provider initialises and the CPU
-  // otherwise; FORCE_CPU is the stronger statement made after a GPU failure
-  // that Auto cannot see, because it happened past initialisation.
-  let device = if FORCE_CPU.load(Ordering::SeqCst) {
-    Device::Cpu
-  } else {
-    Device::Auto
-  };
-  // Built without the lock held: model loading takes seconds, and blocking
-  // every other speaker on it is worse than the rare double build, where both
-  // engines are valid and the last one stored wins.
-  let engine = runtime()?
-    .block_on(TtsEngine::on_device(onnx_dir.clone(), base, false, device))
-    .map_err(|e| {
-      let msg = format!(
-        "[supertonic3_tts] failed to load model from {}: {}",
-        onnx_dir.display(),
-        e
-      );
-      crate::log::log("error", &msg);
-      msg
-    })?;
-  crate::log::log(
-    "info",
-    &format!("[supertonic3_tts] running on {}", engine.backend()),
-  );
-  let engine = Arc::new(engine);
-  if let Ok(mut slot) = SUPERTONIC3_ENGINE.lock() {
-    *slot = Some(engine.clone());
-  }
-  Ok(engine)
+  super::engine_handle(&SUPERTONIC3_ENGINE, || {
+    let base = model_root();
+    let onnx_dir = base.join("onnx");
+    // Device::Auto takes the GPU when its provider initialises and the CPU
+    // otherwise; FORCE_CPU is the stronger statement made after a GPU
+    // failure that Auto cannot see, because it happened past
+    // initialisation.
+    let device = if FORCE_CPU.load(Ordering::SeqCst) {
+      Device::Cpu
+    } else {
+      Device::Auto
+    };
+    let engine = runtime()?
+      .block_on(TtsEngine::on_device(onnx_dir.clone(), base, false, device))
+      .map_err(|e| {
+        let msg = format!(
+          "[supertonic3_tts] failed to load model from {}: {}",
+          onnx_dir.display(),
+          e
+        );
+        crate::log::log("error", &msg);
+        msg
+      })?;
+    crate::log::log(
+      "info",
+      &format!("[supertonic3_tts] running on {}", engine.backend()),
+    );
+    Ok(engine)
+  })
 }
 
 /// Load the engine if it is not loaded already.

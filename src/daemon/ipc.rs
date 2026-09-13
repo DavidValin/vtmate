@@ -110,6 +110,28 @@ pub struct StateView {
   pub modal_agent1: usize,
   pub modal_agent2: usize,
   pub modal_focus: u8,
+  /// The debate modal's typed initial-message field (Ctrl+D popup), so an
+  /// attached terminal can draw the text and caret the daemon is editing.
+  #[serde(default)]
+  pub modal_subject: String,
+  #[serde(default)]
+  pub modal_caret: usize,
+  #[serde(default)]
+  pub modal_max_turns: String,
+  #[serde(default)]
+  pub modal_max_turns_caret: usize,
+  /// The Ctrl+E save popup, same idea: open/closed, its two checkboxes, which
+  /// one has focus, and the folder name to show while a save is running.
+  #[serde(default)]
+  pub save_modal_visible: bool,
+  #[serde(default)]
+  pub save_modal_check_txt: bool,
+  #[serde(default)]
+  pub save_modal_check_html: bool,
+  #[serde(default)]
+  pub save_modal_focus: u8,
+  #[serde(default)]
+  pub save_modal_folder: Option<String>,
   /// The settings popup while it is open, so an attached terminal can draw
   /// it. The keys that drive it are handled by the daemon, which owns the
   /// agents file; the client only renders this copy.
@@ -147,6 +169,15 @@ impl StateView {
       modal_agent1: *state.debate_modal_selected_agent1.lock().unwrap(),
       modal_agent2: *state.debate_modal_selected_agent2.lock().unwrap(),
       modal_focus: *state.debate_modal_focus.lock().unwrap(),
+      modal_subject: state.debate_modal_subject.lock().unwrap().clone(),
+      modal_caret: *state.debate_modal_caret.lock().unwrap(),
+      modal_max_turns: state.debate_modal_max_turns.lock().unwrap().clone(),
+      modal_max_turns_caret: *state.debate_modal_max_turns_caret.lock().unwrap(),
+      save_modal_visible: state.save_modal_visible.load(Ordering::SeqCst),
+      save_modal_check_txt: state.save_modal_check_txt.load(Ordering::SeqCst),
+      save_modal_check_html: state.save_modal_check_html.load(Ordering::SeqCst),
+      save_modal_focus: *state.save_modal_focus.lock().unwrap(),
+      save_modal_folder: state.save_modal_folder.lock().unwrap().clone(),
       settings: {
         let settings = state.settings_ui.lock().unwrap();
         settings.open.then(|| settings.clone())
@@ -216,6 +247,21 @@ impl StateView {
     *state.debate_modal_selected_agent1.lock().unwrap() = self.modal_agent1;
     *state.debate_modal_selected_agent2.lock().unwrap() = self.modal_agent2;
     *state.debate_modal_focus.lock().unwrap() = self.modal_focus;
+    *state.debate_modal_subject.lock().unwrap() = self.modal_subject.clone();
+    *state.debate_modal_caret.lock().unwrap() = self.modal_caret;
+    *state.debate_modal_max_turns.lock().unwrap() = self.modal_max_turns.clone();
+    *state.debate_modal_max_turns_caret.lock().unwrap() = self.modal_max_turns_caret;
+    state
+      .save_modal_visible
+      .store(self.save_modal_visible, Ordering::SeqCst);
+    state
+      .save_modal_check_txt
+      .store(self.save_modal_check_txt, Ordering::SeqCst);
+    state
+      .save_modal_check_html
+      .store(self.save_modal_check_html, Ordering::SeqCst);
+    *state.save_modal_focus.lock().unwrap() = self.save_modal_focus;
+    *state.save_modal_folder.lock().unwrap() = self.save_modal_folder.clone();
     *state.settings_ui.lock().unwrap() = self.settings.clone().unwrap_or_default();
   }
 }

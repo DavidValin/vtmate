@@ -28,6 +28,7 @@ mod record;
 mod settings_ui;
 mod state;
 mod stt;
+mod text_field;
 mod tts;
 mod ui;
 mod util;
@@ -786,7 +787,17 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
     let agent1_name = &debate_args[0];
     let agent2_name = &debate_args[1];
-    let subject = if debate_args.len() >= 3 {
+    // A trailing <subject> and -p/-i are the same thing (the debate's
+    // initial message, turn 0) - never both at once.
+    let has_trailing_subject = debate_args.len() >= 3;
+    if has_trailing_subject && initial_prompt.is_some() {
+      crate::log::log(
+        "error",
+        "--debate: give the initial message either as a trailing <subject> or with -p/-i, not both",
+      );
+      util::terminate(1);
+    }
+    let subject = if has_trailing_subject {
       debate_args[2..].join(" ")
     } else if let Some(ref subj) = initial_prompt {
       subj.clone()
@@ -818,10 +829,16 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         util::terminate(1);
       }
     };
-    state.debate_enabled.store(true, Ordering::SeqCst);
     *state.debate_subject.lock().unwrap() = subject;
     *state.debate_agents.lock().unwrap() = vec![agent1, agent2];
     state.debate_turn.store(0, Ordering::SeqCst);
+    // --max-turns exits the process once reached, unlike a debate (re)started
+    // from the Ctrl+D popup - see conversation::conversation_thread.
+    state.debate_started_via_cli.store(true, Ordering::SeqCst);
+    // Set before `debate_enabled`: conversation_thread may already be
+    // running (it's spawned earlier, above) and reacts to that flag.
+    state.debate_pending_submit.store(true, Ordering::SeqCst);
+    state.debate_enabled.store(true, Ordering::SeqCst);
     tts::apply_residency(&state);
   }
 

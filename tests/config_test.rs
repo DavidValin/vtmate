@@ -29,6 +29,27 @@ mod util {
   pub fn terminate(code: i32) -> ! {
     std::process::exit(code)
   }
+  /// Mirrors `crate::util::_strip_ansi`: config.rs's `--help` box-drawing
+  /// (`wrap_in_box`/`build_options_body`) measures wrapped text width with
+  /// this, so the stub needs to behave the same way, not just exist.
+  pub fn _strip_ansi(s: &str) -> String {
+    let mut result = String::new();
+    let mut in_escape = false;
+    for c in s.chars() {
+      if in_escape {
+        if c == 'm' {
+          in_escape = false;
+        }
+        continue;
+      }
+      if c == '\x1b' {
+        in_escape = true;
+        continue;
+      }
+      result.push(c);
+    }
+    result
+  }
 }
 
 mod log {

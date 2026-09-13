@@ -4,6 +4,7 @@
 
 use crate::conversation::Command;
 use crate::state::{GLOBAL_STATE, decrease_voice_speed, increase_voice_speed};
+use crate::text_field::{insert_char_at, remove_char_at};
 use crossbeam_channel::Sender;
 use crossterm::{
   event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
@@ -241,7 +242,10 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
   if k.modifiers.contains(KeyModifiers::CONTROL) {
     // Ctrl+S opens the settings
     if let KeyCode::Char('s') | KeyCode::Char('S') = k.code {
-      if k.kind == KeyEventKind::Press && !state.debate_modal_visible.load(Ordering::SeqCst) {
+      if k.kind == KeyEventKind::Press
+        && !state.debate_modal_visible.load(Ordering::SeqCst)
+        && !state.save_modal_visible.load(Ordering::SeqCst)
+      {
         for message in crate::settings_ui::open(state) {
           let _ = ctx.tx_ui.send(message);
         }
@@ -253,7 +257,7 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
       let debate_enabled = state.debate_enabled.load(Ordering::SeqCst);
       let modal_visible = state.debate_modal_visible.load(Ordering::SeqCst);
 
-      if !modal_visible {
+      if !modal_visible && !state.save_modal_visible.load(Ordering::SeqCst) {
         if !debate_enabled {
           // Entering debate mode - show agent selection modal
           let agent_count = state.agents.lock().unwrap().len();
@@ -264,6 +268,20 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
             *state.debate_modal_selected_agent2.lock().unwrap() =
               if agent_count > 1 { 1 } else { 0 };
             *state.debate_modal_focus.lock().unwrap() = 0;
+            *state.debate_modal_subject.lock().unwrap() = String::new();
+            *state.debate_modal_caret.lock().unwrap() = 0;
+            // Prefilled from the live value, not reset: --max-turns already
+            // carries over between debates started with Control+D (see
+            // README), so reopening the modal should show the limit that is
+            // actually still in effect rather than blank it out.
+            let current_max_turns = state.max_turns.load(Ordering::SeqCst);
+            *state.debate_modal_max_turns.lock().unwrap() = if current_max_turns == 0 {
+              String::new()
+            } else {
+              current_max_turns.to_string()
+            };
+            *state.debate_modal_max_turns_caret.lock().unwrap() =
+              state.debate_modal_max_turns.lock().unwrap().chars().count();
             let _ = ctx.tx_ui.send("modal_show|".to_string());
           } else {
             // Not enough agents
@@ -278,6 +296,7 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
           state.debate_agents.lock().unwrap().clear();
           state.debate_turn.store(0, Ordering::SeqCst);
           *state.debate_subject.lock().unwrap() = String::new();
+          state.debate_paused.store(false, Ordering::SeqCst);
           // Back to the selected agent alone; an engine it shares with a
           // debate agent stays loaded.
           crate::tts::apply_residency(state);
@@ -291,11 +310,25 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
         }
       }
     }
+    // Ctrl+E shows the save popup (start a new recording, or stop the
+    // running one). The settings popup already took over the whole keyboard
+    // above if it is open, so only the debate modal needs checking here.
+    if let KeyCode::Char('e') | KeyCode::Char('E') = k.code {
+      if k.kind == KeyEventKind::Press
+        && !state.debate_modal_visible.load(Ordering::SeqCst)
+        && !state.save_modal_visible.load(Ordering::SeqCst)
+      {
+        open_save_modal(state);
+        let _ = ctx.tx_ui.send("save_modal_show|".to_string());
+      }
+      return KeyOutcome::Continue;
+    }
   }
 
   // Undo key handling ('u' to undo last response)
   if k.code == KeyCode::Char('u')
     && !state.debate_modal_visible.load(Ordering::SeqCst)
+    && !state.save_modal_visible.load(Ordering::SeqCst)
     && k.kind == KeyEventKind::Press
   {
     // If a response is currently being processed, cancel undo
@@ -343,45 +376,59 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
         state.debate_modal_visible.store(false, Ordering::SeqCst);
         let _ = ctx.tx_ui.send("modal_hide|".to_string());
       }
+      KeyCode::Enter
+        if *state.debate_modal_focus.lock().unwrap() == 3
+          && !k.modifiers.contains(KeyModifiers::CONTROL) =>
+      {
+        // The subject field is a multi-line textarea: Enter writes a
+        // newline into it, the same convention settings_ui's system-prompt
+        // field uses. Ctrl+Enter confirms from here instead (see below).
+        let mut caret = state.debate_modal_caret.lock().unwrap();
+        let mut text = state.debate_modal_subject.lock().unwrap();
+        insert_char_at(&mut text, *caret, '\n');
+        *caret += 1;
+        let _ = ctx.tx_ui.send("modal_update|".to_string());
+      }
       KeyCode::Enter => {
         // Confirm selection and start debate
         let agents = state.agents();
         let agent1_idx = *state.debate_modal_selected_agent1.lock().unwrap();
         let agent2_idx = *state.debate_modal_selected_agent2.lock().unwrap();
+        let max_turns_text = state.debate_modal_max_turns.lock().unwrap().clone();
+        let max_turns = parse_modal_max_turns(&max_turns_text);
 
-        if agent1_idx == agent2_idx {
-          let _ = ctx.tx_ui.send(
-            "line|\n\x1b[31m✗ Please select two different agents\x1b[0m\n".to_string(),
-          );
+        // Same agent picked twice is allowed - it just debates itself.
+        if max_turns_text.is_empty() {
+          // blank = no limit, always valid
+          start_debate(state, ctx.tx_ui, &agents, agent1_idx, agent2_idx, 0);
+        } else if let Some(max_turns) = max_turns {
+          start_debate(state, ctx.tx_ui, &agents, agent1_idx, agent2_idx, max_turns);
         } else {
-          let debate_agents = vec![agents[agent1_idx].clone(), agents[agent2_idx].clone()];
-          *state.debate_agents.lock().unwrap() = debate_agents;
-          state.debate_turn.store(0, Ordering::SeqCst);
-          *state.debate_subject.lock().unwrap() =
-            "Let's debate. What should we discuss?".to_string();
-          state.debate_enabled.store(true, Ordering::SeqCst);
-          // Both debate agents speak from here on, so both engines are wanted.
-          crate::tts::apply_residency(state);
-          state.reset_conversation();
-          state.debate_modal_visible.store(false, Ordering::SeqCst);
-
-          let _ = ctx.tx_ui.send("modal_hide|".to_string());
-          let _ = ctx.tx_ui.send(format!(
-            "line|\n\x1b[33m⇄ Debate mode ENABLED between '{}' and '{}'\x1b[0m",
-            agents[agent1_idx].name, agents[agent2_idx].name
-          ));
-          let _ = ctx.tx_ui.send("line|\n\x1b[33m» Speak to set the debate topic or change the subject at any time\x1b[0m\n".to_string());
+          let _ = ctx.tx_ui.send(
+            "line|\n\x1b[31m✗ Max turns must be blank (no limit) or 2-1000000000000\x1b[0m\n"
+              .to_string(),
+          );
         }
       }
       KeyCode::Up | KeyCode::Down | KeyCode::Tab => {
-        // Switch focus between agent1, agent2, and confirm button - the same
-        // convention the agent settings form uses (Tab/↑/↓ move between
-        // fields, ←/→ change the current field's value).
-        let mut focus = state.debate_modal_focus.lock().unwrap();
-        if k.code == KeyCode::Up {
-          *focus = if *focus == 0 { 2 } else { *focus - 1 };
-        } else {
-          *focus = (*focus + 1) % 3;
+        // Inside the subject textarea, ↑/↓ walk its lines first (same as
+        // settings_ui's system-prompt field) and only cycle focus once they
+        // fall off the field's first/last line; Tab always cycles focus.
+        let focus_now = *state.debate_modal_focus.lock().unwrap();
+        let moved_within_text = focus_now == 3
+          && k.code != KeyCode::Tab
+          && move_subject_caret_line(state, k.code == KeyCode::Down);
+        if !moved_within_text {
+          // Switch focus between agent1, agent2, max turns, the subject
+          // field, and the Start Debate button - the same convention the
+          // agent settings form uses (Tab/↑/↓ move between fields, ←/→
+          // change the current field's value / move its caret).
+          let mut focus = state.debate_modal_focus.lock().unwrap();
+          if k.code == KeyCode::Up {
+            *focus = if *focus == 0 { 4 } else { *focus - 1 };
+          } else {
+            *focus = (*focus + 1) % 5;
+          }
         }
         let _ = ctx.tx_ui.send("modal_update|".to_string());
       }
@@ -405,7 +452,16 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
             *agent2_idx - 1
           };
           let _ = ctx.tx_ui.send("modal_update|".to_string());
+        } else if focus == 2 {
+          let mut caret = state.debate_modal_max_turns_caret.lock().unwrap();
+          *caret = caret.saturating_sub(1);
+          let _ = ctx.tx_ui.send("modal_update|".to_string());
+        } else if focus == 3 {
+          let mut caret = state.debate_modal_caret.lock().unwrap();
+          *caret = caret.saturating_sub(1);
+          let _ = ctx.tx_ui.send("modal_update|".to_string());
         }
+        // focus == 4 (Start Debate button): nothing to move.
       }
       KeyCode::Right => {
         let focus = *state.debate_modal_focus.lock().unwrap();
@@ -419,11 +475,115 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
           let mut agent2_idx = state.debate_modal_selected_agent2.lock().unwrap();
           *agent2_idx = (*agent2_idx + 1) % agent_count;
           let _ = ctx.tx_ui.send("modal_update|".to_string());
+        } else if focus == 2 {
+          let len = state.debate_modal_max_turns.lock().unwrap().chars().count();
+          let mut caret = state.debate_modal_max_turns_caret.lock().unwrap();
+          *caret = (*caret + 1).min(len);
+          let _ = ctx.tx_ui.send("modal_update|".to_string());
+        } else if focus == 3 {
+          let len = state.debate_modal_subject.lock().unwrap().chars().count();
+          let mut caret = state.debate_modal_caret.lock().unwrap();
+          *caret = (*caret + 1).min(len);
+          let _ = ctx.tx_ui.send("modal_update|".to_string());
         }
+        // focus == 4 (Start Debate button): nothing to move.
+      }
+      KeyCode::Home if *state.debate_modal_focus.lock().unwrap() == 2 => {
+        *state.debate_modal_max_turns_caret.lock().unwrap() = 0;
+        let _ = ctx.tx_ui.send("modal_update|".to_string());
+      }
+      KeyCode::End if *state.debate_modal_focus.lock().unwrap() == 2 => {
+        let len = state.debate_modal_max_turns.lock().unwrap().chars().count();
+        *state.debate_modal_max_turns_caret.lock().unwrap() = len;
+        let _ = ctx.tx_ui.send("modal_update|".to_string());
+      }
+      KeyCode::Home if *state.debate_modal_focus.lock().unwrap() == 3 => {
+        let text = state.debate_modal_subject.lock().unwrap().clone();
+        let caret_now = *state.debate_modal_caret.lock().unwrap();
+        let (start, _) = current_line_bounds(&text, caret_now);
+        *state.debate_modal_caret.lock().unwrap() = start;
+        let _ = ctx.tx_ui.send("modal_update|".to_string());
+      }
+      KeyCode::End if *state.debate_modal_focus.lock().unwrap() == 3 => {
+        let text = state.debate_modal_subject.lock().unwrap().clone();
+        let caret_now = *state.debate_modal_caret.lock().unwrap();
+        let (_, end) = current_line_bounds(&text, caret_now);
+        *state.debate_modal_caret.lock().unwrap() = end;
+        let _ = ctx.tx_ui.send("modal_update|".to_string());
+      }
+      KeyCode::Backspace if *state.debate_modal_focus.lock().unwrap() == 2 => {
+        let mut caret = state.debate_modal_max_turns_caret.lock().unwrap();
+        if *caret > 0 {
+          let idx = *caret - 1;
+          let mut text = state.debate_modal_max_turns.lock().unwrap();
+          remove_char_at(&mut text, idx);
+          *caret = idx;
+          let _ = ctx.tx_ui.send("modal_update|".to_string());
+        }
+      }
+      KeyCode::Backspace if *state.debate_modal_focus.lock().unwrap() == 3 => {
+        let mut caret = state.debate_modal_caret.lock().unwrap();
+        if *caret > 0 {
+          let idx = *caret - 1;
+          let mut text = state.debate_modal_subject.lock().unwrap();
+          remove_char_at(&mut text, idx);
+          *caret = idx;
+          let _ = ctx.tx_ui.send("modal_update|".to_string());
+        }
+      }
+      KeyCode::Delete if *state.debate_modal_focus.lock().unwrap() == 2 => {
+        let caret = *state.debate_modal_max_turns_caret.lock().unwrap();
+        let mut text = state.debate_modal_max_turns.lock().unwrap();
+        if caret < text.chars().count() {
+          remove_char_at(&mut text, caret);
+          let _ = ctx.tx_ui.send("modal_update|".to_string());
+        }
+      }
+      KeyCode::Delete if *state.debate_modal_focus.lock().unwrap() == 3 => {
+        let caret = *state.debate_modal_caret.lock().unwrap();
+        let mut text = state.debate_modal_subject.lock().unwrap();
+        if caret < text.chars().count() {
+          remove_char_at(&mut text, caret);
+          let _ = ctx.tx_ui.send("modal_update|".to_string());
+        }
+      }
+      KeyCode::Char(c)
+        if *state.debate_modal_focus.lock().unwrap() == 2
+          && c.is_ascii_digit()
+          && !k.modifiers.contains(KeyModifiers::CONTROL) =>
+      {
+        // Capped to the field's own valid range's digit count (13, for
+        // 1000000000000) - Enter still re-validates the actual value.
+        let mut text = state.debate_modal_max_turns.lock().unwrap();
+        if text.chars().count() < 13 {
+          let mut caret = state.debate_modal_max_turns_caret.lock().unwrap();
+          insert_char_at(&mut text, *caret, c);
+          *caret += 1;
+          let _ = ctx.tx_ui.send("modal_update|".to_string());
+        }
+      }
+      KeyCode::Char(c)
+        if *state.debate_modal_focus.lock().unwrap() == 3
+          && !k.modifiers.contains(KeyModifiers::CONTROL) =>
+      {
+        let mut caret = state.debate_modal_caret.lock().unwrap();
+        let mut text = state.debate_modal_subject.lock().unwrap();
+        insert_char_at(&mut text, *caret, c);
+        *caret += 1;
+        let _ = ctx.tx_ui.send("modal_update|".to_string());
       }
       _ => {}
     }
     return KeyOutcome::Continue; // Don't process other keys when modal is visible
+  }
+
+  // Handle the save popup's keyboard navigation
+  if state.save_modal_visible.load(Ordering::SeqCst) {
+    if k.kind != KeyEventKind::Press {
+      return KeyOutcome::Continue;
+    }
+    save_modal_key(state, ctx, k.code);
+    return KeyOutcome::Continue;
   }
 
   match k.code {
@@ -571,4 +731,206 @@ pub fn switch_agent(
     "line|\n\x1b[32m◆ Agent switched to '\x1b[37m{}\x1b[0m\x1b[32m' language: \x1b[37m{}\x1b[0m",
     new_agent.name, new_agent.language
   ));
+}
+
+/// (start, end) char index of the line containing `caret` in `text` - end
+/// exclusive of that line's own trailing '\n', if any. Used to make Home/End
+/// jump to the start/end of the current line rather than the whole field,
+/// now that the debate modal's subject field can span several lines.
+fn current_line_bounds(text: &str, caret: usize) -> (usize, usize) {
+  let chars: Vec<char> = text.chars().collect();
+  let caret = caret.min(chars.len());
+  let start = chars[..caret]
+    .iter()
+    .rposition(|c| *c == '\n')
+    .map_or(0, |i| i + 1);
+  let end = chars[caret..]
+    .iter()
+    .position(|c| *c == '\n')
+    .map_or(chars.len(), |rel| caret + rel);
+  (start, end)
+}
+
+/// Move the debate modal's subject caret to the equivalent column on the
+/// line above/below. `false` at the field's first (going up) or last (going
+/// down) line, so the caller can fall back to cycling focus instead.
+fn move_subject_caret_line(state: &crate::state::AppState, down: bool) -> bool {
+  let text = state.debate_modal_subject.lock().unwrap().clone();
+  let mut caret = state.debate_modal_caret.lock().unwrap();
+  match crate::text_field::move_caret_vertical(&text, *caret, down) {
+    Some(pos) => {
+      *caret = pos;
+      true
+    }
+    None => false,
+  }
+}
+
+/// Validate the debate modal's max-turns text: all digits and within
+/// `[2, 1_000_000_000_000]`. An empty string ("no limit") is handled
+/// separately by the caller, not by this function.
+fn parse_modal_max_turns(text: &str) -> Option<u64> {
+  let n: u64 = text.parse().ok()?;
+  crate::state::DEBATE_MAX_TURNS_RANGE.contains(&n).then_some(n)
+}
+
+/// Commit the debate modal: start a debate between `agents[agent1_idx]` and
+/// `agents[agent2_idx]`, capped at `max_turns` replies (0 = no limit), with
+/// whatever initial subject was typed.
+fn start_debate(
+  state: &crate::state::AppState,
+  tx_ui: &Sender<String>,
+  agents: &[crate::config::AgentSettings],
+  agent1_idx: usize,
+  agent2_idx: usize,
+  max_turns: u64,
+) {
+  // The typed initial message, same role as `--debate`'s trailing <subject>;
+  // left blank, the debate waits for a spoken topic instead (see
+  // conversation::conversation_thread's turn-0 handling).
+  let subject = state.debate_modal_subject.lock().unwrap().trim().to_string();
+  let debate_agents = vec![agents[agent1_idx].clone(), agents[agent2_idx].clone()];
+  *state.debate_agents.lock().unwrap() = debate_agents;
+  state.debate_turn.store(0, Ordering::SeqCst);
+  *state.debate_subject.lock().unwrap() = subject.clone();
+  state.max_turns.store(max_turns, Ordering::SeqCst);
+  // A popup-started debate switches back to conversation mode when
+  // --max-turns is reached, instead of exiting the process - see
+  // conversation::conversation_thread. This overrides a `--debate` CLI start
+  // from earlier in the same run.
+  state.debate_started_via_cli.store(false, Ordering::SeqCst);
+  // Reset *before* flipping the flag below: the conversation thread's own
+  // loop reacts to `debate_enabled` going true by submitting the subject
+  // above as turn 0 - if that flip happened first, it could race this reset
+  // and have the turn it just submitted wiped out from under it a moment
+  // later instead.
+  state.reset_conversation();
+  // A pause left over from a previous debate (Esc sets this without clearing
+  // it on exit) would otherwise make this fresh start silently drop its
+  // typed subject at conversation_thread's pause check and sit waiting for a
+  // spoken utterance instead.
+  state.debate_paused.store(false, Ordering::SeqCst);
+  state.debate_pending_submit.store(true, Ordering::SeqCst);
+  state.debate_enabled.store(true, Ordering::SeqCst);
+  // Both debate agents speak from here on, so both engines are wanted. Reads
+  // `debate_enabled`/`debate_agents`, so must run after both are set.
+  crate::tts::apply_residency(state);
+  state.debate_modal_visible.store(false, Ordering::SeqCst);
+
+  let _ = tx_ui.send("modal_hide|".to_string());
+  let _ = tx_ui.send(format!(
+    "line|\n\x1b[33m⇄ Debate mode ENABLED between '{}' and '{}'\x1b[0m",
+    agents[agent1_idx].name, agents[agent2_idx].name
+  ));
+  if subject.is_empty() {
+    let _ = tx_ui.send("line|\n\x1b[33m» Speak to set the debate topic or change the subject at any time\x1b[0m\n".to_string());
+  } else {
+    let _ = tx_ui.send(format!(
+      "line|\n\x1b[33m» Debate topic: \x1b[37m{}\x1b[0m\n",
+      subject
+    ));
+  }
+  if max_turns > 0 {
+    let _ = tx_ui.send(format!(
+      "line|\x1b[33m» Debate will end automatically after {} turns\x1b[0m\n",
+      max_turns
+    ));
+  }
+}
+
+/// Open the Ctrl+E save popup: refreshes the running session's folder name
+/// (relevant if one is already running, in which case the popup opens
+/// straight on the "stop recording" screen) and, only when nothing is
+/// running yet, resets the checkbox choices to their defaults.
+fn open_save_modal(state: &crate::state::AppState) {
+  state.save_modal_visible.store(true, Ordering::SeqCst);
+  *state.save_modal_folder.lock().unwrap() = crate::conversation::active_save_folder(state);
+  let currently_saving = state.save_enabled.load(Ordering::Relaxed)
+    || state.save_html_enabled.load(Ordering::Relaxed);
+  if !currently_saving {
+    state.save_modal_check_txt.store(true, Ordering::SeqCst);
+    state.save_modal_check_html.store(false, Ordering::SeqCst);
+    *state.save_modal_focus.lock().unwrap() = 0;
+  }
+}
+
+/// Handle one key while the Ctrl+E popup is open.
+fn save_modal_key(state: &crate::state::AppState, ctx: &KeyCtx, code: KeyCode) {
+  let currently_saving =
+    state.save_enabled.load(Ordering::Relaxed) || state.save_html_enabled.load(Ordering::Relaxed);
+
+  if currently_saving {
+    // "Stop recording" screen: only Enter and Esc do anything - Enter stops
+    // the running save (the popup then falls back to the checkbox screen so
+    // a new one can be started right away), Esc just closes the popup.
+    match code {
+      KeyCode::Enter => {
+        crate::conversation::stop_save(state);
+        *state.save_modal_folder.lock().unwrap() = None;
+        state.save_modal_check_txt.store(true, Ordering::SeqCst);
+        state.save_modal_check_html.store(false, Ordering::SeqCst);
+        *state.save_modal_focus.lock().unwrap() = 0;
+        let _ = ctx.tx_ui.send("save_modal_update|".to_string());
+        let _ = ctx
+          .tx_ui
+          .send("line|\n\x1b[35m■ Recording stopped\x1b[0m\n".to_string());
+      }
+      KeyCode::Esc => {
+        state.save_modal_visible.store(false, Ordering::SeqCst);
+        let _ = ctx.tx_ui.send("save_modal_hide|".to_string());
+      }
+      _ => {}
+    }
+    return;
+  }
+
+  match code {
+    KeyCode::Esc => {
+      state.save_modal_visible.store(false, Ordering::SeqCst);
+      let _ = ctx.tx_ui.send("save_modal_hide|".to_string());
+    }
+    KeyCode::Up | KeyCode::Down | KeyCode::Tab | KeyCode::BackTab => {
+      // Cycles the two checkboxes and the Start Recording button.
+      let mut focus = state.save_modal_focus.lock().unwrap();
+      let backward = matches!(code, KeyCode::Up | KeyCode::BackTab);
+      *focus = if backward {
+        if *focus == 0 { 2 } else { *focus - 1 }
+      } else {
+        (*focus + 1) % 3
+      };
+      let _ = ctx.tx_ui.send("save_modal_update|".to_string());
+    }
+    KeyCode::Char(' ') => {
+      let focus = *state.save_modal_focus.lock().unwrap();
+      let flag = match focus {
+        0 => &state.save_modal_check_txt,
+        1 => &state.save_modal_check_html,
+        _ => return, // focus == 2 (Start Recording button): nothing to toggle
+      };
+      let cur = flag.load(Ordering::SeqCst);
+      flag.store(!cur, Ordering::SeqCst);
+      let _ = ctx.tx_ui.send("save_modal_update|".to_string());
+    }
+    KeyCode::Enter => {
+      let want_txt = state.save_modal_check_txt.load(Ordering::SeqCst);
+      let want_html = state.save_modal_check_html.load(Ordering::SeqCst);
+      if !want_txt && !want_html {
+        // Nothing selected: the popup's own inline warning already explains
+        // this, so there is nothing more to do here.
+        return;
+      }
+      if want_txt {
+        state.save_enabled.store(true, Ordering::Relaxed);
+      }
+      if want_html {
+        state.save_html_enabled.store(true, Ordering::Relaxed);
+      }
+      state.save_modal_visible.store(false, Ordering::SeqCst);
+      let _ = ctx.tx_ui.send("save_modal_hide|".to_string());
+      let _ = ctx.tx_ui.send(
+        "line|\n\x1b[35m● Saving to ~/.vtmate/conversations\x1b[0m\n".to_string(),
+      );
+    }
+    _ => {}
+  }
 }

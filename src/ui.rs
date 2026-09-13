@@ -154,6 +154,7 @@ pub fn spawn_ui_thread(
     let mut pending_stream: Vec<String> = Vec::new();
     let mut modal_visible = false;
     let mut settings_visible = false;
+    let mut save_modal_visible = false;
     // A popup runs on the alternate screen, so neither it nor anything
     // scrolling underneath it reaches the primary screen's scrollback.
     let mut popup_on_alt = false;
@@ -223,6 +224,8 @@ pub fn spawn_ui_thread(
             crate::settings_ui::render(&mut out, &buffer.wrapped);
           } else if modal_visible {
             render_debate_modal(&mut out, &buffer.wrapped);
+          } else if save_modal_visible {
+            render_save_modal(&mut out, &buffer.wrapped);
           }
         }
       }
@@ -370,6 +373,33 @@ pub fn spawn_ui_thread(
             }
           }
 
+          "save_modal_show" => {
+            if !save_modal_visible {
+              save_modal_visible = true;
+              open_popup_screen(&mut out, &mut popup_on_alt, &mut resized_during_popup);
+            }
+            render_save_modal(&mut out, &buffer.wrapped);
+          }
+
+          "save_modal_hide" => {
+            save_modal_visible = false;
+            bottom_bar = close_popup_screen(
+              &mut out,
+              &mut popup_on_alt,
+              resized_during_popup,
+              &buffer,
+              &ui_state,
+              &spinner,
+              &status_line,
+            );
+          }
+
+          "save_modal_update" => {
+            if save_modal_visible {
+              render_save_modal(&mut out, &buffer.wrapped);
+            }
+          }
+
           "redraw_full_history" => {
             // Rebuilt in bulk (rebuild_history) and printed once
             // (reprint_history): the character-reveal path redraws the bottom
@@ -386,9 +416,16 @@ pub fn spawn_ui_thread(
         }
 
         // Anything printed underneath (an answer still streaming, a log line)
-        // would run over the popup, so it goes back on top.
+        // would run over the popup, so it goes back on top. Both popups can
+        // be opened mid-conversation (Ctrl+D and Ctrl+E only check that the
+        // other popup isn't already up), so a reply still streaming
+        // underneath is an expected case for either.
         if settings_visible && !msg_type.starts_with("settings") {
           crate::settings_ui::render(&mut out, &buffer.wrapped);
+        } else if modal_visible && !msg_type.starts_with("modal") {
+          render_debate_modal(&mut out, &buffer.wrapped);
+        } else if save_modal_visible && !msg_type.starts_with("save_modal") {
+          render_save_modal(&mut out, &buffer.wrapped);
         }
       }
 
@@ -1427,6 +1464,120 @@ fn fit_to_width(s: &str, max_cols: usize) -> String {
   out
 }
 
+/// One row of a multi-line text field: `line` is that logical line's chars
+/// and `caret_col` is the caret's column within it (`None` if the caret is
+/// on a different line). Scrolls horizontally to keep the caret in view
+/// within `avail` columns, overlaying the char at the caret in reverse
+/// video (or, when the caret sits past the last char, appending a blank
+/// reverse-video caret) - the same windowing convention as
+/// `settings_ui::text_box`. Used by the debate modal's subject textarea,
+/// one call per visible row.
+fn render_field_line(line: &[char], caret_col: Option<usize>, avail: usize) -> String {
+  let len = line.len();
+  match caret_col {
+    Some(col) => {
+      let col = col.min(len);
+      let start = col.saturating_sub(avail.saturating_sub(1));
+      let end = (start + avail).min(len);
+      let mut out = String::new();
+      for (i, ch) in line[start..end].iter().enumerate() {
+        if start + i == col {
+          out.push_str(&format!("\x1b[7m{}\x1b[27m", ch));
+        } else {
+          out.push(*ch);
+        }
+      }
+      if col >= end {
+        out.push_str("\x1b[7m \x1b[27m");
+      }
+      out
+    }
+    None => line[..avail.min(len)].iter().collect(),
+  }
+}
+
+/// A big, centered, bordered "button" spanning 3 rows (top border, label,
+/// bottom border) at row `y` within a modal `modal_x`/`modal_width` wide.
+/// Unfocused, it is just an outline (gray border, white label) on the
+/// modal's own background; focused ("hovered", in this keyboard-only UI -
+/// there is no pointer), the whole box fills with `focused_fill`, an SGR
+/// sequence for its background+text (e.g. black-on-white to match the
+/// debate modal's dropdowns, or a red fill for the save popup's button).
+fn render_modal_button<W: Write>(
+  out: &mut W,
+  modal_x: u16,
+  modal_width: u16,
+  y: u16,
+  label: &str,
+  focused: bool,
+  focused_fill: &str,
+) {
+  let label_len = label.chars().count();
+  let inner_width = label_len + 4; // 2 spaces of padding on each side
+  let box_width = inner_width as u16 + 2; // + the two border columns
+  let x = modal_x + modal_width.saturating_sub(box_width) / 2;
+  let pad = inner_width - label_len;
+  let left_pad = pad / 2;
+  let right_pad = pad - left_pad;
+
+  if focused {
+    execute!(
+      out,
+      MoveTo(x, y),
+      Print(format!("{}┌{}┐\x1b[0m", focused_fill, "─".repeat(inner_width)))
+    )
+    .unwrap();
+    execute!(
+      out,
+      MoveTo(x, y + 1),
+      Print(format!(
+        "{}│{}{}{}│\x1b[0m",
+        focused_fill,
+        " ".repeat(left_pad),
+        label,
+        " ".repeat(right_pad)
+      ))
+    )
+    .unwrap();
+    execute!(
+      out,
+      MoveTo(x, y + 2),
+      Print(format!("{}└{}┘\x1b[0m", focused_fill, "─".repeat(inner_width)))
+    )
+    .unwrap();
+  } else {
+    execute!(
+      out,
+      MoveTo(x, y),
+      Print(format!(
+        "\x1b[48;5;234m\x1b[90m┌{}┐\x1b[0m",
+        "─".repeat(inner_width)
+      ))
+    )
+    .unwrap();
+    execute!(
+      out,
+      MoveTo(x, y + 1),
+      Print(format!(
+        "\x1b[48;5;234m\x1b[90m│\x1b[97m{}{}{}\x1b[90m│\x1b[0m",
+        " ".repeat(left_pad),
+        label,
+        " ".repeat(right_pad)
+      ))
+    )
+    .unwrap();
+    execute!(
+      out,
+      MoveTo(x, y + 2),
+      Print(format!(
+        "\x1b[48;5;234m\x1b[90m└{}┘\x1b[0m",
+        "─".repeat(inner_width)
+      ))
+    )
+    .unwrap();
+  }
+}
+
 fn get_visible_len_for(s: &str) -> usize {
   let mut len = 0usize;
   let mut chars = s.chars();
@@ -1469,12 +1620,20 @@ fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
   let agent1_idx = *state.debate_modal_selected_agent1.lock().unwrap();
   let agent2_idx = *state.debate_modal_selected_agent2.lock().unwrap();
   let focus = *state.debate_modal_focus.lock().unwrap();
+  let subject = state.debate_modal_subject.lock().unwrap().clone();
+  let caret = (*state.debate_modal_caret.lock().unwrap()).min(subject.chars().count());
+  let max_turns_text = state.debate_modal_max_turns.lock().unwrap().clone();
+  let max_turns_caret =
+    (*state.debate_modal_max_turns_caret.lock().unwrap()).min(max_turns_text.chars().count());
 
   let (cols, rows) = terminal::size().unwrap_or((80, 24));
 
-  // Calculate modal dimensions
-  let modal_width = std::cmp::min(60, cols - 4);
-  let modal_height = std::cmp::min(agents.len() as u16 + 10, rows - 4);
+  // Calculate modal dimensions: tall enough for the agent pickers, the max
+  // turns field, the SUBJECT_ROWS-line subject field, its two-line hint, and
+  // the big "Start Debate" button below that, with the instructions block
+  // anchored `modal_height - 3` up from the bottom border.
+  let modal_width = std::cmp::min(70, cols - 4);
+  let modal_height = std::cmp::min(22, rows - 4);
   let modal_x = (cols - modal_width) / 2;
   let modal_y = (rows - modal_height) / 2;
 
@@ -1520,7 +1679,7 @@ fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
   )
   .unwrap();
 
-  let title = " Select Debate Agents ";
+  let title = " Configure New Debate ";
   let title_x = modal_x + (modal_width - title.len() as u16) / 2;
   execute!(
     out,
@@ -1603,20 +1762,193 @@ fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
   )
   .unwrap();
 
-  // Show warning if same agent selected
-  if agent1_idx == agent2_idx {
+  let box_width = modal_width as usize - 4;
+
+  // Max turns field: blank (no limit) or a number of debate replies after
+  // which the debate ends by itself and vtmate switches back to
+  // conversation mode (see conversation::conversation_thread's turn-advance
+  // handling).
+  let max_turns_focused = focus == 2;
+  let max_turns_label = " Max turns: ";
+  execute!(
+    out,
+    MoveTo(modal_x + 2, modal_y + 6),
+    Print(format!(
+      "\x1b[48;5;234m{}{}\x1b[0m",
+      if max_turns_focused { "\x1b[97;1m" } else { "\x1b[90m" },
+      max_turns_label
+    ))
+  )
+  .unwrap();
+  let max_turns_box_width = modal_width as usize - 4 - max_turns_label.len();
+  let max_turns_avail = max_turns_box_width.saturating_sub(1).max(1);
+  let max_turns_chars: Vec<char> = max_turns_text.chars().collect();
+  let max_turns_content = if max_turns_focused {
+    render_field_line(&max_turns_chars, Some(max_turns_caret), max_turns_avail)
+  } else if max_turns_text.is_empty() {
+    "\x1b[2m(blank = no limit)\x1b[22m".to_string()
+  } else {
+    render_field_line(&max_turns_chars, None, max_turns_avail)
+  };
+  let max_turns_pad =
+    max_turns_box_width.saturating_sub(visible_columns(&max_turns_content) + 1);
+  execute!(
+    out,
+    MoveTo(modal_x + 2 + max_turns_label.len() as u16, modal_y + 6),
+    Print(format!(
+      "\x1b[48;5;237m\x1b[97m {}{}\x1b[0m",
+      max_turns_content,
+      " ".repeat(max_turns_pad)
+    ))
+  )
+  .unwrap();
+
+  // Warning row: the same agent picked twice is fine (it just debates
+  // itself), so the only thing that can be invalid here is max turns.
+  let max_turns_valid = max_turns_text.is_empty()
+    || max_turns_text
+      .parse::<u64>()
+      .map(|n| crate::state::DEBATE_MAX_TURNS_RANGE.contains(&n))
+      .unwrap_or(false);
+  let warning = (!max_turns_valid).then_some("▲ Max turns must be blank (no limit) or 2-1000000000000");
+  if let Some(warning) = warning {
     execute!(
       out,
-      MoveTo(modal_x + 2, modal_y + 6),
+      MoveTo(modal_x + 2, modal_y + 7),
       Print(format!(
-        "\x1b[48;5;234m\x1b[91m▲ Please select two different agents\x1b[0m"
+        "\x1b[48;5;234m\x1b[91m{}\x1b[0m",
+        fit_to_width(warning, box_width)
       ))
     )
     .unwrap();
   }
 
-  // Draw instructions
-  let instructions_y = modal_y + modal_height - 5;
+  // Subject label ("Initial message"), naming the agent it will be sent to:
+  // it is that agent's first turn's prompt (see
+  // conversation::conversation_thread's turn-0 handling).
+  let subject_focused = focus == 3;
+  let subject_label = format!(
+    " Initial message (in name of \"{}\"):",
+    agents[agent1_idx].name
+  );
+  execute!(
+    out,
+    MoveTo(modal_x + 2, modal_y + 8),
+    Print(format!(
+      "\x1b[48;5;234m{}{}\x1b[0m",
+      if subject_focused { "\x1b[97;1m" } else { "\x1b[90m" },
+      fit_to_width(&subject_label, box_width)
+    ))
+  )
+  .unwrap();
+
+  // Subject input: a fixed SUBJECT_ROWS-line box. The typed text renders
+  // with an inline block caret on whichever line it is on when focused, or a
+  // dim placeholder on its first line when empty and not being edited. A
+  // line longer than the box scrolls horizontally to keep the caret in
+  // view, and once there are more lines than the box shows, the whole field
+  // scrolls vertically the same way, rather than overflowing past the
+  // border.
+  const SUBJECT_ROWS: u16 = 3;
+  let avail = box_width.saturating_sub(1).max(1);
+  let chars: Vec<char> = subject.chars().collect();
+  let total = chars.len();
+  let caret = caret.min(total);
+
+  // (start, end) char index of each logical line, end exclusive of its own
+  // trailing '\n'.
+  let mut line_bounds: Vec<(usize, usize)> = Vec::new();
+  let mut seg_start = 0;
+  for (i, c) in chars.iter().enumerate() {
+    if *c == '\n' {
+      line_bounds.push((seg_start, i));
+      seg_start = i + 1;
+    }
+  }
+  line_bounds.push((seg_start, total));
+
+  let caret_line = line_bounds
+    .iter()
+    .position(|(s, e)| caret >= *s && caret <= *e)
+    .unwrap_or(0);
+  let total_lines = line_bounds.len();
+  let start_line = if !subject_focused || total_lines <= SUBJECT_ROWS as usize {
+    0
+  } else {
+    caret_line
+      .saturating_sub(SUBJECT_ROWS as usize - 1)
+      .min(total_lines - SUBJECT_ROWS as usize)
+  };
+
+  for row in 0..SUBJECT_ROWS {
+    let li = start_line + row as usize;
+    let content = match line_bounds.get(li) {
+      Some(&(s, e)) if s == e && li == 0 && !subject_focused && subject.is_empty() => {
+        // `\x1b[22m` cancels only the dim attribute (like `\x1b[27m` does for
+        // reverse video elsewhere in this box) - a full `\x1b[0m` reset here
+        // would also drop the row's own background/foreground, leaving the
+        // padding after this text a plain black gap instead of matching the
+        // rest of the field.
+        "\x1b[2m(blank — wait for a spoken topic)\x1b[22m".to_string()
+      }
+      Some(&(s, e)) => {
+        let caret_col = (subject_focused && li == caret_line).then(|| caret - s);
+        render_field_line(&chars[s..e], caret_col, avail)
+      }
+      None => String::new(),
+    };
+    let pad = box_width.saturating_sub(visible_columns(&content) + 1);
+    execute!(
+      out,
+      MoveTo(modal_x + 2, modal_y + 9 + row),
+      Print(format!(
+        "\x1b[48;5;237m\x1b[97m {}{}\x1b[0m",
+        content,
+        " ".repeat(pad)
+      ))
+    )
+    .unwrap();
+  }
+
+  // Hint text, in gray, explaining the subject field - kept to 2 lines.
+  for (i, line) in [
+    "This is the initial message of the debate (e.g. \"Is AI the right",
+    "way to go forward?\"). Leave blank to speak the topic instead.",
+  ]
+  .iter()
+  .enumerate()
+  {
+    execute!(
+      out,
+      MoveTo(modal_x + 2, modal_y + 9 + SUBJECT_ROWS + i as u16),
+      Print(format!(
+        "\x1b[48;5;234m\x1b[90m{}\x1b[0m",
+        fit_to_width(line, box_width)
+      ))
+    )
+    .unwrap();
+  }
+
+  // Instructions render as a single row listing every shortcut.
+  let instructions_y = modal_y + modal_height - 3;
+
+  // Start Debate button - a blank row separates it from the hint above and
+  // one more blank row follows it before the footer. On a terminal too short for
+  // the full layout, `modal_height` above is already clamped to fit the
+  // screen, but this button's own offset is otherwise fixed from the top -
+  // clamp it against `instructions_y` too so it can never land on the same
+  // row as the footer instead of just running out of screen below them.
+  let start_debate_focused = focus == 4;
+  let button_y = (modal_y + 9 + SUBJECT_ROWS + 2 + 1).min(instructions_y.saturating_sub(4));
+  render_modal_button(
+    out,
+    modal_x,
+    modal_width,
+    button_y,
+    "Start Debate",
+    start_debate_focused,
+    "\x1b[30;47m",
+  );
   execute!(
     out,
     MoveTo(modal_x + 2, instructions_y),
@@ -1631,28 +1963,344 @@ fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
     out,
     MoveTo(modal_x + 2, instructions_y + 1),
     Print(format!(
-      "\x1b[48;5;234m\x1b[97m Tab/↑/↓ \x1b[90m Switch focus\x1b[0m"
+      "\x1b[48;5;234m\x1b[97m Tab/↑/↓ \x1b[90mSwitch focus   \x1b[97m←/→ \x1b[90m{}   \x1b[97mEsc \x1b[90mCancel\x1b[0m",
+      if subject_focused || max_turns_focused {
+        "Move cursor"
+      } else {
+        "Change selection"
+      }
     ))
   )
   .unwrap();
 
+  // Draw bottom border
   execute!(
     out,
-    MoveTo(modal_x + 2, instructions_y + 2),
+    MoveTo(modal_x, modal_y + modal_height - 1),
     Print(format!(
-      "\x1b[48;5;234m\x1b[97m ←/→     \x1b[90m Change selection\x1b[0m"
+      "\x1b[48;5;234m\x1b[97m└{}┘\x1b[0m",
+      "─".repeat(modal_width as usize - 2)
     ))
   )
   .unwrap();
 
+  // Draw vertical borders
+  for y in (modal_y + 1)..(modal_y + modal_height - 1) {
+    execute!(
+      out,
+      MoveTo(modal_x, y),
+      Print("\x1b[48;5;234m\x1b[97m│\x1b[0m")
+    )
+    .unwrap();
+    execute!(
+      out,
+      MoveTo(modal_x + modal_width - 1, y),
+      Print("\x1b[48;5;234m\x1b[97m│\x1b[0m")
+    )
+    .unwrap();
+  }
+
+  out.flush().unwrap();
+}
+
+/// The Ctrl+E popup: either the "pick what to save" checkbox screen, or, while
+/// a `-s`/`--save-html` session is already running, a "stop recording"
+/// screen - the same dark bordered box [`render_debate_modal`] uses.
+/// How long a `list_export_files` result is reused before the directory is
+/// read again: the popup redraws on every background stream/line message
+/// while it's open (see the redraw-on-top-of-popup handling in the ui loop),
+/// so without this an active streamed reply would turn into one directory
+/// read-and-sort per token.
+const EXPORT_FILES_REFRESH: Duration = Duration::from_millis(400);
+
+static EXPORT_FILES_CACHE: Mutex<Option<(String, Instant, Vec<String>)>> = Mutex::new(None);
+
+/// File names (sorted) currently sitting in `~/.vtmate/conversations/<folder>`
+/// - whatever `-s`/`--save-html` has written there so far. Reads the real
+/// directory rather than reconstructing the list from in-memory state, so it
+/// is correct regardless of which of the two is active (or both) and works
+/// the same for an attached client as it does locally, as long as the
+/// folder is on a filesystem it can also see. Empty if the folder name
+/// (`state.save_modal_folder`) isn't known yet, or nothing has been
+/// written. Cached per `EXPORT_FILES_REFRESH`.
+fn list_export_files(folder: &Option<String>) -> Vec<String> {
+  let Some(name) = folder else {
+    *EXPORT_FILES_CACHE.lock().unwrap() = None;
+    return Vec::new();
+  };
+  let mut cache = EXPORT_FILES_CACHE.lock().unwrap();
+  if let Some((cached_name, read_at, files)) = cache.as_ref() {
+    if cached_name == name && read_at.elapsed() < EXPORT_FILES_REFRESH {
+      return files.clone();
+    }
+  }
+  let files = read_export_files(name);
+  *cache = Some((name.clone(), Instant::now(), files.clone()));
+  files
+}
+
+fn read_export_files(name: &str) -> Vec<String> {
+  let Some(home) = crate::util::get_user_home_path() else {
+    return Vec::new();
+  };
+  let dir = home.join(".vtmate").join("conversations").join(name);
+  let Ok(entries) = std::fs::read_dir(&dir) else {
+    return Vec::new();
+  };
+  let mut files: Vec<String> = entries
+    .filter_map(|e| e.ok())
+    .filter(|e| e.path().is_file())
+    .filter_map(|e| e.file_name().into_string().ok())
+    .collect();
+  files.sort();
+  files
+}
+
+fn render_save_modal<W: Write>(out: &mut W, buffer: &[String]) {
+  let state = GLOBAL_STATE.get().expect("AppState not initialized");
+  let currently_saving =
+    state.save_enabled.load(Ordering::Relaxed) || state.save_html_enabled.load(Ordering::Relaxed);
+  let export_files = if currently_saving {
+    list_export_files(&state.save_modal_folder.lock().unwrap())
+  } else {
+    Vec::new()
+  };
+  // At least 1 so there is always a row for the "(no files yet)" placeholder.
+  let file_rows = export_files.len().max(1) as u16;
+
+  let (cols, rows) = terminal::size().unwrap_or((80, 24));
+  // Wide enough for "Files will be saved in ~/.vtmate/conversations", the
+  // longest line in the popup.
+  let modal_width = std::cmp::min(52, cols - 4);
+  // Tall enough to list every exported file without truncating it - grows
+  // with the folder rather than scrolling.
+  let modal_height = std::cmp::min(if currently_saving { file_rows + 13 } else { 19 }, rows - 4);
+  let modal_x = (cols - modal_width) / 2;
+  let modal_y = (rows - modal_height) / 2;
+  let box_width = modal_width as usize - 4;
+
+  // Clear the screen first
+  execute!(out, Clear(ClearType::All), MoveTo(0, 0)).unwrap();
+
+  // Redraw buffer in the background (dimmed)
+  let (_, term_height) = terminal::size().unwrap_or((80, 24));
+  let (view_start, visible) = viewport(buffer.len(), term_height);
+  for (i, line) in buffer.iter().enumerate().skip(view_start).take(visible) {
+    let y = i - view_start;
+    execute!(
+      out,
+      MoveTo(0, y as u16),
+      ResetColor,
+      Clear(ClearType::CurrentLine),
+      Print(format!("\x1b[90m{}\x1b[0m", line))
+    )
+    .unwrap();
+  }
+
+  // Draw modal background
+  for y in modal_y..modal_y + modal_height {
+    execute!(
+      out,
+      MoveTo(modal_x, y),
+      Print(format!(
+        "\x1b[48;5;234m{}\x1b[0m",
+        " ".repeat(modal_width as usize)
+      ))
+    )
+    .unwrap();
+  }
+
+  // Draw modal border and title
   execute!(
     out,
-    MoveTo(modal_x + 2, instructions_y + 3),
+    MoveTo(modal_x, modal_y),
     Print(format!(
-      "\x1b[48;5;234m\x1b[97m Enter   \x1b[90m Confirm | \x1b[97mEsc \x1b[90m Cancel\x1b[0m"
+      "\x1b[48;5;234m\x1b[97m┌{}┐\x1b[0m",
+      "─".repeat(modal_width as usize - 2)
     ))
   )
   .unwrap();
+
+  let title = " Save Conversation ";
+  let title_x = modal_x + (modal_width - title.len() as u16) / 2;
+  execute!(
+    out,
+    MoveTo(title_x, modal_y),
+    Print(format!("\x1b[48;5;234m\x1b[97;1m{}\x1b[0m", title))
+  )
+  .unwrap();
+
+  if currently_saving {
+    let folder = state.save_modal_folder.lock().unwrap().clone();
+    let path_line = match &folder {
+      Some(name) => format!("~/.vtmate/conversations/{}", name),
+      None => "~/.vtmate/conversations/…".to_string(),
+    };
+
+    execute!(
+      out,
+      MoveTo(modal_x + 2, modal_y + 2),
+      Print("\x1b[48;5;234m\x1b[97mCurrent session is being saved in:\x1b[0m")
+    )
+    .unwrap();
+    execute!(
+      out,
+      MoveTo(modal_x + 2, modal_y + 3),
+      Print(format!(
+        "\x1b[48;5;234m\x1b[36m{}\x1b[0m",
+        fit_to_width(&path_line, box_width)
+      ))
+    )
+    .unwrap();
+
+    // Every file in that folder so far, one per line - the modal is already
+    // sized (via `file_rows` above) to show every one of them in full.
+    if export_files.is_empty() {
+      execute!(
+        out,
+        MoveTo(modal_x + 2, modal_y + 5),
+        Print("\x1b[48;5;234m\x1b[90m(no files written yet)\x1b[0m")
+      )
+      .unwrap();
+    } else {
+      for (i, name) in export_files.iter().enumerate() {
+        execute!(
+          out,
+          MoveTo(modal_x + 2, modal_y + 5 + i as u16),
+          Print(format!(
+            "\x1b[48;5;234m\x1b[97m{}\x1b[0m",
+            fit_to_width(name, box_width)
+          ))
+        )
+        .unwrap();
+      }
+    }
+
+    // Big centered button - the only interactive thing on this screen, so
+    // it is always drawn "focused" (red).
+    render_modal_button(
+      out,
+      modal_x,
+      modal_width,
+      modal_y + 5 + file_rows + 1,
+      "Stop Recording",
+      true,
+      "\x1b[41m\x1b[97;1m",
+    );
+
+    let hint = "Esc  Back";
+    let hint_x = modal_x + (modal_width.saturating_sub(hint.len() as u16)) / 2;
+    execute!(
+      out,
+      MoveTo(hint_x, modal_y + modal_height - 2),
+      Print(format!("\x1b[48;5;234m\x1b[90m{}\x1b[0m", hint))
+    )
+    .unwrap();
+  } else {
+    let check_txt = state.save_modal_check_txt.load(Ordering::SeqCst);
+    let check_html = state.save_modal_check_html.load(Ordering::SeqCst);
+    let focus = *state.save_modal_focus.lock().unwrap();
+
+    // Checkbox label ("[x] Save as ...") plus a second, gray detail line
+    // indented to align under the label text rather than the checkbox
+    // itself. `y` is the label's row; the detail sits right below it.
+    let detail_indent: usize = 4; // width of "[x] "
+    for (y, focused, checked, label, detail) in [
+      (
+        2u16,
+        focus == 0,
+        check_txt,
+        "Save as .txt and single .wav",
+        "(exported as single audio .wav)",
+      ),
+      (
+        5u16,
+        focus == 1,
+        check_html,
+        "Save as html with playable turns",
+        "(separate .wav per turn)",
+      ),
+    ] {
+      let text = format!("[{}] {}", if checked { "x" } else { " " }, label);
+      let style = if focused { "\x1b[30;47m" } else { "\x1b[97m" };
+      execute!(
+        out,
+        MoveTo(modal_x + 2, modal_y + y),
+        Print(format!(
+          "\x1b[48;5;234m{}{:<width$}\x1b[0m",
+          style,
+          fit_to_width(&text, box_width),
+          width = box_width
+        ))
+      )
+      .unwrap();
+      execute!(
+        out,
+        MoveTo(modal_x + 2 + detail_indent as u16, modal_y + y + 1),
+        Print(format!(
+          "\x1b[48;5;234m\x1b[90m{}\x1b[0m",
+          fit_to_width(detail, box_width.saturating_sub(detail_indent))
+        ))
+      )
+      .unwrap();
+    }
+
+    if !check_txt && !check_html {
+      execute!(
+        out,
+        MoveTo(modal_x + 2, modal_y + 7),
+        Print("\x1b[48;5;234m\x1b[91m▲ Select at least one option\x1b[0m")
+      )
+      .unwrap();
+    }
+
+    execute!(
+      out,
+      MoveTo(modal_x + 2, modal_y + 9),
+      Print(format!(
+        "\x1b[48;5;234m\x1b[90m{}\x1b[0m",
+        fit_to_width("Files will be saved in ~/.vtmate/conversations", box_width)
+      ))
+    )
+    .unwrap();
+
+    // Start Recording button - a blank row separates it from the message
+    // above and one more blank row follows it before the footer. Red on
+    // focus, like the Stop Recording button on the other screen of this
+    // popup.
+    render_modal_button(
+      out,
+      modal_x,
+      modal_width,
+      modal_y + 11,
+      "Start Recording",
+      focus == 2,
+      "\x1b[41m\x1b[97;1m",
+    );
+
+    let instructions_y = modal_y + modal_height - 4;
+    execute!(
+      out,
+      MoveTo(modal_x + 2, instructions_y),
+      Print(format!(
+        "\x1b[48;5;234m\x1b[90m{}\x1b[0m",
+        "─".repeat(box_width)
+      ))
+    )
+    .unwrap();
+    execute!(
+      out,
+      MoveTo(modal_x + 2, instructions_y + 1),
+      Print("\x1b[48;5;234m\x1b[97m ↑/↓/Tab \x1b[90m Move   \x1b[97mSpace \x1b[90m Toggle\x1b[0m")
+    )
+    .unwrap();
+    execute!(
+      out,
+      MoveTo(modal_x + 2, instructions_y + 2),
+      Print("\x1b[48;5;234m\x1b[97m Esc      \x1b[90m Cancel\x1b[0m")
+    )
+    .unwrap();
+  }
 
   // Draw bottom border
   execute!(
