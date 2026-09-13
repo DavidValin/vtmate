@@ -121,6 +121,15 @@ pub struct Args {
   )]
   pub read_file: Option<String>,
 
+  #[arg(
+    long = "stt",
+    value_name = "WAV_FILE",
+    default_missing_value = "-",
+    conflicts_with_all = ["read_file", "quiet", "prompt", "prompt_file", "debate", "list_voices", "daemon", "daemon_foreground", "daemon_stop", "daemon_status", "clone_voice", "refine_voice"],
+    help = "transcribe a wav file to text (no llm, no tts) and exit; use '-' to read wav audio from STDIN. Uses the whisper model of the selected agent (-a)"
+  )]
+  pub stt: Option<String>,
+
   #[arg(short = 'q', long = "quiet", action = clap::ArgAction::SetTrue, help = "produce a single response and exit (requires `-p` or `-i`)")]
   pub quiet: bool,
 
@@ -872,6 +881,10 @@ const OPTIONS: &[(&str, &str)] = &[
   (
     "-r, --read-file <FILENAME>",
     "read a file with voice, phrase by phrase (no llm involved). Use '-' for STDIN (runs in quiet mode))",
+  ),
+  (
+    "--stt <WAV_FILE>",
+    "transcribe a wav file to text (no llm, no tts) and exit; use '-' to read wav audio from STDIN. Uses the whisper model of the selected agent (-a)",
   ),
   (
     "-q, --quiet",

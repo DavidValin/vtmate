@@ -286,6 +286,10 @@ All cli options:
   -r <file.txt>                         read a file with voice, phrase by phrase (no llm involved)
   -r -                                  read text from STDIN with voice, phrase by phrase
                                         (no llm involved). Use - for STDIN (runs in quiet mode)
+  --stt <wav_file>                      transcribe a wav file to text and exit (no llm, no tts)
+  --stt -                               transcribe wav audio from STDIN to text and exit
+                                        (no llm, no tts). Uses the whisper model of the
+                                        selected agent (-a)
   -c <agents_file>                      use a specific agents file instead of ~/.vtmate/agents
   --list-voices                         list all voices for all languages and tts systems
   --ptt <true/false>                    override for this session the ptt setting for all agents

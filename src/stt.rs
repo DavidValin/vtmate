@@ -174,3 +174,64 @@ impl Whisper {
     Ok(result.trim_end().to_string())
   }
 }
+
+/// Decode WAV audio (mono/stereo, 8/16/24/32-bit int or 32-bit float) from
+/// any `Read`, downmixed to mono at its native sample rate. `hound::WavReader`
+/// only needs `Read` (not `Seek`) to walk samples, so this also covers WAV
+/// bytes streamed on STDIN, not just files.
+///
+/// Stops at the first decode error instead of propagating it: a stream
+/// piped from something that cannot seek back to patch its header (e.g.
+/// `arecord` stopped with Ctrl-C, or `ffmpeg` writing to a pipe) declares a
+/// placeholder `data` size, and hound errors out once the real bytes run
+/// short of that. Whatever decoded before that point is a complete prefix of
+/// the audio, so treating it as the end of the stream is more useful here
+/// than failing the whole transcription.
+fn read_wav_mono<R: std::io::Read>(
+  reader: R,
+) -> Result<(Vec<f32>, u32), Box<dyn std::error::Error + Send + Sync>> {
+  let mut wav = hound::WavReader::new(reader)
+    .map_err(|e| format!("not a readable wav stream: {}", e))?;
+  let spec = wav.spec();
+
+  let samples: Vec<f32> = match spec.sample_format {
+    hound::SampleFormat::Float => wav.samples::<f32>().map_while(Result::ok).collect(),
+    hound::SampleFormat::Int => {
+      let full_scale = (1i64 << (spec.bits_per_sample - 1)) as f32;
+      wav
+        .samples::<i32>()
+        .map_while(Result::ok)
+        .map(|v| v as f32 / full_scale)
+        .collect()
+    }
+  };
+
+  let mono = if spec.channels <= 1 {
+    samples
+  } else {
+    audio::convert_to_mono(&audio::AudioChunk {
+      data: samples,
+      channels: spec.channels,
+      sample_rate: spec.sample_rate,
+    })
+  };
+
+  Ok((mono, spec.sample_rate))
+}
+
+/// Transcribe one WAV audio input with `whisper`: `path` is a file path, or
+/// `"-"` to decode WAV bytes streamed on STDIN. Used by `--stt`.
+pub fn transcribe_wav(
+  whisper: &Whisper,
+  path: &str,
+  language: &str,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+  let (mono, sample_rate) = if path == "-" {
+    read_wav_mono(std::io::stdin().lock())?
+  } else {
+    let file =
+      std::fs::File::open(path).map_err(|e| format!("failed to open '{}': {}", path, e))?;
+    read_wav_mono(std::io::BufReader::new(file))?
+  };
+  whisper.transcribe(&mono, sample_rate, language)
+}

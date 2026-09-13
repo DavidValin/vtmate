@@ -84,7 +84,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     && args.prompt_file.is_none()
     && !args.quiet
     && args.debate.is_none()
-    && !args.list_voices;
+    && !args.list_voices
+    && args.stt.is_none();
   if bare_conversation_mode {
     if daemon::ipc::probe(Duration::from_millis(300)).is_some() {
       attach::run(&args);
@@ -131,6 +132,13 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   if args.list_voices {
     tts::print_voices();
     util::terminate(0);
+  }
+
+  // ---------------------------------------------------
+  // handle --stt <WAV_FILE|->
+  // ---------------------------------------------------
+  if let Some(ref stt_input) = args.stt {
+    run_stt_cli(stt_input, &args);
   }
 
   // ---------------------------------------------------
@@ -850,6 +858,62 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let _ = ui_handle.join();
 
   Ok(())
+}
+
+/// `--stt <WAV_FILE|->`: transcribes one wav input (a file, or STDIN for
+/// `-`) with the whisper model of the selected agent (`-a`, else the general
+/// default) and streams the plain text to stdout - no timestamps, no LLM, no
+/// TTS. Never returns.
+///
+/// Exits via `std::process::exit`, not `util::terminate`: this mode never
+/// touches the terminal (no raw mode, no alternate screen), but `terminate`
+/// unconditionally writes a cursor-show/clear-line escape sequence to
+/// stdout, which would corrupt the transcript for a caller piping it.
+fn run_stt_cli(input: &str, args: &config::Args) -> ! {
+  // Same as the normal conversation path: route whisper.cpp/ggml's own
+  // logging through crate::log (which drops anything below warning/error
+  // outside --verbose) instead of leaving it on its raw, very chatty
+  // default stderr output.
+  crate::log::install_ggml_log_callback();
+  let _ = config::ensure_settings_file();
+  let _ = config::ensure_agents_file();
+  let settings_path = config::resolve_settings_path().unwrap_or_else(|e| {
+    eprintln!("✗ Failed to resolve settings path: {}", e);
+    std::process::exit(1);
+  });
+  let agents_path = config::resolve_agents_path(args).unwrap_or_else(|e| {
+    eprintln!("✗ Failed to resolve agents path: {}", e);
+    std::process::exit(1);
+  });
+  let agents = config::load_settings(&agents_path, args).unwrap_or_else(|e| {
+    eprintln!("✗ Failed to load settings: {}", e);
+    std::process::exit(1);
+  });
+  let general = config::load_general_settings(&settings_path).unwrap_or_default();
+  let settings =
+    config::select_agent(&agents, args.agent.as_deref(), &general).unwrap_or_else(|e| {
+      eprintln!("✗ {}", e);
+      std::process::exit(1);
+    });
+
+  let model_path = config::resolved_whisper_model_path(&settings.whisper_model_path);
+  let whisper = stt::init(&model_path).unwrap_or_else(|e| {
+    eprintln!("✗ Failed to load whisper model '{}': {}", model_path, e);
+    std::process::exit(1);
+  });
+
+  match stt::transcribe_wav(whisper, input, &settings.language) {
+    Ok(text) => {
+      println!("{}", text);
+      use std::io::Write;
+      let _ = std::io::stdout().flush();
+      std::process::exit(0);
+    }
+    Err(e) => {
+      eprintln!("✗ Speech-to-text failed: {}", e);
+      std::process::exit(1);
+    }
+  }
 }
 
 /// Shared tail of `--clone-voice` and `--refine-voice`: opens the progress
