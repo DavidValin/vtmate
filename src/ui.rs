@@ -2056,6 +2056,10 @@ fn read_export_files(name: &str) -> Vec<String> {
   files
 }
 
+/// A debate saved as html writes one .wav per turn: without a cap the popup
+/// would grow a row taller with every turn instead of staying put.
+const MAX_EXPORT_FILES_SHOWN: usize = 3;
+
 fn render_save_modal<W: Write>(out: &mut W, buffer: &[String]) {
   let state = GLOBAL_STATE.get().expect("AppState not initialized");
   let currently_saving =
@@ -2065,15 +2069,24 @@ fn render_save_modal<W: Write>(out: &mut W, buffer: &[String]) {
   } else {
     Vec::new()
   };
-  // At least 1 so there is always a row for the "(no files yet)" placeholder.
-  let file_rows = export_files.len().max(1) as u16;
+  // At least 1 so there is always a row for the "(no files yet)" placeholder;
+  // capped at MAX_EXPORT_FILES_SHOWN (+1 for the "..." line beyond that), to
+  // match what the render loop below actually draws.
+  let file_rows = if export_files.is_empty() {
+    1
+  } else if export_files.len() > MAX_EXPORT_FILES_SHOWN {
+    MAX_EXPORT_FILES_SHOWN + 1
+  } else {
+    export_files.len()
+  } as u16;
 
   let (cols, rows) = terminal::size().unwrap_or((80, 24));
   // Wide enough for "Files will be saved in ~/.vtmate/conversations", the
   // longest line in the popup.
   let modal_width = std::cmp::min(52, cols - 4);
-  // Tall enough to list every exported file without truncating it - grows
-  // with the folder rather than scrolling.
+  // Tall enough for up to MAX_EXPORT_FILES_SHOWN files (or that many plus the
+  // "..." line) - grows with the folder up to that cap rather than scrolling,
+  // instead of following an html-saved debate's turn count without bound.
   let modal_height = std::cmp::min(if currently_saving { file_rows + 13 } else { 19 }, rows - 4);
   let modal_x = (cols - modal_width) / 2;
   let modal_y = (rows - modal_height) / 2;
@@ -2153,8 +2166,9 @@ fn render_save_modal<W: Write>(out: &mut W, buffer: &[String]) {
     )
     .unwrap();
 
-    // Every file in that folder so far, one per line - the modal is already
-    // sized (via `file_rows` above) to show every one of them in full.
+    // Up to MAX_EXPORT_FILES_SHOWN files, one per line, then a "..." line if
+    // there are more (an html-saved debate writes one .wav per turn, which
+    // would otherwise grow the popup a row taller every turn).
     if export_files.is_empty() {
       execute!(
         out,
@@ -2163,7 +2177,8 @@ fn render_save_modal<W: Write>(out: &mut W, buffer: &[String]) {
       )
       .unwrap();
     } else {
-      for (i, name) in export_files.iter().enumerate() {
+      let shown = export_files.len().min(MAX_EXPORT_FILES_SHOWN);
+      for (i, name) in export_files.iter().take(shown).enumerate() {
         execute!(
           out,
           MoveTo(modal_x + 2, modal_y + 5 + i as u16),
@@ -2171,6 +2186,14 @@ fn render_save_modal<W: Write>(out: &mut W, buffer: &[String]) {
             "\x1b[48;5;234m\x1b[97m{}\x1b[0m",
             fit_to_width(name, box_width)
           ))
+        )
+        .unwrap();
+      }
+      if export_files.len() > shown {
+        execute!(
+          out,
+          MoveTo(modal_x + 2, modal_y + 5 + shown as u16),
+          Print("\x1b[48;5;234m\x1b[90m...\x1b[0m")
         )
         .unwrap();
       }
