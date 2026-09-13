@@ -416,13 +416,15 @@ pub fn spawn_ui_thread(
         }
 
         // Anything printed underneath (an answer still streaming, a log line)
-        // would run over the popup, so it goes back on top.
+        // would run over the popup, so it goes back on top. Both popups can
+        // be opened mid-conversation (Ctrl+D and Ctrl+E only check that the
+        // other popup isn't already up), so a reply still streaming
+        // underneath is an expected case for either.
         if settings_visible && !msg_type.starts_with("settings") {
           crate::settings_ui::render(&mut out, &buffer.wrapped);
+        } else if modal_visible && !msg_type.starts_with("modal") {
+          render_debate_modal(&mut out, &buffer.wrapped);
         } else if save_modal_visible && !msg_type.starts_with("save_modal") {
-          // Unlike the debate modal (only up while nothing else is running
-          // yet), the save popup can be opened mid-conversation, so a reply
-          // still streaming underneath is an expected case here.
           render_save_modal(&mut out, &buffer.wrapped);
         }
       }
@@ -1465,24 +1467,30 @@ fn fit_to_width(s: &str, max_cols: usize) -> String {
 /// One row of a multi-line text field: `line` is that logical line's chars
 /// and `caret_col` is the caret's column within it (`None` if the caret is
 /// on a different line). Scrolls horizontally to keep the caret in view
-/// within `avail` columns, splicing in an inline reverse-video block caret
-/// when `caret_col` is given. Used by the debate modal's subject textarea,
+/// within `avail` columns, overlaying the char at the caret in reverse
+/// video (or, when the caret sits past the last char, appending a blank
+/// reverse-video caret) - the same windowing convention as
+/// `settings_ui::text_box`. Used by the debate modal's subject textarea,
 /// one call per visible row.
 fn render_field_line(line: &[char], caret_col: Option<usize>, avail: usize) -> String {
   let len = line.len();
   match caret_col {
     Some(col) => {
       let col = col.min(len);
-      let start = if len <= avail {
-        0
-      } else {
-        col.saturating_sub(avail.saturating_sub(1)).min(len - avail)
-      };
+      let start = col.saturating_sub(avail.saturating_sub(1));
       let end = (start + avail).min(len);
-      let col = col.clamp(start, end);
-      let before: String = line[start..col].iter().collect();
-      let after: String = line[col..end].iter().collect();
-      format!("{}\x1b[7m \x1b[27m{}", before, after)
+      let mut out = String::new();
+      for (i, ch) in line[start..end].iter().enumerate() {
+        if start + i == col {
+          out.push_str(&format!("\x1b[7m{}\x1b[27m", ch));
+        } else {
+          out.push(*ch);
+        }
+      }
+      if col >= end {
+        out.push_str("\x1b[7m \x1b[27m");
+      }
+      out
     }
     None => line[..avail.min(len)].iter().collect(),
   }
@@ -1621,10 +1629,9 @@ fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
   let (cols, rows) = terminal::size().unwrap_or((80, 24));
 
   // Calculate modal dimensions: tall enough for the agent pickers, the max
-  // turns field, the 5-line subject field, its two-line hint, and the big
-  // "Start Debate" button below that, with the instructions block still
-  // anchored `modal_height - 3` up from the bottom border (one combined
-  // shortcuts row instead of three).
+  // turns field, the SUBJECT_ROWS-line subject field, its two-line hint, and
+  // the big "Start Debate" button below that, with the instructions block
+  // anchored `modal_height - 3` up from the bottom border.
   let modal_width = std::cmp::min(70, cols - 4);
   let modal_height = std::cmp::min(22, rows - 4);
   let modal_x = (cols - modal_width) / 2;
@@ -1835,12 +1842,13 @@ fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
   )
   .unwrap();
 
-  // Subject input: a fixed 5-line box. The typed text renders with an
-  // inline block caret on whichever line it is on when focused, or a dim
-  // placeholder on its first line when empty and not being edited. A line
-  // longer than the box scrolls horizontally to keep the caret in view, and
-  // once there are more than 5 lines the whole field scrolls vertically the
-  // same way, rather than overflowing past the border.
+  // Subject input: a fixed SUBJECT_ROWS-line box. The typed text renders
+  // with an inline block caret on whichever line it is on when focused, or a
+  // dim placeholder on its first line when empty and not being edited. A
+  // line longer than the box scrolls horizontally to keep the caret in
+  // view, and once there are more lines than the box shows, the whole field
+  // scrolls vertically the same way, rather than overflowing past the
+  // border.
   const SUBJECT_ROWS: u16 = 3;
   let avail = box_width.saturating_sub(1).max(1);
   let chars: Vec<char> = subject.chars().collect();
@@ -1921,12 +1929,11 @@ fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
     .unwrap();
   }
 
-  // Draw instructions: one combined row instead of one per shortcut.
+  // Instructions render as a single row listing every shortcut.
   let instructions_y = modal_y + modal_height - 3;
 
-  // Start Debate button - a blank row already separates it from the hint
-  // above (the same row the footer separator used to sit right after); one
-  // more blank row follows it before the footer. On a terminal too short for
+  // Start Debate button - a blank row separates it from the hint above and
+  // one more blank row follows it before the footer. On a terminal too short for
   // the full layout, `modal_height` above is already clamped to fit the
   // screen, but this button's own offset is otherwise fixed from the top -
   // clamp it against `instructions_y` too so it can never land on the same
@@ -1999,6 +2006,15 @@ fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
 /// The Ctrl+E popup: either the "pick what to save" checkbox screen, or, while
 /// a `-s`/`--save-html` session is already running, a "stop recording"
 /// screen - the same dark bordered box [`render_debate_modal`] uses.
+/// How long a `list_export_files` result is reused before the directory is
+/// read again: the popup redraws on every background stream/line message
+/// while it's open (see the redraw-on-top-of-popup handling in the ui loop),
+/// so without this an active streamed reply would turn into one directory
+/// read-and-sort per token.
+const EXPORT_FILES_REFRESH: Duration = Duration::from_millis(400);
+
+static EXPORT_FILES_CACHE: Mutex<Option<(String, Instant, Vec<String>)>> = Mutex::new(None);
+
 /// File names (sorted) currently sitting in `~/.vtmate/conversations/<folder>`
 /// - whatever `-s`/`--save-html` has written there so far. Reads the real
 /// directory rather than reconstructing the list from in-memory state, so it
@@ -2006,11 +2022,24 @@ fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
 /// the same for an attached client as it does locally, as long as the
 /// folder is on a filesystem it can also see. Empty if the folder name
 /// (`state.save_modal_folder`) isn't known yet, or nothing has been
-/// written.
+/// written. Cached per `EXPORT_FILES_REFRESH`.
 fn list_export_files(folder: &Option<String>) -> Vec<String> {
   let Some(name) = folder else {
+    *EXPORT_FILES_CACHE.lock().unwrap() = None;
     return Vec::new();
   };
+  let mut cache = EXPORT_FILES_CACHE.lock().unwrap();
+  if let Some((cached_name, read_at, files)) = cache.as_ref() {
+    if cached_name == name && read_at.elapsed() < EXPORT_FILES_REFRESH {
+      return files.clone();
+    }
+  }
+  let files = read_export_files(name);
+  *cache = Some((name.clone(), Instant::now(), files.clone()));
+  files
+}
+
+fn read_export_files(name: &str) -> Vec<String> {
   let Some(home) = crate::util::get_user_home_path() else {
     return Vec::new();
   };
@@ -2041,8 +2070,7 @@ fn render_save_modal<W: Write>(out: &mut W, buffer: &[String]) {
 
   let (cols, rows) = terminal::size().unwrap_or((80, 24));
   // Wide enough for "Files will be saved in ~/.vtmate/conversations", the
-  // longest line here now that the checkboxes wrap their detail onto a
-  // second line.
+  // longest line in the popup.
   let modal_width = std::cmp::min(52, cols - 4);
   // Tall enough to list every exported file without truncating it - grows
   // with the folder rather than scrolling.
@@ -2236,10 +2264,10 @@ fn render_save_modal<W: Write>(out: &mut W, buffer: &[String]) {
     )
     .unwrap();
 
-    // Start Recording button - a blank row already separates it from the
-    // message above (the same row the footer separator used to sit right
-    // after); one more blank row follows it before the footer. Red on focus,
-    // like the Stop Recording button on the other screen of this popup.
+    // Start Recording button - a blank row separates it from the message
+    // above and one more blank row follows it before the footer. Red on
+    // focus, like the Stop Recording button on the other screen of this
+    // popup.
     render_modal_button(
       out,
       modal_x,

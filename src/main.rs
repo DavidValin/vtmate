@@ -28,6 +28,7 @@ mod record;
 mod settings_ui;
 mod state;
 mod stt;
+mod text_field;
 mod tts;
 mod ui;
 mod util;

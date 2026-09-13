@@ -4,6 +4,7 @@
 
 use crate::conversation::Command;
 use crate::state::{GLOBAL_STATE, decrease_voice_speed, increase_voice_speed};
+use crate::text_field::{insert_char_at, remove_char_at};
 use crossbeam_channel::Sender;
 use crossterm::{
   event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
@@ -731,27 +732,6 @@ pub fn switch_agent(
   ));
 }
 
-/// Insert `c` into `text` at char index `idx` (clamped to the string's
-/// length): the same UTF-8-safe indexing settings_ui's text fields use, kept
-/// here too since the debate modal's subject field is edited independently
-/// of the settings popup.
-fn insert_char_at(text: &mut String, idx: usize, c: char) {
-  let idx = idx.min(text.chars().count());
-  let byte = text
-    .char_indices()
-    .nth(idx)
-    .map(|(i, _)| i)
-    .unwrap_or(text.len());
-  text.insert(byte, c);
-}
-
-/// Remove the char at char index `idx`, if any.
-fn remove_char_at(text: &mut String, idx: usize) {
-  if let Some((byte, _)) = text.char_indices().nth(idx) {
-    text.remove(byte);
-  }
-}
-
 /// (start, end) char index of the line containing `caret` in `text` - end
 /// exclusive of that line's own trailing '\n', if any. Used to make Home/End
 /// jump to the start/end of the current line rather than the whole field,
@@ -771,42 +751,18 @@ fn current_line_bounds(text: &str, caret: usize) -> (usize, usize) {
 }
 
 /// Move the debate modal's subject caret to the equivalent column on the
-/// line above/below - the same vertical-caret algorithm settings_ui's
-/// system-prompt field uses (see `settings_ui::move_caret_line`). Returns
-/// `false` at the field's first (going up) or last (going down) line, so the
-/// caller can fall back to cycling focus instead.
+/// line above/below. `false` at the field's first (going up) or last (going
+/// down) line, so the caller can fall back to cycling focus instead.
 fn move_subject_caret_line(state: &crate::state::AppState, down: bool) -> bool {
   let text = state.debate_modal_subject.lock().unwrap().clone();
-  let chars: Vec<char> = text.chars().collect();
   let mut caret = state.debate_modal_caret.lock().unwrap();
-  let pos = (*caret).min(chars.len());
-  let line_start = chars[..pos]
-    .iter()
-    .rposition(|c| *c == '\n')
-    .map_or(0, |i| i + 1);
-  let column = pos - line_start;
-  if down {
-    let Some(rel) = chars[pos..].iter().position(|c| *c == '\n') else {
-      return false;
-    };
-    let next_start = pos + rel + 1;
-    let next_len = chars[next_start..]
-      .iter()
-      .position(|c| *c == '\n')
-      .unwrap_or(chars.len() - next_start);
-    *caret = next_start + column.min(next_len);
-  } else {
-    if line_start == 0 {
-      return false;
+  match crate::text_field::move_caret_vertical(&text, *caret, down) {
+    Some(pos) => {
+      *caret = pos;
+      true
     }
-    let previous_start = chars[..line_start - 1]
-      .iter()
-      .rposition(|c| *c == '\n')
-      .map_or(0, |i| i + 1);
-    let previous_len = line_start - 1 - previous_start;
-    *caret = previous_start + column.min(previous_len);
+    None => false,
   }
-  true
 }
 
 /// Validate the debate modal's max-turns text: all digits and within
@@ -905,6 +861,9 @@ fn save_modal_key(state: &crate::state::AppState, ctx: &KeyCtx, code: KeyCode) {
       KeyCode::Enter => {
         crate::conversation::stop_save(state);
         *state.save_modal_folder.lock().unwrap() = None;
+        state.save_modal_check_txt.store(true, Ordering::SeqCst);
+        state.save_modal_check_html.store(false, Ordering::SeqCst);
+        *state.save_modal_focus.lock().unwrap() = 0;
         let _ = ctx.tx_ui.send("save_modal_update|".to_string());
         let _ = ctx
           .tx_ui

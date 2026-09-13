@@ -114,9 +114,9 @@ pub struct AppState {
   pub max_turns: Arc<AtomicU64>,
   /// True while the running debate was started with `--debate` on the
   /// command line (as opposed to the Ctrl+D popup): `--max-turns` reaching
-  /// its limit then exits the process (the original, scriptable behavior)
-  /// instead of switching back to conversation mode. Set at CLI startup and
-  /// cleared whenever the popup starts a debate instead.
+  /// its limit then exits the process, keeping a scripted run
+  /// non-interactive, instead of switching back to conversation mode. Set at
+  /// CLI startup and cleared whenever the popup starts a debate instead.
   pub debate_started_via_cli: Arc<AtomicBool>,
   pub debate_paused: Arc<AtomicBool>,
   pub debate_modal_visible: Arc<AtomicBool>,

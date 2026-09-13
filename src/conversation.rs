@@ -333,9 +333,8 @@ pub fn conversation_thread(
         // (--debate's own <subject> or -p/-i, or the popup's typed text)
         // always arrives here as `pending_user_msg`, the same as a spoken
         // interruption - see the pre-loop handling and the transition
-        // detection above - so there is no turn-0 special case left: every
-        // turn either responds to a submitted message or, lacking one,
-        // continues from the last assistant reply.
+        // detection above - so every turn either responds to a submitted
+        // message or, lacking one, continues from the last assistant reply.
         let (current_agent, user_msg) = if let Some(msg) = pending_user_msg.take() {
           // User interrupted - current agent responds to user
           (&debate_agents[turn % agent_count], msg)
@@ -396,9 +395,9 @@ pub fn conversation_thread(
               if max_turns > 0 && turns_done >= max_turns {
                 if state.debate_started_via_cli.load(Ordering::SeqCst) {
                   // A `--debate ... --max-turns N` CLI run stays script-friendly:
-                  // it exits the process once its turn limit is reached, same as
-                  // always. Only a debate (re)started from the Ctrl+D popup
-                  // switches back to conversation mode instead (see below).
+                  // it exits the process once its turn limit is reached. Only a
+                  // debate (re)started from the Ctrl+D popup switches back to
+                  // conversation mode instead (see below).
                   crate::log::notice(
                     "info",
                     &format!("--max-turns {} reached, ending the debate", max_turns),
@@ -715,14 +714,12 @@ pub fn conversation_thread(
         // Persist conversation after streaming (same as handle_reply does at line 970)
         perform_save(&conversation_history, &settings_clone);
       }
-      // Without this, the loop parks here indefinitely whenever it's idle in
-      // conversation mode: nothing about starting a debate (from the Ctrl+D
-      // popup, or --max-turns switching back to conversation mode and then
-      // straight into a new debate) sends anything on `rx_cmd`/`rx_utt`, so
-      // the top-of-loop checks above (including `debate_pending_submit`)
-      // never got a chance to run again until the user happened to speak -
-      // which is also why a spoken utterance "unstuck" it, but by then it
-      // had already overwritten the typed subject with what was said.
+      // Keeps the top-of-loop checks (including `debate_pending_submit`)
+      // running while idle in conversation mode: starting a debate from the
+      // Ctrl+D popup, or switching modes when `--max-turns` is reached,
+      // sends nothing on `rx_cmd`/`rx_utt`, so without this timeout those
+      // checks would only run again once the user spoke - by which point the
+      // spoken utterance would already have overwritten the typed subject.
       default(std::time::Duration::from_millis(100)) => {}
     }
   }
@@ -1110,8 +1107,8 @@ fn handle_reply(
           // the turn is over, and the next turn's `stop_play_tx` clears the
           // queue out from under audio that was still in flight, cutting it
           // off. Slow-but-not-hung engine loads are handled at the source
-          // now (the per-engine mutex in src/tts/*.rs is held for the whole
-          // build), so this can just wait.
+          // instead (the per-engine mutex in src/tts/*.rs is held for the
+          // whole build), so this can just wait.
           let _ = tts_done_rx.recv();
         }
       }
