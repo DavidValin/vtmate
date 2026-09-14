@@ -40,6 +40,8 @@ pub struct AgentSettings {
   pub sound_threshold_peak: f32,
   pub end_silence_ms: u64,
   pub voice_speed: f32,
+  #[serde(default, deserialize_with = "parse_tools")]
+  pub tools: Vec<String>,
   /// Name of the `[system_prompt]` block this prompt was pulled from, when
   /// the agent wrote `system_prompt = @<name>`. `save_settings` writes the
   /// prompt back under the same name instead of inventing a new one. Never
@@ -228,6 +230,20 @@ where
 pub const HANGOVER_MS_DEFAULT: u64 = 300;
 pub const MIN_UTTERANCE_MS_DEFAULT: u64 = 300;
 pub const OPENTTS_BASE_URL_DEFAULT: &str = "http://127.0.0.1:5500/api/tts?&vocoder=high&denoiserStrength=0.005&&speakerId=&ssml=false&ssmlNumbers=true&ssmlDates=true&ssmlCurrency=true&cache=false";
+
+/// Parse a comma-separated string into a Vec<String>. Empty values are filtered out.
+fn parse_tools<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+  D: serde::de::Deserializer<'de>,
+{
+  let s = String::deserialize(deserializer)?;
+  let tools: Vec<String> = s
+    .split(',')
+    .map(|t| t.trim().to_string())
+    .filter(|t| !t.is_empty())
+    .collect();
+  Ok(tools)
+}
 
 pub const DAEMON_LLM_PTT_DEFAULT: &str = "ctrl+alt+a";
 pub const DAEMON_TTS_DEFAULT: &str = "ctrl+alt+r";
@@ -1477,6 +1493,12 @@ pub fn try_load_settings(
       errors.push(format!("Agent {}: {}", agent.name, problem));
     }
 
+    if let Err(e) =
+      validate_tools(&agent.tools).map_err(|e: std::io::Error| -> Error { Error::new(e) })
+    {
+      errors.push(format!("Agent {}: {}", agent.name, e));
+    }
+
     agents.push(agent);
   }
 
@@ -1590,6 +1612,7 @@ sound_threshold_peak = 0.12
 end_silence_ms = 2500
 ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
+tools = web_fetch
 
 [agent]
 name = explainer
@@ -1605,6 +1628,7 @@ sound_threshold_peak = 0.12
 end_silence_ms = 2500
 ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
+tools = web_fetch
 
 [agent]
 name = planner
@@ -1620,6 +1644,7 @@ sound_threshold_peak = 0.12
 end_silence_ms = 2000
 ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
+tools = web_fetch
 
 [agent]
 name = Ptahhotep
@@ -1635,6 +1660,7 @@ sound_threshold_peak = 0.12
 end_silence_ms = 2500
 ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
+tools = web_fetch
 
 [agent]
 name = Aristoteles
@@ -1650,6 +1676,7 @@ sound_threshold_peak = 0.12
 end_silence_ms = 2500
 ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
+tools = web_fetch
 
 [agent]
 name = Budda
@@ -1665,6 +1692,7 @@ sound_threshold_peak = 0.12
 end_silence_ms = 2500
 ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
+tools = web_fetch
 
 [agent]
 name = Jesus Christ
@@ -2262,6 +2290,37 @@ fn validate_voice_speed(value: f32) -> Result<(), std::io::Error> {
   Ok(())
 }
 
+fn validate_tools(tools: &[String]) -> Result<(), std::io::Error> {
+  // Collect valid static tool names
+  let mut valid_tools: Vec<String> = vec![
+    "web_fetch".to_string(),
+    "bash_command".to_string(),
+    "glob".to_string(),
+    "grep".to_string(),
+    "read_file".to_string(),
+    "search".to_string(),
+    "apply_patch".to_string(),
+  ];
+  // Add dynamically loaded HTTP request tool names
+  for def in crate::tools::http_request::load_http_request_definitions() {
+    valid_tools.push(def.tool_definition.name);
+  }
+
+  for tool in tools {
+    if !valid_tools.iter().any(|t| t == tool) {
+      return Err(std::io::Error::new(
+        std::io::ErrorKind::Other,
+        format!(
+          "Unknown tool '{}'. Valid tools: {}",
+          tool,
+          valid_tools.join(", ")
+        ),
+      ));
+    }
+  }
+  Ok(())
+}
+
 // PRIVATE
 // ------------------------------------------------------------------
 
@@ -2278,4 +2337,5 @@ fn sanitize_agent_settings(agent: &mut AgentSettings) {
   agent.system_prompt = agent.system_prompt.trim_matches('"').to_string();
   // agent.ptt is a bool; no trimming needed
   agent.whisper_model_path = agent.whisper_model_path.trim_matches('"').to_string();
+  // tools is Vec<String> from the deserializer, no trimming needed
 }

@@ -1279,6 +1279,7 @@ fn default_agent() -> AgentSettings {
     end_silence_ms: 2500,
     voice_speed: 1.1,
     system_prompt_name: None,
+    tools: Vec::new(),
   }
 }
 

@@ -486,6 +486,58 @@ And then load each as you need with `-c`:
 vtmate -c philosophers.txt --debate "Aristoteles" "Ptahhotep" "how to achieve harmony?"
 ```
 
+###  Tools
+
+Available tools:
+
+* `glob`: Search for files using glob patterns like **/*.js or src/**/*.ts
+* `grep`: Fast content search across files in a directory using full regex syntax
+* `read_file`: Reads specific line ranges from a file
+* `apply_patch`: Applies a unified diff patch to a file
+* `bash_command`: Executes a bash command on the host system
+* `search`: Searches the web for a term (q) and return a list of results (title+url)
+* `web_fetch`: Fetches a single web page using a url and returns a JSON containing its content and links
+
+vtmate supports **dynamic HTTP request tools** — custom API call definitions loaded from JSON files. Each definition registers a new tool that the LLM can call.
+
+Create a JSON file in `~/.vtmate/tools/http_requests/` with this structure:
+
+```json
+{
+  "tool_definition": {
+    "name": "get_weather",
+    "description": "Get current weather for a city",
+    "parameters": {
+      "city": {
+        "type": "string",
+        "description": "City name"
+      },
+      "units": {
+        "type": "string",
+        "description": "Metric or imperial",
+        "default": "metric"
+      }
+    }
+  },
+  "tool_http_handler": {
+    "method": "GET",
+    "url": "https://api.weather.com/v1/forecast?city=PICK_FROM['city']&units=PICK_FROM['units']",
+    "headers": {
+      "Authorization": "Bearer your_api_key"
+    },
+    "body": {}
+  }
+}
+```
+
+The `tool_definition` provides the JSON schema for the LLM tool call. The `tool_http_handler` translates the LLM's call into an actual HTTP request — values can reference call arguments with `PICK_FROM['key']` template syntax. Parameters with a `default` are optional; all others are required.
+
+To enable a tool for an agent, add its name to the `tools` setting in `~/.vtmate/settings`:
+
+```ini
+tools = web_fetch, bash_command, search, get_weather
+```
+
 ###  Custom voices
 
 `supertonic3` and `supertonic2` read their voices from one JSON file per voice:
@@ -680,5 +732,22 @@ build_linux.sh
 build_macos.sh
 build_windows.ps1
 ```
+
+## Testing
+
+Test tools:
+```
+cargo test \
+  --test glob_test \
+  --test grep_test \
+  --test read_file_test \
+  --test  apply_patch_test
+```
+
+Test all:
+```
+cargo test
+```
+
 
 Have fun o:)
