@@ -851,7 +851,7 @@ fn react_loop(
   available_tools: &[String],
 ) -> Option<String> {
   let system_prompt = settings.system_prompt.replace("\\n", "\n");
-  let system_prompt = augment_system_prompt(system_prompt, available_tools);
+  let system_prompt = augment_system_prompt(system_prompt, available_tools, &settings.language);
 
   let my_interrupt = interrupt_counter.load(Ordering::SeqCst);
   let has_tools = !available_tools.is_empty();
@@ -1212,6 +1212,21 @@ fn react_loop(
         // Display the tool failure in the UI
         let _ = tx_ui.send(format!("line|The tool `{}` failed: {}", call.name, reasons));
         let _ = tx_ui.send("line|".to_string());
+        // Guaranteed spoken acknowledgment, independent of whether the model
+        // itself comments on the failure in its next turn (see the "if a tool
+        // call fails..." guideline in augment_system_prompt) - otherwise a
+        // broken tool can go through several silent retries before anything
+        // is heard.
+        speak_phrase(
+          tx_ui,
+          tts_tx,
+          tts_done_rx,
+          conversation_history,
+          tool_failure_filler(&settings.language),
+          &assistant_name_for_closure,
+          my_interrupt,
+          &settings.voice,
+        );
         format!("Tool error: {}. Try a different approach.", reasons)
       } else {
         // Display the tool result in the UI
@@ -1293,6 +1308,62 @@ fn normalize_tool_call(tc: &serde_json::Value, iteration: i32, index: usize) -> 
     id,
     name,
     arguments,
+  }
+}
+
+/// Short, fixed filler spoken right when a tool call hard-fails (see the
+/// `is_failure` branch above), so the user always hears *something*
+/// immediately rather than possibly waiting through several silent retries
+/// for the model to comment on it. Deterministic and not model-dependent, so
+/// unlike the model's own remarks it can't draw on the reply's language -
+/// picked from `settings.language` instead. Covers every language code any
+/// TTS backend here supports (union of `KOKORO_VOICES_PER_LANGUAGE`,
+/// `DEFAULT_OPENTTS_VOICES_PER_LANGUAGE`, `SUPERTONIC2_LANGS` and
+/// supertonic3's `SUPPORTED_LANGS`); falls back to English for anything else.
+fn tool_failure_filler(language: &str) -> &'static str {
+  match language.trim_matches('"') {
+    "ar" => "حسنًا، لم ينجح ذلك.",
+    "bg" => "Хм, това не проработи.",
+    "bn" => "উফ, এটা কাজ করেনি।",
+    "ca" => "Vaja, això no ha funcionat.",
+    "cs" => "Hmm, to nezafungovalo.",
+    "da" => "Hmm, det virkede ikke.",
+    "de" => "Hmm, das hat nicht geklappt.",
+    "el" => "Χμ, αυτό δεν πέτυχε.",
+    "en" => "Hmm, that didn't work.",
+    "es" => "Vaya, eso no funcionó.",
+    "et" => "Hmm, see ei õnnestunud.",
+    "fi" => "Hmm, se ei toiminut.",
+    "fr" => "Hmm, ça n'a pas marché.",
+    "gu" => "અરે, એ કામ ન થયું.",
+    "hi" => "अरे, वो काम नहीं हुआ.",
+    "hr" => "Hmm, to nije uspjelo.",
+    "hu" => "Hmm, ez nem sikerült.",
+    "id" => "Hmm, itu tidak berhasil.",
+    "it" => "Uhm, non ha funzionato.",
+    "ja" => "うーん、うまくいかなかった。",
+    "kn" => "ಅಯ್ಯೋ, ಅದು ಕೆಲಸ ಮಾಡಲಿಲ್ಲ.",
+    "ko" => "음, 그게 안 됐어요.",
+    "lt" => "Hmm, tai nepavyko.",
+    "lv" => "Hmm, tas neizdevās.",
+    "mr" => "अरे, ते झालं नाही.",
+    "nl" => "Hmm, dat werkte niet.",
+    "pa" => "ਓਹ, ਇਹ ਕੰਮ ਨਹੀਂ ਕੀਤਾ.",
+    "pl" => "Hmm, to nie zadziałało.",
+    "pt" => "Hmm, isso não funcionou.",
+    "ro" => "Hmm, asta n-a mers.",
+    "ru" => "Хм, не получилось.",
+    "sk" => "Hmm, to nefungovalo.",
+    "sl" => "Hmm, to ni delovalo.",
+    "sv" => "Hmm, det fungerade inte.",
+    "sw" => "Aa, hilo halikufanya kazi.",
+    "ta" => "அய்யோ, அது வேலை செய்யவில்லை.",
+    "te" => "అయ్యో, అది పని చేయలేదు.",
+    "tr" => "Hmm, bu işe yaramadı.",
+    "uk" => "Хм, це не спрацювало.",
+    "vi" => "Ừm, cái đó không được.",
+    "zh" => "嗯，没成功。",
+    _ => "Hmm, that didn't work.",
   }
 }
 
@@ -1464,7 +1535,11 @@ fn create_full_context_messages(
 }
 
 // Augment system prompt with tool instructions if tools are available
-fn augment_system_prompt(mut system_prompt: String, available_tools: &[String]) -> String {
+fn augment_system_prompt(
+  mut system_prompt: String,
+  available_tools: &[String],
+  language: &str,
+) -> String {
   if !available_tools.is_empty() {
     let current_date = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     let cwd = std::env::current_dir()
@@ -1528,8 +1603,11 @@ fn augment_system_prompt(mut system_prompt: String, available_tools: &[String]) 
     system_prompt.push_str("        - Be concise in your responses\n");
     system_prompt.push_str("        - Show file paths clearly when working with files\n\n");
     system_prompt.push_str("        - If you need new information, use search to find results and then web_fetch to inspect the page content\n\n");
+    system_prompt.push_str("        - Before calling a tool, say a brief phrase (3-6 words) in the same language as the rest of your reply, announcing what you're about to do, e.g. \"Let me check that file\" or \"Searching for it\". Say it as normal reply text, not inside the tool call itself.\n");
+    system_prompt.push_str("        - If a tool call fails or its result doesn't actually help, briefly say so (in the same language) before trying a different approach, instead of silently retrying.\n");
     system_prompt.push_str(&format!("        Current date: {}\n", current_date));
     system_prompt.push_str(&format!("        Current working directory: {}\n", cwd));
+    system_prompt.push_str(&format!("        Respond in language: {}\n", language));
   }
 
   system_prompt
