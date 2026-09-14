@@ -1040,7 +1040,12 @@ fn react_loop(
       available_tools,
       Some(&mut on_tool_call),
       Some(&mut on_reasoning_piece),
-      has_tools,
+      // `think` (whether to request the model's "thinking" mode), not
+      // `has_tools` - every other path here disables it by default (see
+      // `build_provider`'s `reasoning_effort: "none"`); `on_reasoning_piece`
+      // still exists as a display-only safety net for a model that reasons
+      // unprompted (Gemma 4, DeepSeek, ...) despite this being false.
+      false,
     ));
 
     if let Err(e) = stream_result {
@@ -1143,6 +1148,21 @@ fn react_loop(
     }
     if !reply.is_empty() {
       last_reply = reply.clone();
+    } else {
+      // The model didn't comply with the "announce before calling a tool"
+      // guideline in augment_system_prompt (a real possibility - it's a
+      // prompt instruction, not enforced) - fall back to a generic spoken
+      // announcement so a tool call is never silent.
+      speak_phrase(
+        tx_ui,
+        tts_tx,
+        tts_done_rx,
+        conversation_history,
+        tool_call_announcement_filler(&settings.language),
+        &assistant_name_for_closure,
+        my_interrupt,
+        &settings.voice,
+      );
     }
 
     let calls: Vec<ToolCallSpec> = tool_calls
@@ -1308,6 +1328,59 @@ fn normalize_tool_call(tc: &serde_json::Value, iteration: i32, index: usize) -> 
     id,
     name,
     arguments,
+  }
+}
+
+/// Generic spoken announcement used right before executing tool calls when
+/// the model produced no reply text of its own that iteration - see the
+/// "announce before calling a tool" guideline in `augment_system_prompt`,
+/// which this backs up rather than replaces: it only fires when the model
+/// didn't already say something. Same language coverage and fallback as
+/// `tool_failure_filler` below.
+fn tool_call_announcement_filler(language: &str) -> &'static str {
+  match language.trim_matches('"') {
+    "ar" => "حسنًا، لحظة من فضلك.",
+    "bg" => "Добре, един момент.",
+    "bn" => "ঠিক আছে, একটু অপেক্ষা করুন।",
+    "ca" => "D'acord, un moment.",
+    "cs" => "Dobře, moment.",
+    "da" => "Okay, et øjeblik.",
+    "de" => "Okay, einen Moment.",
+    "el" => "Εντάξει, μια στιγμή.",
+    "en" => "Okay, one moment.",
+    "es" => "Vale, un momento.",
+    "et" => "Selge, üks hetk.",
+    "fi" => "Selvä, hetki vain.",
+    "fr" => "D'accord, un instant.",
+    "gu" => "ઠીક છે, એક ક્ષણ.",
+    "hi" => "ठीक है, एक पल.",
+    "hr" => "Dobro, trenutak.",
+    "hu" => "Rendben, egy pillanat.",
+    "id" => "Baik, sebentar.",
+    "it" => "Ok, un momento.",
+    "ja" => "はい、少々お待ちください。",
+    "kn" => "ಸರಿ, ಒಂದು ಕ್ಷಣ.",
+    "ko" => "네, 잠시만요.",
+    "lt" => "Gerai, akimirką.",
+    "lv" => "Labi, mirkli.",
+    "mr" => "ठीक आहे, एक क्षण.",
+    "nl" => "Oké, een moment.",
+    "pa" => "ਠੀਕ ਹੈ, ਇੱਕ ਪਲ.",
+    "pl" => "Dobrze, chwileczkę.",
+    "pt" => "Ok, um momento.",
+    "ro" => "Bine, un moment.",
+    "ru" => "Хорошо, одну секунду.",
+    "sk" => "Dobre, chvíľu.",
+    "sl" => "V redu, trenutek.",
+    "sv" => "Okej, ett ögonblick.",
+    "sw" => "Sawa, dakika moja.",
+    "ta" => "சரி, ஒரு கணம்.",
+    "te" => "సరే, ఒక్క క్షణం.",
+    "tr" => "Tamam, bir saniye.",
+    "uk" => "Добре, хвилинку.",
+    "vi" => "Được, chờ một chút.",
+    "zh" => "好的，请稍等。",
+    _ => "Okay, one moment.",
   }
 }
 
