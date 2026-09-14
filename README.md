@@ -160,67 +160,22 @@ vtmate works with all major cloud providers, both api and cli options. You can c
 
 ## Configure agents
 
+vtmate allows you to configure as many agents as you want, each with its personality (model, voice and system prompt). Example:
+```
+             vmate
+                │
+       ┌────────┼────────┐
+       ↓        ↓        ↓
+   Scientist  Lawyer  Programmer
+```
+
+It comes with a predefined list of agents.
+
 The quickest way is to press `Control+S` while vtmate is running: a popup opens with the list of your agents, and everything you change there is written to the settings file when you save it.
 
-```
-┌ Settings - 2 agents ─────────────────────────────────────────────────────────────────────┐
-│ NAME        LANG  MODE  TTS         VOICE   SPD   PROVIDER    MODEL          PROMPT      │
-│                                                                                          │
-│ main agent  en    PTT   supertonic3  M1      1.1x  ollama      llama3.2:3b    You are... │
-│ explainer   en    LIVE  supertonic3  F1      1.1x  ollama      llama3.2:3b    You exp... │
-│                                                                                          │
-│ ───────────────────────────────────────────────────────────────────────────────────────  │
-│ n new agent   e edit agent   d delete agent   ↑/↓ move                                   │
-│   [ Save ]   [ Cancel ]                                                                  │
-└──────────────────────────────────────────────────────────────────────────────────────────┘
-```
+<img width="1058" height="556" alt="agents" src="https://github.com/user-attachments/assets/04a32f13-0de3-4cb8-afb5-d678dbe833c5" />
 
-* `n` adds an agent (starting from the one you are on), `e` edits the selected one, `d` removes it after asking.
-* Every field is a select, a slider or a text box, and the one you are on explains itself in a line underneath. The language only offers what the TTS engine speaks, the voice only what that engine and language have, and the provider lists every LLM backend vtmate can use, so an agent that cannot work is hard to build by accident.
-* `Save` writes `~/.vtmate/agents` and the agents are live straight away: no restart, and the conversation you are in keeps going. `Cancel` or `ESCAPE` asks first when you changed something.
-* `ARROW_UP` / `ARROW_DOWN` move between fields, `ARROW_LEFT` / `ARROW_RIGHT` change the value of a select or a slider, `TAB` walks through everything including the buttons.
-
-The rest of this section is what the popup writes for you, and you can of course write it yourself.
-
-Settings live in two files. The first time you run vtmate it will create both if they don't exist:
-
-* `~/.vtmate/settings` - a `[general]` section and a `[daemon]` section.
-* `~/.vtmate/agents` - one `[system_prompt]` section per named prompt, then one `[agent]` section per agent. You can define as many agents as you want. `-c <file>` uses a different agents file instead (see [Separate agents](#separate-agents)); `~/.vtmate/settings` is always the same file.
-
-`~/.vtmate/settings` starts like this:
-
-```
-[general]
-selected_agent = main agent
-
-[daemon]
-llm_background_ptt_combo = ctrl+alt+a
-tts_background_combo = ctrl+alt+r
-stt_and_paste_background_ptt_combo = ctrl+alt+s
-llm_background_reset = ctrl+q
-```
-
-* `selected_agent` is the agent vtmate starts with. It is updated automatically every time you switch agents with `ARROW_LEFT` / `ARROW_RIGHT` (in the terminal or while attached to the daemon), so the next start picks the same agent. `-a <agent>` overrides it for one run without changing the file; a debate picks its agents per turn and never changes it either.
-* The `[daemon]` keys are the global shortcuts of the [daemon mode](#daemon-mode-global-shortcuts).
-
-Example of agent definition, in `~/.vtmate/agents`:
-
-```
-[agent]
-name = explainer
-language = en
-tts = supertonic3
-voice = F1
-voice_speed = 1.1
-provider = ollama
-baseurl = http://127.0.0.1:11434
-model = llama3.2:3b
-system_prompt = "You are a helpful AI assistant. Your only funcion is to explain things as simple as possible in no more than 150 words or 450 words if the user asks for a longer explanation."
-sound_threshold_peak = 0.12
-end_silence_ms = 2500
-ptt = true
-whisper_model_path = ~/.whisper-models/ggml-tiny.bin
-```
+Agent settings live in ~/.vtmate/agents file, which you can edit manually too (`see vtmate --help`).
 
 * By default all agents are set in `PTT` mode, you have to keep `SPACE` pressed to talk. If you want to use `LIVE` mode, make sure you adjust your microphone levels correctly and adjust `sound_threshold_peak` and `end_silence_ms` settings to your need
 * Source code in an agent's reply is not spoken: anything wrapped in ``` fences is shown but skipped. Reading a file with `-r` does speak it, since the code is part of what you asked to have read.
@@ -256,11 +211,6 @@ system_prompt = @planner
 * Inline prompts keep working exactly as before: `system_prompt = "You are a nice ai agent\nreply nicely"` turns `\n` into a new line. Start an inline prompt with `@@` if you need it to begin with a literal `@`.
 * The `Control+S` popup picks between the two forms for you: a prompt of more than 5 lines is saved as a `[system_prompt]` block, a shorter one inline. A prompt that came from a block keeps that block's name, so agents sharing one go on sharing it.
 
-To see explanation of each field:
-```
-vtmate --help
-```
-
 ## How to use it
 
 Start vtmate and press SPACE while you talk and then release (PTT mode):
@@ -295,6 +245,9 @@ This writes a folder per conversation in `~/.vtmate/conversations`:
   turn-002-nova.wav     what the agent answered on that turn
   ...
 ```
+Here is how it looks exported as html:
+
+<img width="1488" height="849" alt="html-export" src="https://github.com/user-attachments/assets/4495788f-74ac-424c-9f72-f812efea0490" />
 
 Open `index.html` in a browser and press play: it plays every turn in order,
 highlights the one being spoken and scrolls to it. Playback can be paused and
@@ -345,6 +298,10 @@ echo "How to fly without wings?" | vtmate -i -
 ![debate mode](https://github.com/DavidValin/vtmate/raw/main/docs/en/diagrams/debate-mode.png)
 
 Initialize a debate between two agents and be able to participate in the debate by speaking at any time. To create a good debate adjust the system prompts of each agent and give a detailed initial input.
+
+There are two ways to initialize a debate, using a cli command or from vtmate tui itself by pressing Control+D, which open the next popup:
+<img width="1060" height="556" alt="new-debate" src="https://github.com/user-attachments/assets/400baa8d-0ae9-4303-b6a1-8476de52df1e" />
+
 In debate mode is good idea to set `--ptt <true/false>` option so that the ptt value is not switched on each agent turn.
 
 The debate's initial subject and `-p`/`-i`'s initial prompt are the same thing: whichever one you give becomes turn 0. Give only one - a trailing `<subject>` together with `-p`/`-i` is rejected, since they would both be trying to set the same message.
