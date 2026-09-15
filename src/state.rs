@@ -138,6 +138,8 @@ pub struct AppState {
   pub debate_modal_max_turns: Arc<Mutex<String>>,
   /// Caret position (in chars) inside `debate_modal_max_turns`.
   pub debate_modal_max_turns_caret: Arc<Mutex<usize>>,
+  /// The 't' popup showing the most recently touched TODO list: open/closed.
+  pub todo_popup_visible: Arc<AtomicBool>,
   /// The Ctrl+E save popup: open/closed.
   pub save_modal_visible: Arc<AtomicBool>,
   /// "[ ] Save as .txt and single .wav" checkbox.
@@ -237,6 +239,7 @@ impl AppState {
       debate_modal_caret: Arc::new(Mutex::new(0)),
       debate_modal_max_turns: Arc::new(Mutex::new(String::new())),
       debate_modal_max_turns_caret: Arc::new(Mutex::new(0)),
+      todo_popup_visible: Arc::new(AtomicBool::new(false)),
       save_modal_visible: Arc::new(AtomicBool::new(false)),
       save_modal_check_txt: Arc::new(AtomicBool::new(true)),
       save_modal_check_html: Arc::new(AtomicBool::new(false)),

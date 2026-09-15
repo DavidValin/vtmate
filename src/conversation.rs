@@ -1648,6 +1648,27 @@ fn augment_system_prompt(
         "web_fetch" => {
           system_prompt.push_str("        - web_fetch: get page links and content of a url\n");
         }
+        "todo_define" => {
+          system_prompt.push_str("        - todo_define: create a new named TODO list (title, description, initial tasks with optional nested subtasks)\n");
+        }
+        "todo_update" => {
+          system_prompt.push_str("        - todo_update: apply add/edit/remove/reorder operations to a named TODO's tasks, addressed by a 0-based path array (e.g. [1, 0] = subtask 0 of top-level task 1); applied atomically\n");
+        }
+        "todo_list" => {
+          system_prompt.push_str("        - todo_list: list every persisted TODO (title, description, progress) to discover and resume in-progress work\n");
+        }
+        "todo_get" => {
+          system_prompt.push_str("        - todo_get: read the full contents of a named TODO\n");
+        }
+        "todo_get_item" => {
+          system_prompt.push_str("        - todo_get_item: read one task (and its subtasks) from a named TODO by path\n");
+        }
+        "todo_set_status" => {
+          system_prompt.push_str("        - todo_set_status: set one task's status ('pending', 'in_progress', or 'done') in a named TODO\n");
+        }
+        "todo_delete" => {
+          system_prompt.push_str("        - todo_delete: delete a named TODO entirely\n");
+        }
         _ => {}
       }
     }
@@ -1678,6 +1699,7 @@ fn augment_system_prompt(
     system_prompt.push_str("        - If you need new information, use search to find results and then web_fetch to inspect the page content\n\n");
     system_prompt.push_str("        - Before calling a tool, say a brief phrase (3-6 words) in the same language as the rest of your reply, announcing what you're about to do, e.g. \"Let me check that file\" or \"Searching for it\". Say it as normal reply text, not inside the tool call itself.\n");
     system_prompt.push_str("        - If a tool call fails or its result doesn't actually help, briefly say so (in the same language) before trying a different approach, instead of silently retrying.\n");
+    system_prompt.push_str("        - TODOs persist across restarts. Call todo_list at the start of work that might already be tracked, to find and resume an in-progress TODO instead of redefining it.\n");
     system_prompt.push_str(&format!("        Current date: {}\n", current_date));
     system_prompt.push_str(&format!("        Current working directory: {}\n", cwd));
     system_prompt.push_str(&format!("        Respond in language: {}\n", language));

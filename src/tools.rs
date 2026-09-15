@@ -12,6 +12,10 @@ use search::SearchTool;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::OnceLock;
+use todo::{
+  TodoDefineTool, TodoDeleteTool, TodoGetItemTool, TodoGetTool, TodoListTool, TodoSetStatusTool,
+  TodoUpdateTool,
+};
 use web_fetch::WebFetchTool;
 
 // API
@@ -24,6 +28,7 @@ pub mod grep;
 pub mod http_request;
 pub mod read_file;
 pub mod search;
+pub mod todo;
 pub mod web_fetch;
 
 pub trait Tool {
@@ -43,6 +48,26 @@ fn load_http_tools() -> &'static Vec<HttpRequestTool> {
     let defs = http_request::load_http_request_definitions();
     defs.into_iter().map(HttpRequestTool::new).collect()
   })
+}
+
+/// Every built-in tool name — the static ones plus the `todo_*` set, plus
+/// the "to-do" alias that expands to them (see `config::parse_tools`) —
+/// reserved so a user-defined HTTP tool (`~/.vtmate/tools/http_requests/`)
+/// can never shadow one. Also reused by `config::validate_tools` as the
+/// non-HTTP part of its allow-list, so the two lists can't drift apart.
+pub fn reserved_tool_names() -> Vec<&'static str> {
+  let mut names = vec![
+    "web_fetch",
+    "bash_command",
+    "glob",
+    "grep",
+    "read_file",
+    "search",
+    "apply_patch",
+    "to-do",
+  ];
+  names.extend(todo::TOOL_NAMES);
+  names
 }
 
 /// Given a list of tool names, return their JSON schemas.
@@ -66,6 +91,13 @@ pub fn tools_schemas(
       "read_file" => schemas.push(ReadFileTool::new().json_schema()?),
       "glob" => schemas.push(GlobTool::new().json_schema()?),
       "grep" => schemas.push(GrepTool::new().json_schema()?),
+      "todo_define" => schemas.push(TodoDefineTool::new().json_schema()?),
+      "todo_update" => schemas.push(TodoUpdateTool::new().json_schema()?),
+      "todo_list" => schemas.push(TodoListTool::new().json_schema()?),
+      "todo_get" => schemas.push(TodoGetTool::new().json_schema()?),
+      "todo_get_item" => schemas.push(TodoGetItemTool::new().json_schema()?),
+      "todo_set_status" => schemas.push(TodoSetStatusTool::new().json_schema()?),
+      "todo_delete" => schemas.push(TodoDeleteTool::new().json_schema()?),
       _ => {
         if let Some(tool) = http_tool_map.get(name.as_str()) {
           schemas.push(tool.json_schema()? as Value);
@@ -176,6 +208,13 @@ fn try_handle_tool_call(
     "read_file" => ReadFileTool::new().json_schema()?,
     "glob" => GlobTool::new().json_schema()?,
     "grep" => GrepTool::new().json_schema()?,
+    "todo_define" => TodoDefineTool::new().json_schema()?,
+    "todo_update" => TodoUpdateTool::new().json_schema()?,
+    "todo_list" => TodoListTool::new().json_schema()?,
+    "todo_get" => TodoGetTool::new().json_schema()?,
+    "todo_get_item" => TodoGetItemTool::new().json_schema()?,
+    "todo_set_status" => TodoSetStatusTool::new().json_schema()?,
+    "todo_delete" => TodoDeleteTool::new().json_schema()?,
     _ => {
       let http_tools = load_http_tools();
       let tool = http_tools
@@ -197,6 +236,13 @@ fn try_handle_tool_call(
     "read_file" => ReadFileTool::new().handle(args),
     "glob" => GlobTool::new().handle(args),
     "grep" => GrepTool::new().handle(args),
+    "todo_define" => TodoDefineTool::new().handle(args),
+    "todo_update" => TodoUpdateTool::new().handle(args),
+    "todo_list" => TodoListTool::new().handle(args),
+    "todo_get" => TodoGetTool::new().handle(args),
+    "todo_get_item" => TodoGetItemTool::new().handle(args),
+    "todo_set_status" => TodoSetStatusTool::new().handle(args),
+    "todo_delete" => TodoDeleteTool::new().handle(args),
     _ => {
       let http_tools = load_http_tools();
       let tool = http_tools

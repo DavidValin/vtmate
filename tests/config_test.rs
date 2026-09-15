@@ -68,6 +68,32 @@ mod tools {
       vec![]
     }
   }
+  pub mod todo {
+    pub const TOOL_NAMES: [&str; 7] = [
+      "todo_define",
+      "todo_update",
+      "todo_list",
+      "todo_get",
+      "todo_get_item",
+      "todo_set_status",
+      "todo_delete",
+    ];
+  }
+  /// Mirrors `crate::tools::reserved_tool_names()`.
+  pub fn reserved_tool_names() -> Vec<&'static str> {
+    let mut names = vec![
+      "web_fetch",
+      "bash_command",
+      "glob",
+      "grep",
+      "read_file",
+      "search",
+      "apply_patch",
+      "to-do",
+    ];
+    names.extend(todo::TOOL_NAMES);
+    names
+  }
 }
 
 mod llm {
@@ -422,6 +448,155 @@ tools = web_fetch
   assert_eq!(agent.voice_speed, 5.0);
   assert_eq!(agent.whisper_model_path, "~/.whisper-models/ggml-tiny.bin");
   assert_eq!(agent.tools, vec!["web_fetch".to_string()]);
+}
+
+#[test]
+fn test_tools_to_do_alias_expands_and_dedupes() {
+  let mut path = temp_dir();
+  path.push(format!(
+    "vtmate_test_config_todo_alias_{}.ini",
+    SystemTime::now()
+      .duration_since(UNIX_EPOCH)
+      .unwrap()
+      .as_nanos()
+  ));
+
+  // "to-do" expands to all seven todo_* tools; repeating the alias must not
+  // produce duplicates.
+  let contents = r#"
+[agent]
+name = "main agent"
+language = "en"
+tts = "kokoro"
+voice = "bf_alice"
+provider = "ollama"
+baseurl = "http://127.0.0.1:11434"
+model = "llama3.2:3b"
+system_prompt = "You are a helpful assistant."
+sound_threshold_peak = "0.1"
+end_silence_ms = "2000"
+ptt = "false"
+whisper_model_path = "~/.whisper-models/ggml-tiny.bin"
+voice_speed = 5.0
+tools = to-do, to-do, web_fetch
+"#;
+
+  let mut file = File::create(&path).expect("Failed to create temp config file");
+  file
+    .write_all(contents.as_bytes())
+    .expect("Failed to write to temp config file");
+
+  let args = Args {
+    config: None,
+    prompt: None,
+    prompt_file: None,
+    verbose: false,
+    agent: Some("main agent".to_string()),
+    list_voices: false,
+    render_quicksheet_pdf: false,
+    ptt: Some(true),
+    debate: None,
+    read_file: None,
+    read_file_stdout: None,
+    stt: None,
+    quiet: false,
+    save: false,
+    save_html: false,
+    max_turns: None,
+    daemon: false,
+    daemon_foreground: false,
+    daemon_stop: false,
+    daemon_status: false,
+    no_banner: false,
+    clone_voice: None,
+    refine_voice: None,
+  };
+
+  let agents = load_settings(&path, &args).expect("Failed to load settings");
+  let agent = &agents[0];
+  assert_eq!(
+    agent.tools,
+    vec![
+      "todo_define".to_string(),
+      "todo_update".to_string(),
+      "todo_list".to_string(),
+      "todo_get".to_string(),
+      "todo_get_item".to_string(),
+      "todo_set_status".to_string(),
+      "todo_delete".to_string(),
+      "web_fetch".to_string(),
+    ]
+  );
+}
+
+#[test]
+fn test_tools_rejects_an_individual_todo_tool_listed_on_its_own() {
+  let mut path = temp_dir();
+  path.push(format!(
+    "vtmate_test_config_todo_individual_{}.ini",
+    SystemTime::now()
+      .duration_since(UNIX_EPOCH)
+      .unwrap()
+      .as_nanos()
+  ));
+
+  // "todo_get" listed directly (not via "to-do") must be refused, so an
+  // agent can never end up with only part of the todo tool set.
+  let contents = r#"
+[agent]
+name = "main agent"
+language = "en"
+tts = "kokoro"
+voice = "bf_alice"
+provider = "ollama"
+baseurl = "http://127.0.0.1:11434"
+model = "llama3.2:3b"
+system_prompt = "You are a helpful assistant."
+sound_threshold_peak = "0.1"
+end_silence_ms = "2000"
+ptt = "false"
+whisper_model_path = "~/.whisper-models/ggml-tiny.bin"
+voice_speed = 5.0
+tools = todo_get
+"#;
+
+  let mut file = File::create(&path).expect("Failed to create temp config file");
+  file
+    .write_all(contents.as_bytes())
+    .expect("Failed to write to temp config file");
+
+  let args = Args {
+    config: None,
+    prompt: None,
+    prompt_file: None,
+    verbose: false,
+    agent: Some("main agent".to_string()),
+    list_voices: false,
+    render_quicksheet_pdf: false,
+    ptt: Some(true),
+    debate: None,
+    read_file: None,
+    read_file_stdout: None,
+    stt: None,
+    quiet: false,
+    save: false,
+    save_html: false,
+    max_turns: None,
+    daemon: false,
+    daemon_foreground: false,
+    daemon_stop: false,
+    daemon_status: false,
+    no_banner: false,
+    clone_voice: None,
+    refine_voice: None,
+  };
+
+  let err = load_settings(&path, &args).expect_err("an individual todo_* tool must be refused");
+  assert!(
+    err.to_string().contains("to-do"),
+    "error should point at the 'to-do' alias: {}",
+    err
+  );
 }
 
 #[test]

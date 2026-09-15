@@ -231,17 +231,35 @@ pub const HANGOVER_MS_DEFAULT: u64 = 300;
 pub const MIN_UTTERANCE_MS_DEFAULT: u64 = 300;
 pub const OPENTTS_BASE_URL_DEFAULT: &str = "http://127.0.0.1:5500/api/tts?&vocoder=high&denoiserStrength=0.005&&speakerId=&ssml=false&ssmlNumbers=true&ssmlDates=true&ssmlCurrency=true&cache=false";
 
-/// Parse a comma-separated string into a Vec<String>. Empty values are filtered out.
+/// Parse a comma-separated string into a Vec<String>. Empty values are
+/// filtered out, and "to-do" expands to all seven `todo_*` tools at once —
+/// they're meant to be used as a set, so this is the one name an agent's
+/// `tools=` line needs instead of listing them out. Repeating the alias is
+/// deduplicated, keeping first-seen order; listing an individual `todo_*`
+/// name on its own is refused outright — "to-do" is the only way to enable
+/// any of them, so an agent can never end up with a partial subset.
 fn parse_tools<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
 where
   D: serde::de::Deserializer<'de>,
 {
   let s = String::deserialize(deserializer)?;
-  let tools: Vec<String> = s
-    .split(',')
-    .map(|t| t.trim().to_string())
-    .filter(|t| !t.is_empty())
-    .collect();
+  let mut tools: Vec<String> = Vec::new();
+  for t in s.split(',').map(|t| t.trim()).filter(|t| !t.is_empty()) {
+    if t == "to-do" {
+      for name in crate::tools::todo::TOOL_NAMES {
+        if !tools.iter().any(|existing| existing == name) {
+          tools.push(name.to_string());
+        }
+      }
+    } else if crate::tools::todo::TOOL_NAMES.contains(&t) {
+      return Err(serde::de::Error::custom(format!(
+        "'{}' cannot be listed on its own; use 'to-do' to enable the todo tools as a set",
+        t
+      )));
+    } else if !tools.iter().any(|existing| existing == t) {
+      tools.push(t.to_string());
+    }
+  }
   Ok(tools)
 }
 
@@ -2291,16 +2309,13 @@ fn validate_voice_speed(value: f32) -> Result<(), std::io::Error> {
 }
 
 fn validate_tools(tools: &[String]) -> Result<(), std::io::Error> {
-  // Collect valid static tool names
-  let mut valid_tools: Vec<String> = vec![
-    "web_fetch".to_string(),
-    "bash_command".to_string(),
-    "glob".to_string(),
-    "grep".to_string(),
-    "read_file".to_string(),
-    "search".to_string(),
-    "apply_patch".to_string(),
-  ];
+  // Built-in tool names ("to-do" itself is never a real tool name here — it
+  // is expanded to the concrete todo_* names by `parse_tools` before this
+  // runs — but it's harmless to also accept it as-is).
+  let mut valid_tools: Vec<String> = crate::tools::reserved_tool_names()
+    .into_iter()
+    .map(|s| s.to_string())
+    .collect();
   // Add dynamically loaded HTTP request tool names
   for def in crate::tools::http_request::load_http_request_definitions() {
     valid_tools.push(def.tool_definition.name);

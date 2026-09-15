@@ -237,6 +237,17 @@ pub fn load_http_request_definitions() -> Vec<HttpRequestDefinition> {
         match fs::read_to_string(&path) {
           Ok(content) => match serde_json::from_str::<HttpRequestDefinition>(&content) {
             Ok(def) => {
+              if crate::tools::reserved_tool_names().contains(&def.tool_definition.name.as_str()) {
+                crate::log::log(
+                  "error",
+                  &format!(
+                    "Skipping HTTP request tool at {}: '{}' is a built-in tool name and cannot be redefined",
+                    path.display(),
+                    def.tool_definition.name
+                  ),
+                );
+                continue;
+              }
               crate::log::log(
                 "info",
                 &format!("Loaded HTTP request tool: {}", def.tool_definition.name),
