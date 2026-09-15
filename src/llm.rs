@@ -542,7 +542,17 @@ async fn llama_server_stream_response_into(
     let payload = json!({
       "model": llama_model,
       "messages": messages.iter().map(|m| message_to_json(m, kind)).collect::<Vec<_>>(),
+      // Two different fields for two different endpoints tried below: `think`
+      // (plus `options.think`) is Ollama's native /api/chat parameter, while
+      // `reasoning_effort: "none"` is what actually disables thinking on the
+      // OpenAI-compatible /v1/chat/completions endpoint tried first - same
+      // portable field the non-tool-calling path already relies on (see the
+      // module doc comment above). Without it, Ollama silently ignores the
+      // unrecognized `think` field on that endpoint, returns 200 OK, and the
+      // native fallback (where `think` would work) is never reached - so
+      // thinking never actually turns off for a model like Qwen3.
       "think": think,
+      "reasoning_effort": if think { None } else { Some("none") },
       "stream": true,
       "tools": tools_payload,
       "tool_choice": if include_tools { Some("auto") } else { None::<&str> },
