@@ -155,6 +155,10 @@ pub fn spawn_ui_thread(
     let mut modal_visible = false;
     let mut settings_visible = false;
     let mut save_modal_visible = false;
+    let mut todo_popup_visible = false;
+    // Throttles the live TODO popup's disk re-read to roughly SPINNER_FRAME,
+    // instead of re-reading and redrawing it every 4ms tick.
+    let mut last_todo_poll = Instant::now();
     // A popup runs on the alternate screen, so neither it nor anything
     // scrolling underneath it reaches the primary screen's scrollback.
     let mut popup_on_alt = false;
@@ -184,6 +188,7 @@ pub fn spawn_ui_thread(
 
     let mut waiting_for_first_line = true;
     let mut skip_next_bottom_bar = false;
+    let mut interrupt_shown = false;
 
     loop {
       // Dragging a window edge produces a run of sizes; the redraw waits for
@@ -226,6 +231,8 @@ pub fn spawn_ui_thread(
             render_debate_modal(&mut out, &buffer.wrapped);
           } else if save_modal_visible {
             render_save_modal(&mut out, &buffer.wrapped);
+          } else if todo_popup_visible {
+            render_todo_popup(&mut out, &buffer.wrapped);
           }
         }
       }
@@ -287,6 +294,7 @@ pub fn spawn_ui_thread(
           }
 
           "stream" => {
+            interrupt_shown = false;
             let msg_str = parts.next().unwrap();
 
             if waiting_for_first_line {
@@ -310,19 +318,22 @@ pub fn spawn_ui_thread(
             pending_stream.clear();
             waiting_for_first_line = false;
 
-            handle_line_message(
-              &mut out,
-              // A geometric shape, not an emoji: no colour-emoji font to
-              // install, one column in any terminal, and the red comes from
-              // the escape rather than from the glyph.
-              "\n\n \x1b[31m■ USER interrupted\x1b[0m",
-              &mut buffer,
-              &mut ui_state,
-              &spinner,
-              &status_line,
-              &mut bottom_bar,
-            );
-            skip_next_bottom_bar = true;
+            if !interrupt_shown {
+              handle_line_message(
+                &mut out,
+                // A geometric shape, not an emoji: no colour-emoji font to
+                // install, one column in any terminal, and the red comes from
+                // the escape rather than from the glyph.
+                "\n\n \x1b[31m■ USER interrupted\x1b[0m",
+                &mut buffer,
+                &mut ui_state,
+                &spinner,
+                &status_line,
+                &mut bottom_bar,
+              );
+              interrupt_shown = true;
+              skip_next_bottom_bar = true;
+            }
           }
 
           "modal_show" => {
@@ -400,6 +411,35 @@ pub fn spawn_ui_thread(
             }
           }
 
+          "todo_show" => {
+            if !todo_popup_visible {
+              todo_popup_visible = true;
+              open_popup_screen(&mut out, &mut popup_on_alt, &mut resized_during_popup);
+            }
+            render_todo_popup(&mut out, &buffer.wrapped);
+            last_todo_poll = Instant::now();
+          }
+
+          "todo_hide" => {
+            todo_popup_visible = false;
+            bottom_bar = close_popup_screen(
+              &mut out,
+              &mut popup_on_alt,
+              resized_during_popup,
+              &buffer,
+              &ui_state,
+              &spinner,
+              &status_line,
+            );
+          }
+
+          "todo_update" => {
+            if todo_popup_visible {
+              render_todo_popup(&mut out, &buffer.wrapped);
+              last_todo_poll = Instant::now();
+            }
+          }
+
           "redraw_full_history" => {
             // Rebuilt in bulk (rebuild_history) and printed once
             // (reprint_history): the character-reveal path redraws the bottom
@@ -426,6 +466,8 @@ pub fn spawn_ui_thread(
           render_debate_modal(&mut out, &buffer.wrapped);
         } else if save_modal_visible && !msg_type.starts_with("save_modal") {
           render_save_modal(&mut out, &buffer.wrapped);
+        } else if todo_popup_visible && !msg_type.starts_with("todo") {
+          render_todo_popup(&mut out, &buffer.wrapped);
         }
       }
 
@@ -444,6 +486,15 @@ pub fn spawn_ui_thread(
       if last_spinner_advance.elapsed() >= SPINNER_FRAME {
         ui_state.spinner_index = (ui_state.spinner_index + 1) % spinner.len();
         last_spinner_advance = Instant::now();
+      }
+
+      // The TODO popup has no push notification when a tool call changes it
+      // on disk (tools stay stateless, with no channel back to the UI), so
+      // it re-reads and redraws itself on this short timer instead, keeping
+      // it "live" within about one SPINNER_FRAME of any agent edit.
+      if todo_popup_visible && last_todo_poll.elapsed() >= SPINNER_FRAME {
+        render_todo_popup(&mut out, &buffer.wrapped);
+        last_todo_poll = Instant::now();
       }
 
       let (_cols, term_height) = terminal::size().unwrap_or((80, 24));
@@ -2340,6 +2391,127 @@ fn render_save_modal<W: Write>(out: &mut W, buffer: &[String]) {
   .unwrap();
 
   // Draw vertical borders
+  for y in (modal_y + 1)..(modal_y + modal_height - 1) {
+    execute!(
+      out,
+      MoveTo(modal_x, y),
+      Print("\x1b[48;5;234m\x1b[97m│\x1b[0m")
+    )
+    .unwrap();
+    execute!(
+      out,
+      MoveTo(modal_x + modal_width - 1, y),
+      Print("\x1b[48;5;234m\x1b[97m│\x1b[0m")
+    )
+    .unwrap();
+  }
+
+  out.flush().unwrap();
+}
+
+/// Renders the `t` popup: the most recently touched TODO list, read fresh
+/// from disk on every call (there is no in-memory copy to go stale — see
+/// `crate::tools::todo`). Read-only, so unlike the debate/save/settings
+/// popups it doesn't take over the keyboard.
+fn render_todo_popup<W: Write>(out: &mut W, buffer: &[String]) {
+  let doc_text = match crate::tools::todo::most_recent_doc() {
+    Some(doc) => crate::tools::todo::render(&doc),
+    None => "No TODO lists yet.\n".to_string(),
+  };
+  let lines: Vec<&str> = doc_text.lines().collect();
+
+  let (cols, rows) = terminal::size().unwrap_or((80, 24));
+  let modal_width = std::cmp::min(60, cols.saturating_sub(4)).max(20);
+  let body_rows = lines.len().max(1) as u16;
+  let modal_height = std::cmp::min(body_rows + 4, rows.saturating_sub(4)).max(6);
+  let modal_x = (cols.saturating_sub(modal_width)) / 2;
+  let modal_y = (rows.saturating_sub(modal_height)) / 2;
+  let box_width = modal_width as usize - 4;
+
+  execute!(out, Clear(ClearType::All), MoveTo(0, 0)).unwrap();
+
+  // Redraw the conversation in the background (dimmed), same as the other
+  // popups.
+  let (_, term_height) = terminal::size().unwrap_or((80, 24));
+  let (view_start, visible) = viewport(buffer.len(), term_height);
+  for (i, line) in buffer.iter().enumerate().skip(view_start).take(visible) {
+    let y = i - view_start;
+    execute!(
+      out,
+      MoveTo(0, y as u16),
+      ResetColor,
+      Clear(ClearType::CurrentLine),
+      Print(format!("\x1b[90m{}\x1b[0m", line))
+    )
+    .unwrap();
+  }
+
+  // Modal background
+  for y in modal_y..modal_y + modal_height {
+    execute!(
+      out,
+      MoveTo(modal_x, y),
+      Print(format!(
+        "\x1b[48;5;234m{}\x1b[0m",
+        " ".repeat(modal_width as usize)
+      ))
+    )
+    .unwrap();
+  }
+
+  // Border + title
+  execute!(
+    out,
+    MoveTo(modal_x, modal_y),
+    Print(format!(
+      "\x1b[48;5;234m\x1b[97m┌{}┐\x1b[0m",
+      "─".repeat(modal_width as usize - 2)
+    ))
+  )
+  .unwrap();
+  let title = " TODO ";
+  let title_x = modal_x + (modal_width - title.len() as u16) / 2;
+  execute!(
+    out,
+    MoveTo(title_x, modal_y),
+    Print(format!("\x1b[48;5;234m\x1b[97;1m{}\x1b[0m", title))
+  )
+  .unwrap();
+  execute!(
+    out,
+    MoveTo(modal_x, modal_y + modal_height - 1),
+    Print(format!(
+      "\x1b[48;5;234m\x1b[97m└{}┘\x1b[0m",
+      "─".repeat(modal_width as usize - 2)
+    ))
+  )
+  .unwrap();
+
+  // Body: as many lines as fit, with a "…" marker if the doc is taller than
+  // the popup.
+  let visible_body_rows = (modal_height as usize).saturating_sub(3);
+  let shown = lines.len().min(visible_body_rows);
+  for (i, line) in lines.iter().take(shown).enumerate() {
+    execute!(
+      out,
+      MoveTo(modal_x + 2, modal_y + 1 + i as u16),
+      Print(format!(
+        "\x1b[48;5;234m\x1b[97m{}\x1b[0m",
+        fit_to_width(line, box_width)
+      ))
+    )
+    .unwrap();
+  }
+  if lines.len() > shown && shown > 0 {
+    execute!(
+      out,
+      MoveTo(modal_x + 2, modal_y + shown as u16),
+      Print("\x1b[48;5;234m\x1b[90m…\x1b[0m")
+    )
+    .unwrap();
+  }
+
+  // Side borders
   for y in (modal_y + 1)..(modal_y + modal_height - 1) {
     execute!(
       out,

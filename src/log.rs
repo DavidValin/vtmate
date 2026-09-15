@@ -16,6 +16,12 @@ static TX_UI: OnceLock<Sender<String>> = OnceLock::new();
 static FILE_SINK: OnceLock<Mutex<std::fs::File>> = OnceLock::new();
 
 // API
+
+pub fn send_line(msg: &str) {
+  if let Some(sender) = TX_UI.get() {
+    let _ = sender.send(format!("line|{}", msg));
+  }
+}
 // ------------------------------------------------------------------
 
 pub fn set_verbose(v: bool) {

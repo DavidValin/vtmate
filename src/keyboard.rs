@@ -362,6 +362,24 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
     return KeyOutcome::Continue;
   }
 
+  // 't' toggles the live TODO popup (shows the most recently touched TODO
+  // list, refreshed from disk while open).
+  if k.code == KeyCode::Char('t')
+    && !state.debate_modal_visible.load(Ordering::SeqCst)
+    && !state.save_modal_visible.load(Ordering::SeqCst)
+    && k.kind == KeyEventKind::Press
+  {
+    let visible = state.todo_popup_visible.load(Ordering::SeqCst);
+    if visible {
+      state.todo_popup_visible.store(false, Ordering::SeqCst);
+      let _ = ctx.tx_ui.send("todo_hide|".to_string());
+    } else {
+      state.todo_popup_visible.store(true, Ordering::SeqCst);
+      let _ = ctx.tx_ui.send("todo_show|".to_string());
+    }
+    return KeyOutcome::Continue;
+  }
+
   // Handle modal keyboard navigation
   let modal_visible = state.debate_modal_visible.load(Ordering::SeqCst);
   if modal_visible {

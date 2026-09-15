@@ -84,6 +84,10 @@ pub struct AppState {
   pub model: Arc<Mutex<String>>,
   pub api_key: Arc<Mutex<String>>,
   pub system_prompt: Arc<Mutex<String>>,
+  /// Tool names enabled for the active agent - mirrors `AgentSettings.tools`
+  /// the same way `system_prompt` mirrors `AgentSettings.system_prompt`, so
+  /// `live_agent_settings` picks up a Ctrl+S change to it too.
+  pub tools: Arc<Mutex<Vec<String>>>,
   pub playback: PlaybackState,
   pub status_line: Arc<Mutex<String>>,
   pub interrupt_counter: Arc<AtomicU64>,
@@ -134,6 +138,8 @@ pub struct AppState {
   pub debate_modal_max_turns: Arc<Mutex<String>>,
   /// Caret position (in chars) inside `debate_modal_max_turns`.
   pub debate_modal_max_turns_caret: Arc<Mutex<usize>>,
+  /// The 't' popup showing the most recently touched TODO list: open/closed.
+  pub todo_popup_visible: Arc<AtomicBool>,
   /// The Ctrl+E save popup: open/closed.
   pub save_modal_visible: Arc<AtomicBool>,
   /// "[ ] Save as .txt and single .wav" checkbox.
@@ -188,6 +194,7 @@ impl AppState {
       model: Arc::new(Mutex::new(String::new())),
       api_key: Arc::new(Mutex::new(String::new())),
       system_prompt: Arc::new(Mutex::new(String::new())),
+      tools: Arc::new(Mutex::new(Vec::new())),
       ui: UiState {
         thinking: Arc::new(AtomicBool::new(false)),
         playing: Arc::new(AtomicBool::new(false)),
@@ -232,6 +239,7 @@ impl AppState {
       debate_modal_caret: Arc::new(Mutex::new(0)),
       debate_modal_max_turns: Arc::new(Mutex::new(String::new())),
       debate_modal_max_turns_caret: Arc::new(Mutex::new(0)),
+      todo_popup_visible: Arc::new(AtomicBool::new(false)),
       save_modal_visible: Arc::new(AtomicBool::new(false)),
       save_modal_check_txt: Arc::new(AtomicBool::new(true)),
       save_modal_check_html: Arc::new(AtomicBool::new(false)),
@@ -281,6 +289,7 @@ impl AppState {
     *self.model.lock().unwrap() = agent.model.clone();
     *self.api_key.lock().unwrap() = agent.api_key.clone();
     *self.system_prompt.lock().unwrap() = agent.system_prompt.clone();
+    *self.tools.lock().unwrap() = agent.tools.clone();
     self.ptt.store(agent.ptt, Ordering::Relaxed);
     self.sound_threshold_peak.store(
       (agent.sound_threshold_peak * 1000.0).round().max(0.0) as u32,
@@ -316,6 +325,7 @@ impl AppState {
       end_silence_ms: self.end_silence_ms.load(Ordering::Relaxed),
       voice_speed: self.speed.load(Ordering::Relaxed) as f32 / 10.0,
       system_prompt_name: None,
+      tools: self.tools.lock().unwrap().clone(),
     }
   }
 
@@ -429,6 +439,7 @@ mod tests {
       end_silence_ms: 900,
       voice_speed: 1.5,
       system_prompt_name: None,
+      tools: vec!["web_fetch".to_string()],
     }
   }
 

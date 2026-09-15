@@ -2,7 +2,6 @@
 //  Conversation
 // ------------------------------------------------------------------
 
-use crate::START_INSTANT;
 use crate::playback::set_wav_tx;
 use crate::state::AppState;
 use crate::state::GLOBAL_STATE;
@@ -24,11 +23,21 @@ use uuid::Uuid;
 // API
 // ------------------------------------------------------------------
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct ChatMessage {
   pub role: String,
   pub content: String,
   pub agent_name: Option<String>,
+  /// Tool calls requested by an assistant turn, in OpenAI shape
+  /// (`{id, type, function: {name, arguments}}`) with `arguments` as a parsed object.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub tool_calls: Option<Vec<serde_json::Value>>,
+  /// For `role: "tool"` messages: id of the tool call this result answers.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub tool_call_id: Option<String>,
+  /// For `role: "tool"` messages: name of the tool that produced the result.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub tool_name: Option<String>,
 }
 
 pub type ConversationHistory = std::sync::Arc<std::sync::Mutex<Vec<ChatMessage>>>;
@@ -77,79 +86,7 @@ pub fn conversation_thread(
 
   let settings_clone = settings.clone();
 
-  //  –––––––––––––––––––––––––––––––––––––
-  //   quiet mode
-  //  –––––––––––––––––––––––––––––––––––––
-  if quiet {
-    crate::log::log("info", "Running in quiet mode");
-
-    // Setup save path and WAV writer if saving is requested
-    if save || save_html {
-      maybe_setup_and_save(&conversation_history, &settings_clone, save, save_html)?;
-    }
-
-    let rt = TokioBuilder::new_current_thread()
-      .enable_all()
-      .build()
-      .unwrap();
-
-    if let Some(prompt) = &init_prompt {
-      // Show user message in UI
-      send_user_message_ui(&tx_ui, &prompt, false);
-      push_user_message(&conversation_history, &prompt);
-      perform_save(&conversation_history, &settings_clone);
-      // already expanded by load_settings (inline escapes) or taken
-      // verbatim from a [system_prompt] block
-      let system_prompt = settings.system_prompt.clone();
-      let messages = create_basic_messages(system_prompt, prompt.clone());
-
-      let my_interrupt = interrupt_counter.load(Ordering::SeqCst);
-      let messages_clone = messages.clone();
-      let reply = rt
-        .block_on(get_response(messages_clone, &settings))
-        .unwrap_or_else(|e| {
-          crate::log::log(
-            "error",
-            &format!("Error getting response in quiet mode: {}", e),
-          );
-          String::new()
-        });
-      if !reply.is_empty() {
-        let turn_idx = {
-          let mut hist = conversation_history.lock().unwrap();
-          hist.push(ChatMessage {
-            role: "assistant".to_string(),
-            content: reply.clone(),
-            agent_name: Some(settings.name.clone()),
-          });
-          hist.len() - 1
-        };
-        crate::html_export::open_turn(turn_idx, &settings.name);
-        perform_save(&conversation_history, &settings_clone);
-        // Display in UI
-        let label = format!("\x1b[48;5;22;37m{}\x1b[0m", settings.name);
-        let _ = tx_ui.send(format!("line|{}", label));
-        let _ = tx_ui.send(format!("stream|{}", reply.trim()));
-        let _ = tx_ui.send("line|".to_string());
-        process_tts_phrases(
-          &reply,
-          &tts_tx,
-          &tts_done_rx,
-          settings.voice.clone(),
-          &interrupt_counter,
-          my_interrupt,
-        );
-        let state = GLOBAL_STATE.get().expect("AppState not initialized");
-        wait_for_playback(state, &interrupt_counter, my_interrupt);
-        crate::html_export::close_turn();
-      }
-    }
-
-    crate::log::log("info", "Quiet mode playback finished. Exiting.");
-    terminate(0);
-  }
-
-  // Runtime to use for async debate responses
+  // Runtime to use for async debate/reply responses
   let rt = TokioBuilder::new_current_thread()
     .enable_all()
     .build()
@@ -159,6 +96,13 @@ pub fn conversation_thread(
   let mut last_interrupt = interrupt_counter.load(Ordering::SeqCst);
   let mut debate_interrupted = false;
   let mut pending_user_msg: Option<String> = init_prompt;
+
+  // Safety guard: quiet mode without init_prompt should not happen (validated in main.rs),
+  // but if it does, exit cleanly instead of hanging forever.
+  if quiet && pending_user_msg.is_none() {
+    crate::log::log("info", "Quiet mode: no input to process. Exiting.");
+    terminate(0);
+  }
 
   let state = GLOBAL_STATE.get().expect("AppState not initialized");
   // Seed the live flags from the CLI switches; a daemon-attach client can
@@ -371,7 +315,8 @@ pub fn conversation_thread(
             .playback_active
             .store(false, Ordering::Relaxed);
           let _ = stop_play_tx.try_send(());
-          let _reply_opt = handle_reply(
+          // No tools during debate turns.
+          let _reply_opt = react_loop(
             state,
             current_agent,
             &conversation_history,
@@ -381,6 +326,7 @@ pub fn conversation_thread(
             &rt,
             &interrupt_counter,
             user_msg.clone(),
+            &[],
           );
           state.processing_response.store(false, Ordering::Relaxed);
           // important: next agent will reply to this response using history
@@ -420,7 +366,7 @@ pub fn conversation_thread(
                 state.debate_turn.store(0, Ordering::SeqCst);
                 *state.debate_subject.lock().unwrap() = String::new();
                 state.reset_conversation();
-                // Back to the pre-debate agent: `handle_reply` already
+                // Back to the pre-debate agent: `react_loop` already
                 // restores it via `restore_agent_settings` after every turn,
                 // so this just frees whichever debate-only engine(s) that
                 // agent doesn't itself use.
@@ -455,7 +401,7 @@ pub fn conversation_thread(
         // Read fresh from state every turn, so a Ctrl+S save applies to the
         // very next reply in both bare and daemon mode.
         let live_settings = state.live_agent_settings();
-        handle_reply(
+        react_loop(
           state,
           &live_settings,
           &conversation_history,
@@ -465,9 +411,15 @@ pub fn conversation_thread(
           &rt,
           &interrupt_counter,
           user_msg,
+          &live_settings.tools,
         );
+        if quiet {
+          crate::log::log("info", "Quiet mode playback finished. Exiting.");
+          terminate(0);
+        }
       }
     }
+    let state = GLOBAL_STATE.get().expect("AppState not initialized");
 
     select! {
       recv(rx_cmd) -> cmd => {
@@ -528,8 +480,6 @@ pub fn conversation_thread(
           continue;
         }
 
-        let speech_end_ms = crate::util::SPEECH_END_AT.load(std::sync::atomic::Ordering::SeqCst);
-        let mut first_phrase_logged = false;
         if user_text.is_empty() {
           crate::log::log("debug", "Transcription returned empty string");
           state.processing_response.store(false, Ordering::Relaxed);
@@ -538,21 +488,8 @@ pub fn conversation_thread(
         // Daemon LLM turn with selected text: speech first, then the selection.
         let user_text = compose_user_text(user_text, utt.attachment.as_deref());
 
-        let system_prompt = state.system_prompt.lock().unwrap().clone();
-        let hist = conversation_history.lock().unwrap();
-        let mut messages = Vec::new();
-        messages.push(ChatMessage{role:"system".to_string(), content:system_prompt.clone(), agent_name:None});
-
-        for m in hist.iter() {
-          messages.push(m.clone());
-        }
-        // Release the conversation history lock before re-acquiring it to push the user message
-        std::mem::drop(hist);
-        messages.push(ChatMessage{role:"user".to_string(), content:user_text.clone(), agent_name:None});
-
         let my_interrupt = interrupt_counter.load(Ordering::SeqCst);
-        if handle_interruption(&interrupt_counter, my_interrupt) {
-          interrupt_counter.store(my_interrupt, Ordering::SeqCst);
+        if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
           continue;
         }
 
@@ -580,139 +517,24 @@ pub fn conversation_thread(
           continue;
         }
 
-        ui.thinking.store(true, Ordering::Relaxed);
-
-        // --save-html: the reply streamed below lands at this history index;
-        // its audio is recorded until the next turn opens, because this path
-        // does not wait for playback to drain before looping.
-        crate::html_export::open_turn(
-          conversation_history.lock().unwrap().len(),
-          &settings_clone.name,
+        // Read fresh from state every turn, so a Ctrl+S save applies to the
+        // very next reply in both bare and daemon mode.
+        let live_settings = state.live_agent_settings();
+        // react_loop drives thinking/label/streaming/tool-calling and waits
+        // for playback itself; the user message above is already in
+        // conversation_history, so react_loop sees it via the history walk.
+        react_loop(
+          state,
+          &live_settings,
+          &conversation_history,
+          &tx_ui,
+          &tts_tx,
+          &tts_done_rx,
+          &rt,
+          &interrupt_counter,
+          user_text,
+          &live_settings.tools,
         );
-
-        // Snapshot interruption counter for this assistant turn.
-        let speaker_arc = std::sync::Arc::new(std::sync::Mutex::new(PhraseSpeaker::new()));
-
-        let _ = tx_ui.send("line|".to_string());
-        let _ = tx_ui.send(format!("line|{}", crate::ui::ASSIST_LABEL));
-
-        // clones for the on_piece closure
-        let speaker_arc_cloned_for_closure = speaker_arc.clone();
-        let tx_ui_cloned_for_closure = tx_ui.clone();
-        let tts_tx_cloned_for_closure = tts_tx.clone();
-        // Cleared once this whole reply (request + streaming) is done, not on
-        // the first token: the spinner should stay up through the entire
-        // "busy generating" window, only stepping aside for the play icon
-        // once audio actually starts (the bottom bar checks `play` first).
-        let ui_thinking_cloned_for_closure = ui.thinking.clone();
-        // Capture conversation history and assistant name for history updates
-        let conv_hist_for_closure = conversation_history.clone();
-        let assistant_name_for_closure = settings_clone.name.clone();
-
-        // called on every chunk received from llm
-        let voice_for_tts = state.voice.lock().unwrap().clone();
-        let voice_for_tts_inner = voice_for_tts.clone();
-        // Clone for use inside closure
-
-        // reply accumulator for single ChatMessage
-        let reply_accum = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
-        let reply_accum_cloned = reply_accum.clone();
-        let on_piece = move |piece: &str| {
-          if piece.is_empty() {
-            return;
-          }
-          // Short-lived lock: the guard is dropped at the end of this statement.
-          let phrase = speaker_arc_cloned_for_closure.lock().unwrap().push_text(piece);
-          if let Some(phrase) = phrase {
-            if !first_phrase_logged {
-              let elapsed_ms = crate::util::now_ms(&START_INSTANT) - speech_end_ms;
-              crate::log::log("info", &format!("Time from speech end to first phrase playback: {:.2?}", elapsed_ms));
-              first_phrase_logged = true;
-            }
-              // accumulate reply for single ChatMessage
-            if let Ok(mut acc) = reply_accum_cloned.lock() {
-              acc.push_str(&phrase.text);
-              acc.push(' ');
-            }
-            // send the complete phrase to tts (source code inside ``` is never spoken)
-            let mut cleaned = phrase.tts.clone();
-            if !cleaned.trim().is_empty() {
-              cleaned.push(' ');
-              crate::log::log("info", &format!("Sending phrase to TTS: '{}' (original: '{}'), interrupt={}", cleaned, phrase.text, my_interrupt));
-              let _ = tts_tx_cloned_for_closure.send((cleaned, my_interrupt, voice_for_tts_inner.clone()));
-            }
-          }
-
-          // Update conversation history with this piece (same as handle_reply does).
-          // History first, then the UI: an attaching daemon client snapshots the
-          // history and must not see a piece twice.
-          push_or_update_last_assistant(&conv_hist_for_closure, piece, &assistant_name_for_closure);
-
-          // send raw piece immediately
-          let mut ui_piece = piece.to_string();
-          if ui_piece.ends_with('.') || ui_piece.ends_with('!') || ui_piece.ends_with('?') {
-            ui_piece.push(' ');
-          }
-          let _ = tx_ui_cloned_for_closure.send(format!("stream|{}", ui_piece));
-        };
-
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-        let interrupt_counter_cloned = interrupt_counter.clone();
-        let target = crate::llm::LlmTarget::from_state(state);
-        let on_piece_cloned = std::sync::Arc::new(std::sync::Mutex::new(on_piece));
-        let handle = std::thread::spawn(move || {
-          rt.block_on(async {
-            match crate::llm::stream_response_into(
-              &messages,
-              &target,
-              interrupt_counter_cloned.clone(),
-              my_interrupt,
-              &mut *on_piece_cloned.lock().unwrap(),
-            )
-            .await
-            {
-              Ok(_) => Ok(()),
-              Err(e) => {
-                crate::log::log(
-                  "error",
-                  &format!("llm error ({}): {}. {}", target.provider, e, target.hint()),
-                );
-                Err(e)
-              }
-            }
-          })
-        });
-        // ignore join result to prevent panic on llm error
-        let _join_result = handle.join();
-        ui_thinking_cloned_for_closure.store(false, Ordering::Relaxed);
-        // Nothing was produced (request failed / interrupted before the first
-        // token): no audio will ever clear the flag, so clear it here.
-        if reply_accum.lock().map(|a| a.trim().is_empty()).unwrap_or(true) {
-          state.processing_response.store(false, Ordering::Relaxed);
-        }
-        // Prepare clones for post-closure use
-        let speaker_arc_for_after = speaker_arc.clone();
-        let reply_accum_for_after = reply_accum.clone();
-        let tts_tx_for_after = tts_tx.clone();
-        let voice_for_tts_for_after = voice_for_tts.clone();
-
-        // Flush any remaining phrase from the speaker when stream ends
-        let last_phrase = speaker_arc_for_after.lock().unwrap().flush();
-        if let Some(last_phrase) = last_phrase {
-          // accumulate reply
-          if let Ok(mut acc) = reply_accum_for_after.lock() {
-            acc.push_str(&last_phrase.text);
-            acc.push(' ');
-          }
-          // send to TTS (source code inside ``` is never spoken)
-          let mut cleaned = last_phrase.tts.clone();
-          if !cleaned.trim().is_empty() {
-            cleaned.push(' ');
-            let _ = tts_tx_for_after.send((cleaned, my_interrupt, voice_for_tts_for_after.clone()));
-          }
-        }
-        // Persist conversation after streaming (same as handle_reply does at line 970)
-        perform_save(&conversation_history, &settings_clone);
       }
       // Keeps the top-of-loop checks (including `debate_pending_submit`)
       // running while idle in conversation mode: starting a debate from the
@@ -728,27 +550,6 @@ pub fn conversation_thread(
 
 // PRIVATE
 // ------------------------------------------------------------------
-
-/// Get response from LLM for debate mode (synchronous, non-streaming)
-async fn get_response(
-  messages: Vec<ChatMessage>,
-  agent: &crate::config::AgentSettings,
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-  let interrupt_counter = Arc::new(AtomicU64::new(0));
-  let mut result = String::new();
-  let mut on_piece = |piece: &str| {
-    result.push_str(piece);
-  };
-  crate::llm::stream_response_into(
-    &messages,
-    &crate::llm::LlmTarget::from_settings(agent),
-    interrupt_counter.clone(),
-    0,
-    &mut on_piece,
-  )
-  .await?;
-  Ok(result)
-}
 
 /// Persist conversation history if needed
 fn perform_save(
@@ -947,11 +748,12 @@ impl PhraseSpeaker {
   }
 }
 
-fn handle_interruption(interrupt_counter: &Arc<AtomicU64>, current: u64) -> bool {
-  if interrupt_counter.load(Ordering::SeqCst) != current {
-    true
-  } else {
-    false
+fn remove_empty_placeholder(conversation_history: &ConversationHistory) {
+  let mut hist = conversation_history.lock().unwrap();
+  if let Some(last) = hist.last() {
+    if last.role == "assistant" && last.content.is_empty() {
+      hist.pop();
+    }
   }
 }
 
@@ -999,28 +801,44 @@ fn handle_undo(
   perform_save(&conversation_history, settings);
 }
 
-/// Handle a single conversation reply when debate mode is disabled
-// Helper to push or update last assistant message
+/// Push or update the last assistant message with a whole (already trimmed)
+/// phrase: `react_loop` appends one complete phrase at a time, so a missing
+/// separator here would run two phrases together with no space between them.
 fn push_or_update_last_assistant(
   conversation_history: &ConversationHistory,
-  new_piece: &str,
+  phrase: &str,
   agent_name: &str,
 ) {
   let mut hist = conversation_history.lock().unwrap();
   if let Some(last) = hist.last_mut() {
     if last.role == "assistant" {
-      last.content.push_str(new_piece);
+      let needs_gap = !last.content.is_empty()
+        && !last.content.ends_with(char::is_whitespace)
+        && !phrase.starts_with(char::is_whitespace);
+      if needs_gap {
+        last.content.push(' ');
+      }
+      last.content.push_str(phrase);
       return;
     }
   }
   hist.push(ChatMessage {
     role: "assistant".to_string(),
-    content: new_piece.to_string(),
+    content: phrase.to_string(),
     agent_name: Some(agent_name.to_string()),
+    ..Default::default()
   });
 }
 
-fn handle_reply(
+/// Drive one assistant turn end to end: builds the request, streams the
+/// reply (speaking/displaying it phrase by phrase as it arrives), and - when
+/// `available_tools` is non-empty and the agent's provider supports it (see
+/// `crate::llm::stream_response_into_with_tools`) - executes any tool calls
+/// the model makes and loops back with their results until it produces a
+/// final text reply or `max_react_loop_iters` is hit. Used for every kind of
+/// assistant turn: plain conversation, debate (with `available_tools: &[]`),
+/// and quiet mode's single reply.
+fn react_loop(
   state: &AppState,
   settings: &crate::config::AgentSettings,
   conversation_history: &ConversationHistory,
@@ -1030,21 +848,26 @@ fn handle_reply(
   rt: &tokio::runtime::Runtime,
   interrupt_counter: &Arc<AtomicU64>,
   user_msg: String,
+  available_tools: &[String],
 ) -> Option<String> {
-  // Build messages for LLM
-  let system_prompt = settings.system_prompt.clone();
-  let messages =
-    create_full_context_messages(system_prompt, user_msg.clone(), conversation_history);
+  let system_prompt = settings.system_prompt.replace("\\n", "\n");
+  let system_prompt = augment_system_prompt(system_prompt, available_tools, &settings.language);
 
   let my_interrupt = interrupt_counter.load(Ordering::SeqCst);
-  // Spinner for the request + streaming window - debate mode otherwise shows
-  // no "busy" indicator at all here. Cleared once streaming ends (below),
+  let has_tools = !available_tools.is_empty();
+
+  // Spinner for the request + streaming window. Cleared once streaming ends,
   // not held through playback: the bottom bar already shows the play icon
   // for that, checked ahead of the spinner.
   state.ui.thinking.store(true, Ordering::Relaxed);
-  // Speaker for incremental buffering
-  let speaker_arc = Arc::new(Mutex::new(PhraseSpeaker::new()));
-  let reply_accum = Arc::new(Mutex::new(String::new()));
+
+  // react_messages carries full reAct context (tool calls + outputs) across iterations.
+  // Only the final reply is pushed to conversation_history. The caller has
+  // already pushed `user_msg` to conversation_history by the time this runs,
+  // so `create_full_context_messages` below does not add it a second time.
+  let mut react_messages =
+    create_full_context_messages(system_prompt, user_msg, conversation_history);
+
   // Pre-add assistant placeholder to history for label display
   let turn_idx = {
     let mut hist = conversation_history.lock().unwrap();
@@ -1052,154 +875,590 @@ fn handle_reply(
       role: "assistant".to_string(),
       content: "".to_string(),
       agent_name: Some(settings.name.clone()),
+      ..Default::default()
     });
     hist.len() - 1
   };
   crate::html_export::open_turn(turn_idx, &settings.name);
+
   let originals = apply_agent_settings(state, settings);
   let assistant_name = settings.name.clone();
   let assistant_name_for_closure = assistant_name.clone();
-  let interrupt_counter_clone = interrupt_counter.clone();
-  let my_interrupt_clone = my_interrupt;
 
-  // render assistant label
+  // Render assistant label once
   let label = format!("\x1b[48;5;22;37m{}\x1b[0m", assistant_name);
   let _ = tx_ui.send("line|".to_string());
   let _ = tx_ui.send(format!("line|{}", label));
 
-  let mut on_piece = {
-    let speaker_arc = speaker_arc.clone();
-    let reply_accum = reply_accum.clone();
-    let tts_tx = tts_tx.clone();
-    let tx_ui = tx_ui.clone();
-    let voice = settings.voice.clone();
-    let conversation_history = conversation_history.clone();
-    move |piece: &str| {
-      if piece.is_empty() {
-        return;
-      }
-      // Keep the partial reply in history while streaming, so the history can be
-      // rendered in real‑time
-      push_or_update_last_assistant(&conversation_history, piece, &assistant_name);
-      // Accumulate reply
-      if let Ok(mut acc) = reply_accum.lock() {
-        acc.push_str(piece);
-      }
-      // Buffer via speaker and get phrase (if delimiter reached)
-      let phrase = {
-        let mut speaker = speaker_arc.lock().unwrap();
-        speaker.push_text(piece)
+  let target = crate::llm::LlmTarget::from_settings(settings);
+  let max_react_loop_iters = 20;
+  let mut react_loop_count = 0;
+  // Track the last reply text across iterations
+  let mut last_reply = String::new();
+
+  loop {
+    react_loop_count += 1;
+    if react_loop_count > max_react_loop_iters {
+      crate::log::log(
+        "warn",
+        "react loop exceeded max iterations, using last text as final response",
+      );
+      // Prefer the last thing actually said; fall back to scanning react_messages.
+      let final_reply = if !last_reply.is_empty() {
+        last_reply.clone()
+      } else {
+        react_messages
+          .iter()
+          .rev()
+          .find(|m| m.role == "assistant" && !m.content.is_empty())
+          .map(|m| m.content.clone())
+          .unwrap_or_else(|| {
+            crate::log::log("error", "no text response found in react loop history");
+            "Lo siento, no pude completar la solicitud tras varios intentos.".to_string()
+          })
       };
-      if let Some(ref phrase) = phrase {
-        let _ = tx_ui.send(format!("stream|{}", phrase.text));
-        let _ = tx_ui.send("line|".to_string());
-        // TTS (source code inside ``` is never spoken)
-        let cleaned = phrase.tts.clone();
-        if !cleaned.trim().is_empty() {
-          let _ = tts_tx.send((cleaned, my_interrupt, voice.clone()));
-          // Deliberately unbounded: `wait_for_playback` (further down this
-          // turn) trusts that every phrase has already been fully
-          // synthesized and handed to the playback queue by the time it
-          // starts polling for "done". A timeout here lets `on_piece` move
-          // on to the next phrase while this one is still stuck (e.g.
-          // behind a slow engine load), which desyncs that assumption -
-          // `wait_for_playback` then sees a stray gap in the queue, decides
-          // the turn is over, and the next turn's `stop_play_tx` clears the
-          // queue out from under audio that was still in flight, cutting it
-          // off. Slow-but-not-hung engine loads are handled at the source
-          // instead (the per-engine mutex in src/tts/*.rs is held for the
-          // whole build), so this can just wait.
-          let _ = tts_done_rx.recv();
-        }
+      // last_reply was already displayed, spoken and pushed to conversation_history
+      // when it was produced. Anything else still has to be shown and spoken.
+      if last_reply.is_empty() {
+        let _ = tx_ui.send(format!("line|{}", final_reply));
+        process_tts_phrases(
+          &final_reply,
+          tts_tx,
+          tts_done_rx,
+          settings.voice.clone(),
+          interrupt_counter,
+          my_interrupt,
+        );
+        push_or_update_last_assistant(
+          &conversation_history,
+          &final_reply,
+          &assistant_name_for_closure,
+        );
       }
-      if interrupt_counter_clone.load(Ordering::SeqCst) != my_interrupt_clone {
-        if let Some(rem) = speaker_arc.lock().unwrap().flush() {
-          // Prevents the partially‑generated text from being lost when the user interrupts
-          push_or_update_last_assistant(&conversation_history, &rem.text, &assistant_name);
-        }
-      }
+      state.ui.thinking.store(false, Ordering::Relaxed);
+      perform_save(&conversation_history, settings);
+      restore_agent_settings(state, originals);
+      wait_for_playback(state, interrupt_counter, my_interrupt);
+      crate::html_export::close_turn();
+      perform_save(&conversation_history, settings);
+      return Some(final_reply);
     }
-  };
+    if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
+      // Remove empty assistant placeholder if still empty
+      remove_empty_placeholder(&conversation_history);
+      state.ui.thinking.store(false, Ordering::Relaxed);
+      restore_agent_settings(state, originals);
+      crate::html_export::close_turn();
+      perform_save(&conversation_history, settings);
+      return Some("User interrupted the request.".to_string());
+    }
 
-  let stream_result = rt.block_on(crate::llm::stream_response_into(
-    &messages,
-    &crate::llm::LlmTarget::from_settings(settings),
-    interrupt_counter.clone(),
-    my_interrupt,
-    &mut on_piece,
-  ));
-  state.ui.thinking.store(false, Ordering::Relaxed);
-  if let Err(e) = stream_result {
-    crate::log::log("error", &format!("Streaming error: {}", e));
-    // Drop the assistant placeholder if the request failed before any content
-    // was streamed — some backends reject empty-content messages, which would
-    // otherwise break every subsequent turn until the user manually undoes.
-    {
-      let mut h = conversation_history.lock().unwrap();
-      if let Some(last) = h.last() {
-        if last.role == "assistant" && last.content.is_empty() {
-          h.pop();
-        }
-      }
-    }
-    restore_agent_settings(state, originals);
-    crate::html_export::close_turn();
-    // Persist conversation on interruption
-    perform_save(&conversation_history, settings);
-    return None;
-  }
-
-  // Flush remaining phrase
-  let last_phrase = speaker_arc.lock().unwrap().flush();
-  if let Some(last_phrase) = last_phrase {
-    if !last_phrase.tts.trim().is_empty() {
-      let _ = tts_tx.send((last_phrase.tts.clone(), my_interrupt, settings.voice.clone()));
-      // wait for it like every other phrase does: an unconsumed "done" would be
-      // handed to the first phrase of the next turn, putting the reply one
-      // phrase ahead of its own audio for the rest of the debate
-      let _ = tts_done_rx.recv_timeout(Duration::from_secs(60));
-    }
-    let _ = tx_ui.send(format!("stream|{}", last_phrase.text));
-    let _ = tx_ui.send("line|".to_string());
-    // Add the final, un‑puncuated fragment to the history
-    // (handles replies that end without a punctuation mark or newline)
-    push_or_update_last_assistant(
-      &conversation_history,
-      &last_phrase.text,
-      &assistant_name_for_closure,
+    let mut tool_calls: Vec<serde_json::Value> = Vec::new();
+    crate::log::log(
+      "debug",
+      &format!("react_loop: starting iteration {}", react_loop_count),
     );
-  }
 
-  // Final reply string
-  let reply = {
-    let mut acc = reply_accum.lock().unwrap();
-    let cloned = acc.clone();
-    acc.clear();
-    cloned
-  };
-  // If interrupted, flush any remaining buffered text to history
-  if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
-    if let Some(rem) = speaker_arc.lock().unwrap().flush() {
-      // Flushes any remaining buffered text if the user interrupted
-      // after streaming but before the conversation was saved
-      // (covers the edge‑case where the user hits Esc right after the stream ends
-      // but before the conversation file is written )
-      push_or_update_last_assistant(&conversation_history, &rem.text, &assistant_name_for_closure);
+    let speaker_arc = Arc::new(Mutex::new(PhraseSpeaker::new()));
+    let reply_accum = Arc::new(Mutex::new(String::new()));
+    // Separate accumulator for reasoning tokens (Gemma 4, DeepSeek, etc.)
+    // Reasoning is displayed with a visual distinction but NOT spoken via TTS.
+    let reasoning_accum = Arc::new(Mutex::new(String::new()));
+
+    // Text content is always prose: tool calls arrive through `on_tool_call`, never as
+    // content. So every completed phrase is displayed, spoken and persisted right away,
+    // whether or not tools are enabled for this turn.
+    let mut on_piece = {
+      let speaker_arc = speaker_arc.clone();
+      let reply_accum = reply_accum.clone();
+      let tx_ui = tx_ui.clone();
+      let tts_tx = tts_tx.clone();
+      let tts_done_rx = tts_done_rx.clone();
+      let voice = settings.voice.clone();
+      let conversation_history = conversation_history.clone();
+      let assistant_name = assistant_name.clone();
+      move |piece: &str| {
+        if piece.is_empty() {
+          return;
+        }
+        // Always accumulate reply text
+        if let Ok(mut acc) = reply_accum.lock() {
+          acc.push_str(piece);
+        }
+        let phrase = {
+          let mut speaker = speaker_arc.lock().unwrap();
+          speaker.push_text(piece)
+        };
+        if let Some(ref phrase) = phrase {
+          speak_phrase(
+            &tx_ui,
+            &tts_tx,
+            &tts_done_rx,
+            &conversation_history,
+            &phrase.text,
+            &assistant_name,
+            my_interrupt,
+            &voice,
+          );
+        }
+      }
+    };
+
+    let mut on_tool_call = |tc: &serde_json::Value| {
+      tool_calls.push(tc.clone());
+    };
+
+    // Reasoning callback: display with visual distinction, do NOT speak
+    let mut on_reasoning_piece = {
+      let reasoning_accum = reasoning_accum.clone();
+      let tx_ui = tx_ui.clone();
+      move |piece: &str| {
+        if piece.is_empty() {
+          return;
+        }
+        if let Ok(mut acc) = reasoning_accum.lock() {
+          acc.push_str(piece);
+        }
+        // Display reasoning with grey styling
+        let _ = tx_ui.send(format!("stream|\x1b[90m{}\x1b[0m", piece));
+      }
+    };
+
+    crate::log::log(
+      "debug",
+      &format!(
+        "react_loop: sending to LLM with tools: {:?}",
+        available_tools
+      ),
+    );
+    let stream_result = rt.block_on(crate::llm::stream_response_into_with_tools(
+      &react_messages,
+      &target,
+      interrupt_counter.clone(),
+      my_interrupt,
+      &mut on_piece,
+      available_tools,
+      Some(&mut on_tool_call),
+      Some(&mut on_reasoning_piece),
+      // `think` (whether to request the model's "thinking" mode), not
+      // `has_tools` - every other path here disables it by default (see
+      // `build_provider`'s `reasoning_effort: "none"`); `on_reasoning_piece`
+      // still exists as a display-only safety net for a model that reasons
+      // unprompted (Gemma 4, DeepSeek, ...) despite this being false.
+      false,
+    ));
+
+    if let Err(e) = stream_result {
+      crate::log::log(
+        "error",
+        &format!("llm error ({}): {}. {}", target.provider, e, target.hint()),
+      );
+      let _ = tx_ui.send(format!("line|\x1b[31mError getting response: {}\x1b[0m", e));
+      // Remove empty assistant placeholder if still empty
+      remove_empty_placeholder(&conversation_history);
+      state.ui.thinking.store(false, Ordering::Relaxed);
+      restore_agent_settings(state, originals);
+      crate::html_export::close_turn();
+      perform_save(&conversation_history, settings);
+      return Some(format!("Error getting response: {}", e));
     }
+
+    // Flush remaining phrase (text already in reply_accum from raw pieces)
+    if let Some(last_phrase) = speaker_arc.lock().unwrap().flush() {
+      speak_phrase(
+        tx_ui,
+        tts_tx,
+        tts_done_rx,
+        conversation_history,
+        &last_phrase.text,
+        &assistant_name_for_closure,
+        my_interrupt,
+        &settings.voice,
+      );
+    }
+
+    // Final reply text
+    let reply = {
+      let mut acc = reply_accum.lock().unwrap();
+      let cloned = acc.clone();
+      acc.clear();
+      cloned
+    };
+
+    // Extract accumulated reasoning text
+    let reasoning = {
+      let mut acc = reasoning_accum.lock().unwrap();
+      let cloned = acc.clone();
+      acc.clear();
+      cloned
+    };
+
+    crate::log::log(
+      "debug",
+      &format!(
+        "react_loop: after stream - reply.len={}, reasoning.len={}, tool_calls.len={}",
+        reply.len(),
+        reasoning.len(),
+        tool_calls.len()
+      ),
+    );
+
+    // No tool calls: LLM produced reasoning text
+    // ----------------------------------------------------------
+    if tool_calls.is_empty() {
+      if reply.is_empty() && reasoning.is_empty() {
+        // LLM produced nothing - force it to give a final text response
+        react_messages.push(ChatMessage {
+          role: "user".to_string(),
+          content: "Please provide your final response.".to_string(),
+          ..Default::default()
+        });
+        continue;
+      }
+
+      // Reply text was already displayed, spoken and pushed to history phrase by
+      // phrase during streaming. Without tools the stream IS the final answer, and with
+      // tools a text-only response ends the loop.
+      if !reply.is_empty() || !has_tools {
+        state.ui.thinking.store(false, Ordering::Relaxed);
+        perform_save(&conversation_history, settings);
+        restore_agent_settings(state, originals);
+        wait_for_playback(state, interrupt_counter, my_interrupt);
+        crate::html_export::close_turn();
+        perform_save(&conversation_history, settings);
+        return Some(reply);
+      }
+
+      // Tools available but the LLM only produced reasoning: keep it in context and
+      // let the model continue.
+      react_messages.push(ChatMessage {
+        role: "assistant".to_string(),
+        content: reasoning.clone(),
+        agent_name: Some(assistant_name_for_closure.clone()),
+        ..Default::default()
+      });
+      continue;
+    }
+
+    // Tool calls present. Any reply text was already displayed, spoken and persisted
+    // during streaming; remember it as the last thing said.
+    // ----------------------------------------------------------
+    if !reasoning.is_empty() {
+      let _ = tx_ui.send("line|".to_string());
+    }
+    if !reply.is_empty() {
+      last_reply = reply.clone();
+    } else {
+      // The model didn't comply with the "announce before calling a tool"
+      // guideline in augment_system_prompt (a real possibility - it's a
+      // prompt instruction, not enforced) - fall back to a generic spoken
+      // announcement so a tool call is never silent.
+      speak_phrase(
+        tx_ui,
+        tts_tx,
+        tts_done_rx,
+        conversation_history,
+        tool_call_announcement_filler(&settings.language),
+        &assistant_name_for_closure,
+        my_interrupt,
+        &settings.voice,
+      );
+    }
+
+    let calls: Vec<ToolCallSpec> = tool_calls
+      .iter()
+      .enumerate()
+      .map(|(i, tc)| normalize_tool_call(tc, react_loop_count, i))
+      .collect();
+
+    // The assistant turn that requested the tools, with its tool_calls, so the provider
+    // sees a proper tool exchange. Tool results must directly follow this message, so
+    // reasoning is deliberately not inserted as a separate assistant message here.
+    react_messages.push(ChatMessage {
+      role: "assistant".to_string(),
+      content: reply.clone(),
+      agent_name: Some(assistant_name_for_closure.clone()),
+      tool_calls: Some(calls.iter().map(ToolCallSpec::to_json).collect()),
+      ..Default::default()
+    });
+
+    crate::log::log(
+      "debug",
+      &format!("react_loop: executing {} tool calls", calls.len()),
+    );
+
+    // Execute tool calls; each result goes back as a `tool` message tied to its call id.
+    for call in &calls {
+      if interrupt_counter.load(Ordering::SeqCst) != my_interrupt {
+        crate::log::log("debug", "Interrupted during tool execution");
+        remove_empty_placeholder(&conversation_history);
+        state.ui.thinking.store(false, Ordering::Relaxed);
+        restore_agent_settings(state, originals);
+        crate::html_export::close_turn();
+        perform_save(&conversation_history, settings);
+        return Some("User interrupted the request.".to_string());
+      }
+      let args_str = serde_json::to_string(&call.arguments).unwrap_or_else(|_| "{}".to_string());
+      let payload =
+        serde_json::json!({ "name": call.name, "arguments": call.arguments }).to_string();
+      // Log tool execution to UI
+      let _ = tx_ui.send(format!(
+        "line|\n\x1b[42m\x1b[30m {} \x1b[0m {}",
+        call.name, args_str
+      ));
+      let result = crate::tools::handle_tool_call(&payload);
+      // handle_tool_call always returns Ok, wrapping errors in a JSON failure payload
+      let output =
+        result.unwrap_or_else(|e: Box<dyn std::error::Error + Send + Sync>| e.to_string());
+      let parsed: Option<serde_json::Value> = serde_json::from_str(&output).ok();
+      let is_failure = parsed
+        .as_ref()
+        .and_then(|v| v.get("status").and_then(|s| s.as_str()))
+        .map(|s| s == "failed")
+        .unwrap_or(false);
+      let content = if is_failure {
+        let reasons = parsed
+          .as_ref()
+          .and_then(|v| v.get("reasons"))
+          .and_then(|r| r.as_array())
+          .map(|arr| {
+            arr
+              .iter()
+              .filter_map(|r| r.as_str().map(|s| s.to_string()))
+              .collect::<Vec<_>>()
+              .join(", ")
+          })
+          .unwrap_or_default();
+        // Display the tool failure in the UI
+        let _ = tx_ui.send(format!("line|The tool `{}` failed: {}", call.name, reasons));
+        let _ = tx_ui.send("line|".to_string());
+        // Guaranteed spoken acknowledgment, independent of whether the model
+        // itself comments on the failure in its next turn (see the "if a tool
+        // call fails..." guideline in augment_system_prompt) - otherwise a
+        // broken tool can go through several silent retries before anything
+        // is heard.
+        speak_phrase(
+          tx_ui,
+          tts_tx,
+          tts_done_rx,
+          conversation_history,
+          tool_failure_filler(&settings.language),
+          &assistant_name_for_closure,
+          my_interrupt,
+          &settings.voice,
+        );
+        format!("Tool error: {}. Try a different approach.", reasons)
+      } else {
+        // Display the tool result in the UI
+        let _ = tx_ui.send(format!("line|{}", output.trim()));
+        let _ = tx_ui.send("line|".to_string());
+        output
+      };
+      // Notify UI of tool call
+      let _ = tx_ui.send("line|\n\x1b[32m".to_string());
+
+      react_messages.push(ChatMessage {
+        role: "tool".to_string(),
+        content,
+        tool_call_id: Some(call.id.clone()),
+        tool_name: Some(call.name.clone()),
+        ..Default::default()
+      });
+    }
+
+    // Loop: send updated messages back to LLM
   }
+}
 
-  // Persist conversation after streaming
-  perform_save(&conversation_history, settings);
+/// A tool call requested by the model, normalized to a single shape regardless of how
+/// the provider reported it.
+struct ToolCallSpec {
+  id: String,
+  name: String,
+  /// Parsed argument object (never a JSON string).
+  arguments: serde_json::Value,
+}
 
-  // Restore settings and wait playback
-  restore_agent_settings(state, originals);
-  wait_for_playback(state, &interrupt_counter, my_interrupt);
-  // The turn's wav is deliberately left open: `wait_for_playback` returns as
-  // soon as the speakers fall quiet, which can happen between two phrases of
-  // the same reply. The next turn opening closes it, and so does exiting, so
-  // audio that arrives late still lands in the turn it belongs to.
-  perform_save(&conversation_history, settings);
-  Some(reply)
+impl ToolCallSpec {
+  /// OpenAI-shaped tool call as stored on the assistant turn that requested it.
+  fn to_json(&self) -> serde_json::Value {
+    serde_json::json!({
+      "id": self.id,
+      "type": "function",
+      "function": {
+        "name": self.name,
+        "arguments": self.arguments
+      }
+    })
+  }
+}
+
+/// Normalize a raw tool call. OpenAI-style servers send `arguments` as a JSON string and
+/// always provide an `id`; Ollama's native API sends an object and no id, so a stable id
+/// is synthesized to pair the result message with the call.
+fn normalize_tool_call(tc: &serde_json::Value, iteration: i32, index: usize) -> ToolCallSpec {
+  let func = tc
+    .get("function")
+    .cloned()
+    .unwrap_or(serde_json::Value::Null);
+  let name = func
+    .get("name")
+    .and_then(|n| n.as_str())
+    .unwrap_or("unknown")
+    .to_string();
+  let id = tc
+    .get("id")
+    .and_then(|v| v.as_str())
+    .filter(|s| !s.is_empty())
+    .map(str::to_string)
+    .unwrap_or_else(|| format!("call_{}_{}", iteration, index));
+  let args_value = func
+    .get("arguments")
+    .or_else(|| func.get("parameters"))
+    .cloned()
+    .unwrap_or(serde_json::Value::Null);
+  let arguments = match args_value {
+    serde_json::Value::String(s) => serde_json::from_str(&s).ok(),
+    serde_json::Value::Object(o) => Some(serde_json::Value::Object(o)),
+    _ => None,
+  }
+  .filter(|v| v.is_object())
+  .unwrap_or_else(|| serde_json::json!({}));
+  ToolCallSpec {
+    id,
+    name,
+    arguments,
+  }
+}
+
+/// Generic spoken announcement used right before executing tool calls when
+/// the model produced no reply text of its own that iteration - see the
+/// "announce before calling a tool" guideline in `augment_system_prompt`,
+/// which this backs up rather than replaces: it only fires when the model
+/// didn't already say something. Same language coverage and fallback as
+/// `tool_failure_filler` below.
+fn tool_call_announcement_filler(language: &str) -> &'static str {
+  match language.trim_matches('"') {
+    "ar" => "حسنًا، لحظة من فضلك.",
+    "bg" => "Добре, един момент.",
+    "bn" => "ঠিক আছে, একটু অপেক্ষা করুন।",
+    "ca" => "D'acord, un moment.",
+    "cs" => "Dobře, moment.",
+    "da" => "Okay, et øjeblik.",
+    "de" => "Okay, einen Moment.",
+    "el" => "Εντάξει, μια στιγμή.",
+    "en" => "Okay, one moment.",
+    "es" => "Vale, un momento.",
+    "et" => "Selge, üks hetk.",
+    "fi" => "Selvä, hetki vain.",
+    "fr" => "D'accord, un instant.",
+    "gu" => "ઠીક છે, એક ક્ષણ.",
+    "hi" => "ठीक है, एक पल.",
+    "hr" => "Dobro, trenutak.",
+    "hu" => "Rendben, egy pillanat.",
+    "id" => "Baik, sebentar.",
+    "it" => "Ok, un momento.",
+    "ja" => "はい、少々お待ちください。",
+    "kn" => "ಸರಿ, ಒಂದು ಕ್ಷಣ.",
+    "ko" => "네, 잠시만요.",
+    "lt" => "Gerai, akimirką.",
+    "lv" => "Labi, mirkli.",
+    "mr" => "ठीक आहे, एक क्षण.",
+    "nl" => "Oké, een moment.",
+    "pa" => "ਠੀਕ ਹੈ, ਇੱਕ ਪਲ.",
+    "pl" => "Dobrze, chwileczkę.",
+    "pt" => "Ok, um momento.",
+    "ro" => "Bine, un moment.",
+    "ru" => "Хорошо, одну секунду.",
+    "sk" => "Dobre, chvíľu.",
+    "sl" => "V redu, trenutek.",
+    "sv" => "Okej, ett ögonblick.",
+    "sw" => "Sawa, dakika moja.",
+    "ta" => "சரி, ஒரு கணம்.",
+    "te" => "సరే, ఒక్క క్షణం.",
+    "tr" => "Tamam, bir saniye.",
+    "uk" => "Добре, хвилинку.",
+    "vi" => "Được, chờ một chút.",
+    "zh" => "好的，请稍等。",
+    _ => "Okay, one moment.",
+  }
+}
+
+/// Short, fixed filler spoken right when a tool call hard-fails (see the
+/// `is_failure` branch above), so the user always hears *something*
+/// immediately rather than possibly waiting through several silent retries
+/// for the model to comment on it. Deterministic and not model-dependent, so
+/// unlike the model's own remarks it can't draw on the reply's language -
+/// picked from `settings.language` instead. Covers every language code any
+/// TTS backend here supports (union of `KOKORO_VOICES_PER_LANGUAGE`,
+/// `DEFAULT_OPENTTS_VOICES_PER_LANGUAGE`, `SUPERTONIC2_LANGS` and
+/// supertonic3's `SUPPORTED_LANGS`); falls back to English for anything else.
+fn tool_failure_filler(language: &str) -> &'static str {
+  match language.trim_matches('"') {
+    "ar" => "حسنًا، لم ينجح ذلك.",
+    "bg" => "Хм, това не проработи.",
+    "bn" => "উফ, এটা কাজ করেনি।",
+    "ca" => "Vaja, això no ha funcionat.",
+    "cs" => "Hmm, to nezafungovalo.",
+    "da" => "Hmm, det virkede ikke.",
+    "de" => "Hmm, das hat nicht geklappt.",
+    "el" => "Χμ, αυτό δεν πέτυχε.",
+    "en" => "Hmm, that didn't work.",
+    "es" => "Vaya, eso no funcionó.",
+    "et" => "Hmm, see ei õnnestunud.",
+    "fi" => "Hmm, se ei toiminut.",
+    "fr" => "Hmm, ça n'a pas marché.",
+    "gu" => "અરે, એ કામ ન થયું.",
+    "hi" => "अरे, वो काम नहीं हुआ.",
+    "hr" => "Hmm, to nije uspjelo.",
+    "hu" => "Hmm, ez nem sikerült.",
+    "id" => "Hmm, itu tidak berhasil.",
+    "it" => "Uhm, non ha funzionato.",
+    "ja" => "うーん、うまくいかなかった。",
+    "kn" => "ಅಯ್ಯೋ, ಅದು ಕೆಲಸ ಮಾಡಲಿಲ್ಲ.",
+    "ko" => "음, 그게 안 됐어요.",
+    "lt" => "Hmm, tai nepavyko.",
+    "lv" => "Hmm, tas neizdevās.",
+    "mr" => "अरे, ते झालं नाही.",
+    "nl" => "Hmm, dat werkte niet.",
+    "pa" => "ਓਹ, ਇਹ ਕੰਮ ਨਹੀਂ ਕੀਤਾ.",
+    "pl" => "Hmm, to nie zadziałało.",
+    "pt" => "Hmm, isso não funcionou.",
+    "ro" => "Hmm, asta n-a mers.",
+    "ru" => "Хм, не получилось.",
+    "sk" => "Hmm, to nefungovalo.",
+    "sl" => "Hmm, to ni delovalo.",
+    "sv" => "Hmm, det fungerade inte.",
+    "sw" => "Aa, hilo halikufanya kazi.",
+    "ta" => "அய்யோ, அது வேலை செய்யவில்லை.",
+    "te" => "అయ్యో, అది పని చేయలేదు.",
+    "tr" => "Hmm, bu işe yaramadı.",
+    "uk" => "Хм, це не спрацювало.",
+    "vi" => "Ừm, cái đó không được.",
+    "zh" => "嗯，没成功。",
+    _ => "Hmm, that didn't work.",
+  }
+}
+
+/// Display a completed phrase, hand it to TTS immediately and persist it in history.
+fn speak_phrase(
+  tx_ui: &Sender<String>,
+  tts_tx: &Sender<(String, u64, String)>,
+  tts_done_rx: &Receiver<u64>,
+  conversation_history: &ConversationHistory,
+  phrase: &str,
+  assistant_name: &str,
+  my_interrupt: u64,
+  voice: &str,
+) {
+  let _ = tx_ui.send(format!("stream|{}", phrase));
+  let _ = tx_ui.send("line|".to_string());
+  let spoken = crate::util::strip_special_chars(phrase);
+  if !spoken.trim().is_empty() {
+    let _ = tts_tx.send((spoken, my_interrupt, voice.to_string()));
+    let _ = tts_done_rx.recv();
+  }
+  push_or_update_last_assistant(conversation_history, phrase, assistant_name);
 }
 
 /// Split text into phrases for TTS (used in debate mode)
@@ -1239,6 +1498,7 @@ fn push_user_message(history: &ConversationHistory, text: &str) {
     role: "user".to_string(),
     content: text.to_string(),
     agent_name: None,
+    ..Default::default()
   });
 }
 
@@ -1313,21 +1573,6 @@ fn process_tts_phrases(
   }
 }
 
-fn create_basic_messages(system_prompt: String, user_msg: String) -> Vec<ChatMessage> {
-  vec![
-    ChatMessage {
-      role: "system".to_string(),
-      content: system_prompt,
-      agent_name: None,
-    },
-    ChatMessage {
-      role: "user".to_string(),
-      content: user_msg,
-      agent_name: None,
-    },
-  ]
-}
-
 /// Build messages including full conversation history.
 fn create_full_context_messages(
   system_prompt: String,
@@ -1340,19 +1585,127 @@ fn create_full_context_messages(
     role: "system".to_string(),
     content: system_prompt,
     agent_name: None,
+    ..Default::default()
   });
   // history messages
   let hist = conversation_history.lock().unwrap();
   for m in hist.iter() {
     messages.push(m.clone());
   }
-  // user message
-  messages.push(ChatMessage {
-    role: "user".to_string(),
-    content: user_msg,
-    agent_name: None,
-  });
+  // user message, unless the caller already appended it to the history
+  let already_last = hist
+    .last()
+    .map_or(false, |m| m.role == "user" && m.content == user_msg);
+  if !already_last {
+    messages.push(ChatMessage {
+      role: "user".to_string(),
+      content: user_msg,
+      agent_name: None,
+      ..Default::default()
+    });
+  }
   messages
+}
+
+// Augment system prompt with tool instructions if tools are available
+fn augment_system_prompt(
+  mut system_prompt: String,
+  available_tools: &[String],
+  language: &str,
+) -> String {
+  if !available_tools.is_empty() {
+    let current_date = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let cwd = std::env::current_dir()
+      .unwrap_or_default()
+      .to_string_lossy()
+      .to_string();
+    system_prompt.push_str("\n\nAvailable tools:\n");
+    for tool in available_tools {
+      match tool.as_str() {
+        "read_file" => {
+          system_prompt.push_str(
+            "        - read_file: Read file contents, including multiple range reads at once\n",
+          );
+        }
+        "apply_patch" => {
+          system_prompt
+            .push_str("        - apply_patch: applies a patch to a file using diff notation\n");
+        }
+        "bash_command" => {
+          system_prompt
+            .push_str("        - bash_command: Execute bash commands (ls, grep, find, etc.)\n");
+        }
+        "glob" => {
+          system_prompt
+            .push_str("        - glob: search for files using glob patterns like **/*.js or *\n");
+        }
+        "grep" => {
+          system_prompt.push_str("        - grep: search matching content across files in a directory using full regex syntax\n");
+        }
+        "search" => {
+          system_prompt.push_str("        - search: search online urls for a search term\n");
+        }
+        "web_fetch" => {
+          system_prompt.push_str("        - web_fetch: get page links and content of a url\n");
+        }
+        "todo_define" => {
+          system_prompt.push_str("        - todo_define: create a new named TODO list (title, description, initial tasks with optional nested subtasks)\n");
+        }
+        "todo_update" => {
+          system_prompt.push_str("        - todo_update: apply add/edit/remove/reorder operations to a named TODO's tasks, addressed by a 0-based path array (e.g. [1, 0] = subtask 0 of top-level task 1); applied atomically\n");
+        }
+        "todo_list" => {
+          system_prompt.push_str("        - todo_list: list every persisted TODO (title, description, progress) to discover and resume in-progress work\n");
+        }
+        "todo_get" => {
+          system_prompt.push_str("        - todo_get: read the full contents of a named TODO\n");
+        }
+        "todo_get_item" => {
+          system_prompt.push_str("        - todo_get_item: read one task (and its subtasks) from a named TODO by path\n");
+        }
+        "todo_set_status" => {
+          system_prompt.push_str("        - todo_set_status: set one task's status ('pending', 'in_progress', or 'done') in a named TODO\n");
+        }
+        "todo_delete" => {
+          system_prompt.push_str("        - todo_delete: delete a named TODO entirely\n");
+        }
+        _ => {}
+      }
+    }
+    // Add dynamic HTTP request tools
+    let http_defs = crate::tools::http_request::load_http_request_definitions();
+    for def in http_defs {
+      if available_tools.contains(&def.tool_definition.name) {
+        system_prompt.push_str(&format!(
+          "        - {}: {}\n",
+          def.tool_definition.name, def.tool_definition.description
+        ));
+      }
+    }
+    system_prompt.push_str("\n");
+    system_prompt.push_str("      Guidelines:\n");
+    system_prompt.push_str("        - Use read_file to examine files instead of bash_command.\n");
+    system_prompt.push_str("        - Use bash_comand for file operations like ls, rg, find... or to build a smart command for a complex task in one go\n");
+    system_prompt.push_str(
+      "        - Use bash_command for new files, complete rewrites or append to end of file\n",
+    );
+    system_prompt.push_str("        - Use apply_patch for precise file changes, unified diff patch should match exactly\n");
+    system_prompt.push_str("        - When changing multiple separate locations in one file, use one apply_patch call with multiple entries instead of multiple apply_patch calls\n");
+    system_prompt.push_str("        - Each apply_patch call uses the current file state, not old file states before applying changes to it. Do not emit overlapping or nested edits. Merge nearby changes into one apply_patch.\n");
+    system_prompt.push_str("        - Keep apply_patch as small as possible while still being unique in the file. Do not pad with large unchanged regions.\n");
+    system_prompt.push_str("        - Use write only for new files or complete rewrites.\n");
+    system_prompt.push_str("        - Be concise in your responses\n");
+    system_prompt.push_str("        - Show file paths clearly when working with files\n\n");
+    system_prompt.push_str("        - If you need new information, use search to find results and then web_fetch to inspect the page content\n\n");
+    system_prompt.push_str("        - Before calling a tool, say a brief phrase (3-6 words) in the same language as the rest of your reply, announcing what you're about to do, e.g. \"Let me check that file\" or \"Searching for it\". Say it as normal reply text, not inside the tool call itself.\n");
+    system_prompt.push_str("        - If a tool call fails or its result doesn't actually help, briefly say so (in the same language) before trying a different approach, instead of silently retrying.\n");
+    system_prompt.push_str("        - TODOs persist across restarts. Call todo_list at the start of work that might already be tracked, to find and resume an in-progress TODO instead of redefining it.\n");
+    system_prompt.push_str(&format!("        Current date: {}\n", current_date));
+    system_prompt.push_str(&format!("        Current working directory: {}\n", cwd));
+    system_prompt.push_str(&format!("        Respond in language: {}\n", language));
+  }
+
+  system_prompt
 }
 
 fn apply_agent_settings(

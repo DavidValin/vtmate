@@ -40,6 +40,8 @@ pub struct AgentSettings {
   pub sound_threshold_peak: f32,
   pub end_silence_ms: u64,
   pub voice_speed: f32,
+  #[serde(default, deserialize_with = "parse_tools")]
+  pub tools: Vec<String>,
   /// Name of the `[system_prompt]` block this prompt was pulled from, when
   /// the agent wrote `system_prompt = @<name>`. `save_settings` writes the
   /// prompt back under the same name instead of inventing a new one. Never
@@ -228,6 +230,38 @@ where
 pub const HANGOVER_MS_DEFAULT: u64 = 300;
 pub const MIN_UTTERANCE_MS_DEFAULT: u64 = 300;
 pub const OPENTTS_BASE_URL_DEFAULT: &str = "http://127.0.0.1:5500/api/tts?&vocoder=high&denoiserStrength=0.005&&speakerId=&ssml=false&ssmlNumbers=true&ssmlDates=true&ssmlCurrency=true&cache=false";
+
+/// Parse a comma-separated string into a Vec<String>. Empty values are
+/// filtered out, and "to-do" expands to all seven `todo_*` tools at once —
+/// they're meant to be used as a set, so this is the one name an agent's
+/// `tools=` line needs instead of listing them out. Repeating the alias is
+/// deduplicated, keeping first-seen order; listing an individual `todo_*`
+/// name on its own is refused outright — "to-do" is the only way to enable
+/// any of them, so an agent can never end up with a partial subset.
+fn parse_tools<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+  D: serde::de::Deserializer<'de>,
+{
+  let s = String::deserialize(deserializer)?;
+  let mut tools: Vec<String> = Vec::new();
+  for t in s.split(',').map(|t| t.trim()).filter(|t| !t.is_empty()) {
+    if t == "to-do" {
+      for name in crate::tools::todo::TOOL_NAMES {
+        if !tools.iter().any(|existing| existing == name) {
+          tools.push(name.to_string());
+        }
+      }
+    } else if crate::tools::todo::TOOL_NAMES.contains(&t) {
+      return Err(serde::de::Error::custom(format!(
+        "'{}' cannot be listed on its own; use 'to-do' to enable the todo tools as a set",
+        t
+      )));
+    } else if !tools.iter().any(|existing| existing == t) {
+      tools.push(t.to_string());
+    }
+  }
+  Ok(tools)
+}
 
 pub const DAEMON_LLM_PTT_DEFAULT: &str = "ctrl+alt+a";
 pub const DAEMON_TTS_DEFAULT: &str = "ctrl+alt+r";
@@ -1477,6 +1511,12 @@ pub fn try_load_settings(
       errors.push(format!("Agent {}: {}", agent.name, problem));
     }
 
+    if let Err(e) =
+      validate_tools(&agent.tools).map_err(|e: std::io::Error| -> Error { Error::new(e) })
+    {
+      errors.push(format!("Agent {}: {}", agent.name, e));
+    }
+
     agents.push(agent);
   }
 
@@ -1590,6 +1630,7 @@ sound_threshold_peak = 0.12
 end_silence_ms = 2500
 ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
+tools = web_fetch
 
 [agent]
 name = explainer
@@ -1605,6 +1646,7 @@ sound_threshold_peak = 0.12
 end_silence_ms = 2500
 ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
+tools = web_fetch
 
 [agent]
 name = planner
@@ -1620,6 +1662,7 @@ sound_threshold_peak = 0.12
 end_silence_ms = 2000
 ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
+tools = web_fetch
 
 [agent]
 name = Ptahhotep
@@ -1635,6 +1678,7 @@ sound_threshold_peak = 0.12
 end_silence_ms = 2500
 ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
+tools = web_fetch
 
 [agent]
 name = Aristoteles
@@ -1650,6 +1694,7 @@ sound_threshold_peak = 0.12
 end_silence_ms = 2500
 ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
+tools = web_fetch
 
 [agent]
 name = Budda
@@ -1665,6 +1710,7 @@ sound_threshold_peak = 0.12
 end_silence_ms = 2500
 ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
+tools = web_fetch
 
 [agent]
 name = Jesus Christ
@@ -2262,6 +2308,34 @@ fn validate_voice_speed(value: f32) -> Result<(), std::io::Error> {
   Ok(())
 }
 
+fn validate_tools(tools: &[String]) -> Result<(), std::io::Error> {
+  // Built-in tool names ("to-do" itself is never a real tool name here — it
+  // is expanded to the concrete todo_* names by `parse_tools` before this
+  // runs — but it's harmless to also accept it as-is).
+  let mut valid_tools: Vec<String> = crate::tools::reserved_tool_names()
+    .into_iter()
+    .map(|s| s.to_string())
+    .collect();
+  // Add dynamically loaded HTTP request tool names
+  for def in crate::tools::http_request::load_http_request_definitions() {
+    valid_tools.push(def.tool_definition.name);
+  }
+
+  for tool in tools {
+    if !valid_tools.iter().any(|t| t == tool) {
+      return Err(std::io::Error::new(
+        std::io::ErrorKind::Other,
+        format!(
+          "Unknown tool '{}'. Valid tools: {}",
+          tool,
+          valid_tools.join(", ")
+        ),
+      ));
+    }
+  }
+  Ok(())
+}
+
 // PRIVATE
 // ------------------------------------------------------------------
 
@@ -2278,4 +2352,5 @@ fn sanitize_agent_settings(agent: &mut AgentSettings) {
   agent.system_prompt = agent.system_prompt.trim_matches('"').to_string();
   // agent.ptt is a bool; no trimming needed
   agent.whisper_model_path = agent.whisper_model_path.trim_matches('"').to_string();
+  // tools is Vec<String> from the deserializer, no trimming needed
 }
