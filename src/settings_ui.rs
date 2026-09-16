@@ -1968,18 +1968,35 @@ fn text_box(text: &str, caret: usize, focused: bool, width: usize) -> String {
   )
 }
 
-/// How many of `chars` (a logical line from wherever the previous row left
-/// off) fit in the next row of at most `room` characters, and how many more
-/// past that to skip before the row after starts - a single dropped space
-/// at a word-boundary break, or nothing when the break needed no space (the
-/// whole rest of the line fits, or a single word alone exceeds `room` and
-/// has to be hard-split).
+/// How near the end of a full room-width row a stored `\n` must fall to be
+/// honored as a real line break, rather than treated as a plain space (see
+/// `wrap_prompt_row`).
+const PROMPT_NEWLINE_KEEP_WITHIN: usize = 5;
+
+/// How many of `chars` (from wherever the previous row left off) fit in the
+/// next row of at most `room` characters, and how many more past that to
+/// skip before the row after starts.
+///
+/// A `\n` within `PROMPT_NEWLINE_KEEP_WITHIN` characters of a full row is
+/// honored as an intentional break. Any earlier `\n` - typically left by
+/// whatever hard-wrapped this text at some other width before it was saved
+/// - is treated as an ordinary space instead: just another word-boundary
+/// break candidate, so the text reflows to this box's own width. A single
+/// word too long for a whole row is still hard-split, and a break's own
+/// space (or demoted `\n`) is dropped rather than carried onto either row.
 fn wrap_prompt_row(chars: &[char], room: usize) -> (usize, usize) {
+  if let Some(at) = chars.iter().take(room + 1).position(|c| *c == '\n') {
+    if at + PROMPT_NEWLINE_KEEP_WITHIN >= room {
+      return (at, 1);
+    }
+  }
   if chars.len() <= room {
     return (chars.len(), 0);
   }
-  match chars[..room].iter().rposition(|c| *c == ' ') {
-    Some(space_at) => (space_at, 1),
+  match chars[..room].iter().rposition(|c| *c == ' ' || *c == '\n') {
+    Some(break_at) => (break_at, 1),
+    // A `\n` here would already have been caught above: `room` is always
+    // within `PROMPT_NEWLINE_KEEP_WITHIN` of itself.
     None if chars.get(room) == Some(&' ') => (room, 1),
     None => (room, 0),
   }
@@ -1987,24 +2004,37 @@ fn wrap_prompt_row(chars: &[char], room: usize) -> (usize, usize) {
 
 /// Every row of `text` as `prompt_box` renders it - one entry per visual
 /// row, in order, as the char offset (into `text`) it starts at and how
-/// many characters it holds.
+/// many characters it holds. A `\n` `wrap_prompt_row` demoted to a space
+/// still occupies a char position here; `prompt_row_text` is what turns
+/// that into the row's actual displayed text.
 fn wrapped_prompt_rows(text: &str, room: usize) -> Vec<(usize, usize)> {
+  let chars: Vec<char> = text.chars().collect();
   let mut rows = Vec::new();
-  let mut offset = 0usize;
-  for line in text.split('\n') {
-    let chars: Vec<char> = line.chars().collect();
-    let mut at = 0usize;
-    loop {
-      let (take, skip) = wrap_prompt_row(&chars[at..], room);
-      rows.push((offset + at, take));
-      at += take + skip;
-      if at >= chars.len() {
-        break;
-      }
+  let mut at = 0usize;
+  loop {
+    let (take, skip) = wrap_prompt_row(&chars[at..], room);
+    rows.push((at, take));
+    at += take + skip;
+    if at >= chars.len() {
+      break;
     }
-    offset += chars.len() + 1; // the line break
+  }
+  if let Some(&(last_start, last_take)) = rows.last() {
+    let boundary = last_start + last_take;
+    // Only an honored `\n` gets a blank row after it: re-checking the same
+    // threshold `wrap_prompt_row` used, so a plain trailing space - dropped
+    // at a break same as anywhere else - does not grow a row of its own.
+    if chars.get(boundary) == Some(&'\n') && last_take + PROMPT_NEWLINE_KEEP_WITHIN >= room {
+      rows.push((chars.len(), 0));
+    }
   }
   rows
+}
+
+/// A row's displayed text, with any `\n` `wrap_prompt_row` demoted to a
+/// space shown as one.
+fn prompt_row_text(chars: &[char]) -> String {
+  chars.iter().map(|&c| if c == '\n' { ' ' } else { c }).collect()
 }
 
 /// Move the caret to the equivalent column on the visual row above/below,
@@ -2054,37 +2084,32 @@ fn prompt_box(text: &str, caret: usize, focused: bool, width: usize) -> Vec<Stri
   let room = width.saturating_sub(2).max(8);
   let max_rows = 6usize;
 
-  // every line of the prompt, cut into rows of at most `room` characters
-  // without cutting a word in half, with the offset each row starts at so
-  // the caret can be placed on one of them
-  let mut rows: Vec<(usize, String)> = Vec::new();
+  let ranges = wrapped_prompt_rows(text, room);
   let mut caret_row = 0usize;
   let mut caret_matched = false;
-  let mut offset = 0usize;
-  for line in text.split('\n') {
-    let chars: Vec<char> = line.chars().collect();
-    let mut at = 0usize;
-    loop {
-      let (take, skip) = wrap_prompt_row(&chars[at..], room);
-      let start = offset + at;
-      // A caret on the space a break drops shows at this row's end, since
-      // that space is never itself displayed.
-      if caret >= start && caret < start + take + skip {
-        caret_row = rows.len();
-        caret_matched = true;
-      }
-      rows.push((start, chars[at..at + take].iter().collect()));
-      at += take + skip;
-      if at >= chars.len() {
-        break;
-      }
+  for (i, &(start, take)) in ranges.iter().enumerate() {
+    // A caret between this row and the next (on a break's own space, or a
+    // demoted `\n`) shows at this row's end, since neither is displayed;
+    // the last row also owns its own exact end, having no next row to
+    // otherwise claim it.
+    let upper = match ranges.get(i + 1) {
+      Some(&(next_start, _)) => next_start,
+      None => start + take + 1,
+    };
+    if caret >= start && caret < upper {
+      caret_row = i;
+      caret_matched = true;
     }
-    offset += chars.len() + 1; // the line break
   }
   if !caret_matched {
     // Past every row's own range: the caret sits at the very end of the text.
-    caret_row = rows.len().saturating_sub(1);
+    caret_row = ranges.len().saturating_sub(1);
   }
+  let chars: Vec<char> = text.chars().collect();
+  let rows: Vec<(usize, String)> = ranges
+    .iter()
+    .map(|&(start, take)| (start, prompt_row_text(&chars[start..start + take])))
+    .collect();
 
   let first = caret_row
     .saturating_sub(max_rows - 1)
@@ -2374,5 +2399,45 @@ mod prompt_wrap_tests {
   fn the_column_clamps_to_a_shorter_destination_row() {
     let text = "the quick\nshort";
     assert_eq!(move_prompt_caret_row(text, 8, 10, true), Some(10 + 5));
+  }
+
+  fn rendered_rows_of(text: &str, room: usize) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    wrapped_prompt_rows(text, room)
+      .into_iter()
+      .map(|(start, take)| prompt_row_text(&chars[start..start + take]))
+      .collect()
+  }
+
+  #[test]
+  fn a_stored_newline_far_from_the_row_end_is_demoted_to_a_space() {
+    // Nowhere near the end of a 20-wide row, so it reflows instead of
+    // forcing a break - as if some other tool hard-wrapped this at a
+    // narrower width before it was saved.
+    let text = "abc\ndef ghi jkl mno";
+    assert_eq!(rendered_rows_of(text, 20), vec!["abc def ghi jkl mno"]);
+  }
+
+  #[test]
+  fn a_stored_newline_near_the_row_end_is_honored() {
+    // room=8: 7 characters in, within PROMPT_NEWLINE_KEEP_WITHIN (5) of the
+    // end of a full row - kept as a real break.
+    let text = "abcdefg\nh";
+    assert_eq!(rendered_rows_of(text, 8), vec!["abcdefg", "h"]);
+  }
+
+  #[test]
+  fn an_honored_trailing_newline_still_leaves_a_blank_row() {
+    let text = "abcdefg\n";
+    assert_eq!(rendered_rows_of(text, 8), vec!["abcdefg", ""]);
+  }
+
+  #[test]
+  fn an_ordinary_trailing_space_does_not_grow_a_spurious_blank_row() {
+    // The break's own space is dropped at the end of the text same as
+    // anywhere else - unlike an honored `\n`, it must not leave a row of
+    // its own behind.
+    let text = "aaaaaaaaaa ";
+    assert_eq!(rendered_rows_of(text, 10), vec!["aaaaaaaaaa"]);
   }
 }
