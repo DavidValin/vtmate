@@ -250,7 +250,7 @@ fn ensure_supertonic3_model(home: &str, embedded_dest: &Path, is_release: bool) 
     let mut needs_download = !path.exists();
     if !needs_download && is_release {
       match sha256_hex(&path) {
-        Ok(h) if h == expected => {}
+        Ok(h) if h == expected => println!("cargo:warning=File {} exists and checksum OK", rel),
         Ok(h) => {
           println!(
             "cargo:warning=Checksum mismatch for {} (expected {}, got {}), re-downloading",
@@ -303,7 +303,9 @@ fn ensure_speaker_model(home: &str, embedded_dest: &Path, is_release: bool) {
   let mut needs_download = !path.exists();
   if !needs_download && is_release {
     match sha256_hex(&path) {
-      Ok(h) if h == SPEAKER_MODEL_SHA256 => {}
+      Ok(h) if h == SPEAKER_MODEL_SHA256 => {
+        println!("cargo:warning=File speaker_encoder.onnx exists and checksum OK")
+      }
       Ok(h) => {
         println!(
           "cargo:warning=Checksum mismatch for speaker_encoder.onnx (expected {}, got {}), re-downloading",
