@@ -210,8 +210,9 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let agents = match config::load_settings(&agents_path, &args) {
       Ok(v) => v,
       Err(e) => {
-        crate::log::log("error", &format!("Failed to load settings: {}", e));
-        util::terminate(1);
+        let _ = terminal::disable_raw_mode();
+        eprintln!("✗ Failed to load settings: {}", e);
+        std::process::exit(1);
       }
     };
 
@@ -220,8 +221,9 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let settings = match config::select_agent(&agents, args.agent.as_deref(), &general) {
       Ok(a) => a,
       Err(e) => {
-        crate::log::log("error", &e);
-        util::terminate(1);
+        let _ = terminal::disable_raw_mode();
+        eprintln!("✗ {}", e);
+        std::process::exit(1);
       }
     };
 
@@ -700,7 +702,9 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let agents = match config::load_settings(&agents_path, &args) {
     Ok(v) => v,
     Err(e) => {
-      print!("✗ Failed to load settings: {}", e);
+      let _ = terminal::disable_raw_mode();
+      eprintln!("✗ Failed to load settings: {}", e);
+      util::EXIT_LINE_PRINTED.store(true, Ordering::Relaxed);
       thread::sleep(Duration::from_millis(300));
       util::terminate(1);
     }
@@ -710,7 +714,9 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let settings = match config::select_agent(&agents, args.agent.as_deref(), &general) {
     Ok(a) => a,
     Err(e) => {
-      print!("✗ {}", e);
+      let _ = terminal::disable_raw_mode();
+      eprintln!("✗ {}", e);
+      util::EXIT_LINE_PRINTED.store(true, Ordering::Relaxed);
       thread::sleep(Duration::from_millis(300));
       util::terminate(1);
     }
