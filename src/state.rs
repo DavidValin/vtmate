@@ -385,7 +385,7 @@ pub fn increase_voice_speed() {
 pub fn decrease_voice_speed() {
   let state = GLOBAL_STATE.get().expect("AppState not initialized");
   let mut cur = state.speed.load(Ordering::Relaxed);
-  if cur > 2 {
+  if cur > 6 {
     cur -= 1;
     state.speed.store(cur, Ordering::Relaxed);
     persist_current_voice_speed(state);

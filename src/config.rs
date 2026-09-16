@@ -682,7 +682,7 @@ Explanation on the [agent] fields (in \x1b[90m~/.vtmate/agents\x1b[0m):
       voices, e.g. \"bm_daniel.5+am_puck.5\" (50% of
       bm_daniel and 50% of am_puck).
   voice_speed
-    The voice speed, from 0.2 to 1.8.
+    The voice speed, from 0.6 to 1.8.
   provider
     The system it will use to query the llm.
 
@@ -2245,10 +2245,10 @@ fn validate_end_silence_ms(value: u64) -> Result<(), std::io::Error> {
 }
 
 fn validate_voice_speed(value: f32) -> Result<(), std::io::Error> {
-  if value < 0.2 || value > 1.8 {
+  if value < 0.6 || value > 1.8 {
     return Err(std::io::Error::new(
       std::io::ErrorKind::Other,
-      "'voice_speed' must be between 0.2 and 1.8",
+      "'voice_speed' must be between 0.6 and 1.8",
     ));
   }
   // Ensure one decimal place only
