@@ -498,6 +498,10 @@ pub fn conversation_thread(
         state.conversation_paused.store(false, Ordering::Relaxed);
         // start rendering for this turn (agent response to user query)
         state.processing_response.store(true, Ordering::Relaxed);
+        // Covers the whole turn, including the LLM-thinking and TTS-synthesis
+        // windows before any audio is audible, so the mic can barge in during
+        // those too (see `reply_in_flight`'s doc comment in state.rs).
+        state.reply_in_flight.store(true, Ordering::Relaxed);
 
         crate::log::log("debug", &format!("Received audio chunk of len {}", utt.audio.data.len()));
         crate::log::log("debug", "Transcribing utterance...");
@@ -520,6 +524,7 @@ pub fn conversation_thread(
         // Daemon dictation: the transcript goes to the clipboard/paste, not to the LLM.
         if utt.kind == UtteranceKind::Paste {
           state.processing_response.store(false, Ordering::Relaxed);
+          state.reply_in_flight.store(false, Ordering::Relaxed);
           if user_text.is_empty() {
             crate::log::log("debug", "Transcription returned empty string; nothing to paste");
           } else if let Some(tx) = &tx_action {
@@ -533,6 +538,7 @@ pub fn conversation_thread(
         if user_text.is_empty() {
           crate::log::log("debug", "Transcription returned empty string");
           state.processing_response.store(false, Ordering::Relaxed);
+          state.reply_in_flight.store(false, Ordering::Relaxed);
           continue;
         }
         // Daemon LLM turn with selected text: speech first, then the selection.
@@ -577,6 +583,9 @@ pub fn conversation_thread(
           let _ = stop_play_tx.try_send(());
           // Signal playback is done for user input
           state.playback.playback_active.store(false, Ordering::Relaxed);
+          // No reply starts here - the debate loop picks this subject up on
+          // its own next turn, via `handle_reply`, which manages the flag itself.
+          state.reply_in_flight.store(false, Ordering::Relaxed);
           continue;
         }
 
@@ -687,8 +696,10 @@ pub fn conversation_thread(
         ui_thinking_cloned_for_closure.store(false, Ordering::Relaxed);
         // Nothing was produced (request failed / interrupted before the first
         // token): no audio will ever clear the flag, so clear it here.
-        if reply_accum.lock().map(|a| a.trim().is_empty()).unwrap_or(true) {
+        let produced_nothing = reply_accum.lock().map(|a| a.trim().is_empty()).unwrap_or(true);
+        if produced_nothing {
           state.processing_response.store(false, Ordering::Relaxed);
+          state.reply_in_flight.store(false, Ordering::Relaxed);
         }
         // Prepare clones for post-closure use
         let speaker_arc_for_after = speaker_arc.clone();
@@ -713,6 +724,14 @@ pub fn conversation_thread(
         }
         // Persist conversation after streaming (same as handle_reply does at line 970)
         perform_save(&conversation_history, &settings_clone);
+        if !produced_nothing {
+          // Hold `reply_in_flight` through the trailing synthesis/playback
+          // too: phrases here are queued without waiting for each one's
+          // synthesis to finish, so without this wait the flag would drop
+          // while a later phrase is still being synthesized or played.
+          wait_for_playback(state, &interrupt_counter, my_interrupt);
+          state.reply_in_flight.store(false, Ordering::Relaxed);
+        }
       }
       // Keeps the top-of-loop checks (including `debate_pending_submit`)
       // running while idle in conversation mode: starting a debate from the
@@ -991,6 +1010,7 @@ fn handle_undo(
     drop(h);
     // Reset processing flag after interrupt
     state.processing_response.store(false, Ordering::Relaxed);
+    state.reply_in_flight.store(false, Ordering::Relaxed);
     interrupt_counter.fetch_add(1, Ordering::SeqCst);
     let _ = stop_play_tx.try_send(());
     let _ = tx_ui.send("user_interrupt_show|".to_string());
@@ -1054,6 +1074,10 @@ fn handle_reply(
   // not held through playback: the bottom bar already shows the play icon
   // for that, checked ahead of the spinner.
   state.ui.thinking.store(true, Ordering::Relaxed);
+  // Covers the whole turn - LLM streaming, TTS synthesis and playback - so
+  // the mic's barge-in check (record.rs) can interrupt at any point in it.
+  // Cleared on every path out of this function, below.
+  state.reply_in_flight.store(true, Ordering::Relaxed);
   // Speaker for incremental buffering
   let speaker_arc = Arc::new(Mutex::new(PhraseSpeaker::new()));
   let reply_accum = Arc::new(Mutex::new(String::new()));
@@ -1158,6 +1182,7 @@ fn handle_reply(
     crate::html_export::close_turn();
     // Persist conversation on interruption
     perform_save(&conversation_history, settings);
+    state.reply_in_flight.store(false, Ordering::Relaxed);
     return None;
   }
 
@@ -1211,6 +1236,7 @@ fn handle_reply(
   // the same reply. The next turn opening closes it, and so does exiting, so
   // audio that arrives late still lands in the turn it belongs to.
   perform_save(&conversation_history, settings);
+  state.reply_in_flight.store(false, Ordering::Relaxed);
   Some(reply)
 }
 

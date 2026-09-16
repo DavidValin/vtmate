@@ -89,6 +89,13 @@ pub struct AppState {
   pub interrupt_counter: Arc<AtomicU64>,
   pub recording_paused: Arc<AtomicBool>,
   pub processing_response: Arc<AtomicBool>,
+  /// True for the whole span of a reply, from the moment a user message is
+  /// accepted until its audio has fully finished playing (or the turn was
+  /// interrupted). The mic callback (`record.rs`) ORs this into its
+  /// barge-in check, so speaking up while the LLM is still thinking, or
+  /// between TTS phrases, interrupts just as fast as speaking over audio
+  /// that is already playing.
+  pub reply_in_flight: Arc<AtomicBool>,
   pub ptt: Arc<AtomicBool>,
   /// Voice detection peak, in thousandths (0.125 is stored as 125). An atomic
   /// because the audio callback reads it on every buffer, and the settings
@@ -212,6 +219,7 @@ impl AppState {
       interrupt_counter: Arc::new(AtomicU64::new(0)),
       recording_paused: Arc::new(AtomicBool::new(false)),
       processing_response: Arc::new(AtomicBool::new(false)),
+      reply_in_flight: Arc::new(AtomicBool::new(false)),
       ptt: Arc::new(AtomicBool::new(false)),
       sound_threshold_peak: Arc::new(AtomicU32::new(0)),
       end_silence_ms: Arc::new(AtomicU64::new(0)),
@@ -367,7 +375,7 @@ pub fn get_speed() -> f32 {
 pub fn increase_voice_speed() {
   let state = GLOBAL_STATE.get().expect("AppState not initialized");
   let mut cur = state.speed.load(Ordering::Relaxed);
-  if cur < 80 {
+  if cur < 18 {
     cur += 1;
     state.speed.store(cur, Ordering::Relaxed);
     persist_current_voice_speed(state);
@@ -377,7 +385,7 @@ pub fn increase_voice_speed() {
 pub fn decrease_voice_speed() {
   let state = GLOBAL_STATE.get().expect("AppState not initialized");
   let mut cur = state.speed.load(Ordering::Relaxed);
-  if cur > 5 {
+  if cur > 6 {
     cur -= 1;
     state.speed.store(cur, Ordering::Relaxed);
     persist_current_voice_speed(state);

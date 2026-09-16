@@ -28,6 +28,17 @@ use std::time::Duration;
 /// unrelated, actual OpenAI hosted api and has no baseurl of its own.
 pub const LOCAL_PROVIDERS: &[&str] = &["ollama", "llama-server", "openai-compatible-api"];
 
+/// Each local provider's well-known default baseurl - `None` for
+/// `openai-compatible-api`, which has no default (see above). Used by the
+/// settings popup to fill in `baseurl` when the provider field changes.
+pub fn default_baseurl_for(provider: &str) -> Option<&'static str> {
+  match provider {
+    "ollama" => Some("http://127.0.0.1:11434"),
+    "llama-server" => Some("http://localhost:8080"),
+    _ => None,
+  }
+}
+
 /// Hosted providers handled by the `llm` crate backends (an api key is
 /// needed). Named with an `-api` suffix so they read clearly next to their
 /// cli-subscription counterpart in the settings picker (`anthropic-api` /
@@ -246,7 +257,10 @@ pub async fn stream_response_into(
   // the connection but stops sending bytes mid-stream (no close, no data) hangs here
   // forever and is deaf to Esc/Undo, since those are only checked between chunks.
   let stall_timeout = Duration::from_secs(120);
-  let poll_interval = Duration::from_millis(250);
+  // Also the ceiling on how stale `interrupted()` can be during a gap
+  // between chunks (a barge-in mid-"thinking" pause), so that gap stays
+  // imperceptible.
+  let poll_interval = Duration::from_millis(80);
   let mut since_last_chunk = Duration::ZERO;
 
   loop {

@@ -720,10 +720,13 @@ fn place_caret(ui: &mut SettingsUi, forward: bool) {
   };
 }
 
-/// Move the caret one line up or down inside the prompt. `false` when there
-/// is no such line, so the arrow moves to another field instead.
+/// Move the caret one visual row up or down inside the prompt box - the row
+/// actually rendered, which word-wrap can split a single `\n`-delimited
+/// line into several of. `false` when there is no such row, so the arrow
+/// moves to another field instead.
 fn move_caret_line(ui: &mut SettingsUi, down: bool) -> bool {
-  match crate::text_field::move_caret_vertical(&ui.form.draft.system_prompt, ui.form.caret, down) {
+  let room = system_prompt_room();
+  match move_prompt_caret_row(&ui.form.draft.system_prompt, ui.form.caret, room, down) {
     Some(caret) => {
       ui.form.caret = caret;
       true
@@ -801,6 +804,7 @@ fn step_value(ui: &mut SettingsUi, field: Field, direction: i32) {
     }
     Field::Provider => {
       draft.provider = cycle(&providers(), &draft.provider, direction);
+      maybe_default_baseurl(draft);
     }
     Field::Model if !model_options.is_empty() => {
       draft.model = cycle(&model_options, &draft.model, direction);
@@ -810,8 +814,8 @@ fn step_value(ui: &mut SettingsUi, field: Field, direction: i32) {
     }
     Field::Ptt => draft.ptt = !draft.ptt,
     Field::VoiceSpeed => {
-      let steps = ((draft.voice_speed - 1.0) * 10.0).round() as i32 + direction;
-      draft.voice_speed = 1.0 + (steps.clamp(0, 80) as f32) / 10.0;
+      let steps = ((draft.voice_speed - 0.6) * 10.0).round() as i32 + direction;
+      draft.voice_speed = 0.6 + (steps.clamp(0, 12) as f32) / 10.0;
     }
     Field::Threshold => {
       let steps = (draft.sound_threshold_peak * 20.0).round() as i32 + direction;
@@ -826,6 +830,24 @@ fn step_value(ui: &mut SettingsUi, field: Field, direction: i32) {
   if field == Field::Provider {
     refresh_cli_models(ui);
     maybe_spawn_ollama_poller(ui);
+  }
+}
+
+/// Fills `baseurl` with the new provider's own default, unless it already
+/// holds something other than one of the known local-provider defaults - a
+/// value the user typed in by hand, which is left alone.
+fn maybe_default_baseurl(draft: &mut crate::config::AgentSettings) {
+  let Some(default) = crate::llm::default_baseurl_for(&draft.provider) else {
+    return;
+  };
+  let current = draft.baseurl.trim();
+  let looks_hand_typed = !current.is_empty()
+    && crate::llm::LOCAL_PROVIDERS
+      .iter()
+      .filter_map(|p| crate::llm::default_baseurl_for(p))
+      .all(|known_default| current != known_default);
+  if !looks_hand_typed {
+    draft.baseurl = default.to_string();
   }
 }
 
@@ -874,7 +896,7 @@ impl Field {
       Field::Tts => "←/→ pick the voice engine; it decides the languages and voices below",
       Field::Language => "←/→ pick a language of this engine; also used to transcribe you",
       Field::Voice => "←/→ pick a voice of this engine and language",
-      Field::VoiceSpeed => "←/→ how fast the agent speaks (1.0 to 9.0)",
+      Field::VoiceSpeed => "←/→ how fast the agent speaks (0.6 to 1.8)",
       Field::Ptt => "←/→ ON holds SPACE to talk, OFF listens and cuts on silence (LIVE)",
       Field::Provider => "←/→ where the answers come from; hosted ones need an api key",
       Field::BaseUrl => "host and port of a local server, empty for a hosted provider's default",
@@ -1597,8 +1619,8 @@ fn column_widths(inner: usize) -> (Vec<usize>, Option<usize>) {
 
 fn form_lines(ui: &SettingsUi, inner: usize, rows: u16) -> (String, Vec<String>, Vec<String>) {
   let form = &ui.form;
-  let label_width = 15usize;
-  let value_width = inner.saturating_sub(label_width + 1).max(10);
+  let label_width = FORM_LABEL_WIDTH;
+  let value_width = field_value_width(inner);
   let mut lines: Vec<String> = Vec::new();
   // where each field starts, so the focused one can be scrolled into view
   let mut anchors: Vec<usize> = Vec::new();
@@ -1810,7 +1832,7 @@ fn field_value(
   if field.is_slider() {
     let (position, text) = match field {
       Field::VoiceSpeed => (
-        ((agent.voice_speed - 1.0) / 8.0).clamp(0.0, 1.0),
+        ((agent.voice_speed - 0.6) / 1.2).clamp(0.0, 1.0),
         format!("{:.1}x", agent.voice_speed),
       ),
       Field::Threshold => (
@@ -1946,39 +1968,127 @@ fn text_box(text: &str, caret: usize, focused: bool, width: usize) -> String {
   )
 }
 
+/// How many of `chars` (from wherever the previous row left off) fit in the
+/// next row of at most `room` characters, and how many more past that to
+/// skip before the row after starts.
+///
+/// A `\n` always ends the row right there, whether it was just typed with
+/// Enter or loaded from the agents file. A single word too long for a
+/// whole row is still hard-split, and a break's own space is dropped
+/// rather than carried onto either row.
+fn wrap_prompt_row(chars: &[char], room: usize) -> (usize, usize) {
+  if let Some(at) = chars.iter().take(room + 1).position(|c| *c == '\n') {
+    return (at, 1);
+  }
+  if chars.len() <= room {
+    return (chars.len(), 0);
+  }
+  match chars[..room].iter().rposition(|c| *c == ' ') {
+    Some(space_at) => (space_at, 1),
+    None if chars.get(room) == Some(&' ') => (room, 1),
+    None => (room, 0),
+  }
+}
+
+/// Every row of `text` as `prompt_box` renders it - one entry per visual
+/// row, in order, as the char offset (into `text`) it starts at and how
+/// many characters it holds.
+fn wrapped_prompt_rows(text: &str, room: usize) -> Vec<(usize, usize)> {
+  let chars: Vec<char> = text.chars().collect();
+  let mut rows = Vec::new();
+  let mut at = 0usize;
+  loop {
+    let (take, skip) = wrap_prompt_row(&chars[at..], room);
+    rows.push((at, take));
+    at += take + skip;
+    if at >= chars.len() {
+      break;
+    }
+  }
+  if let Some(&(last_start, last_take)) = rows.last() {
+    let boundary = last_start + last_take;
+    // A trailing `\n` leaves a blank row after it; an ordinary trailing
+    // space, dropped at a break same as anywhere else, does not.
+    if chars.get(boundary) == Some(&'\n') {
+      rows.push((chars.len(), 0));
+    }
+  }
+  rows
+}
+
+/// Move the caret to the equivalent column on the visual row above/below,
+/// the row `prompt_box` actually renders - which a word-wrapped line splits
+/// into several, unlike the `\n`-delimited lines `text_field`'s generic
+/// vertical movement works from. `None` at the box's first (going up) or
+/// last (going down) row, so the caller can fall back to leaving the field.
+fn move_prompt_caret_row(text: &str, caret: usize, room: usize, down: bool) -> Option<usize> {
+  let rows = wrapped_prompt_rows(text, room);
+  let row_idx = rows.iter().rposition(|&(start, _)| caret >= start)?;
+  let (row_start, _) = rows[row_idx];
+  let column = caret - row_start;
+  if down {
+    let &(next_start, next_len) = rows.get(row_idx + 1)?;
+    Some(next_start + column.min(next_len))
+  } else {
+    if row_idx == 0 {
+      return None;
+    }
+    let (prev_start, prev_len) = rows[row_idx - 1];
+    Some(prev_start + column.min(prev_len))
+  }
+}
+
+/// Label column width every form row's field name is cut/padded to.
+const FORM_LABEL_WIDTH: usize = 15;
+
+/// Room left for a field's value once `FORM_LABEL_WIDTH` and the space after
+/// it are taken from `inner` (the popup's full interior width).
+fn field_value_width(inner: usize) -> usize {
+  inner.saturating_sub(FORM_LABEL_WIDTH + 1).max(10)
+}
+
+/// The System Prompt box's current wrap width - the same chain `draw` and
+/// `form_lines` use to size it from the live terminal, so caret movement
+/// wraps exactly where the box renders.
+fn system_prompt_room() -> usize {
+  let (cols, _rows) = terminal::size().unwrap_or((80, 24));
+  let width = cols.saturating_sub(4).min(120).max(30);
+  let inner = width as usize - 4;
+  field_value_width(inner).saturating_sub(2).max(8)
+}
+
 /// The prompt as an editable block, wrapped to the width of the box so no
 /// part of a long line is hidden, and scrolled to wherever the caret is.
 fn prompt_box(text: &str, caret: usize, focused: bool, width: usize) -> Vec<String> {
   let room = width.saturating_sub(2).max(8);
   let max_rows = 6usize;
 
-  // every line of the prompt, cut into rows of `room` characters, with the
-  // offset each row starts at so the caret can be placed on one of them
-  let mut rows: Vec<(usize, String)> = Vec::new();
+  let ranges = wrapped_prompt_rows(text, room);
   let mut caret_row = 0usize;
-  let mut offset = 0usize;
-  for line in text.split('\n') {
-    let chars: Vec<char> = line.chars().collect();
-    let mut at = 0usize;
-    loop {
-      let take = room.min(chars.len() - at);
-      let start = offset + at;
-      // the caret sits on this row when it falls inside it, or right at its
-      // end when the line does not wrap any further
-      if caret >= start
-        && caret <= start + take
-        && (caret < start + take || at + take >= chars.len())
-      {
-        caret_row = rows.len();
-      }
-      rows.push((start, chars[at..at + take].iter().collect()));
-      at += take;
-      if at >= chars.len() {
-        break;
-      }
+  let mut caret_matched = false;
+  for (i, &(start, take)) in ranges.iter().enumerate() {
+    // A caret between this row and the next (on a break's own space, or a
+    // demoted `\n`) shows at this row's end, since neither is displayed;
+    // the last row also owns its own exact end, having no next row to
+    // otherwise claim it.
+    let upper = match ranges.get(i + 1) {
+      Some(&(next_start, _)) => next_start,
+      None => start + take + 1,
+    };
+    if caret >= start && caret < upper {
+      caret_row = i;
+      caret_matched = true;
     }
-    offset += chars.len() + 1; // the line break
   }
+  if !caret_matched {
+    // Past every row's own range: the caret sits at the very end of the text.
+    caret_row = ranges.len().saturating_sub(1);
+  }
+  let chars: Vec<char> = text.chars().collect();
+  let rows: Vec<(usize, String)> = ranges
+    .iter()
+    .map(|&(start, take)| (start, chars[start..start + take].iter().collect()))
+    .collect();
 
   let first = caret_row
     .saturating_sub(max_rows - 1)
@@ -2192,4 +2302,113 @@ fn scroll_for(cursor: usize, total: usize, room: usize) -> usize {
     return 0;
   }
   (cursor + 1 - room).min(total.saturating_sub(room))
+}
+
+#[cfg(test)]
+mod prompt_wrap_tests {
+  use super::*;
+
+  fn chars(s: &str) -> Vec<char> {
+    s.chars().collect()
+  }
+
+  fn rows_of(text: &str, room: usize) -> Vec<String> {
+    let chars = chars(text);
+    let mut rows = Vec::new();
+    let mut at = 0;
+    loop {
+      let (take, skip) = wrap_prompt_row(&chars[at..], room);
+      rows.push(chars[at..at + take].iter().collect::<String>());
+      at += take + skip;
+      if at >= chars.len() {
+        break;
+      }
+    }
+    rows
+  }
+
+  #[test]
+  fn a_word_that_fits_is_never_split() {
+    assert_eq!(rows_of("hello world", 5), vec!["hello", "world"]);
+  }
+
+  #[test]
+  fn the_break_space_is_dropped_not_carried() {
+    for row in rows_of("the quick brown fox", 10) {
+      assert!(!row.starts_with(' ') && !row.ends_with(' '), "{:?}", row);
+    }
+    assert_eq!(rows_of("the quick brown fox", 10), vec!["the quick", "brown fox"]);
+  }
+
+  #[test]
+  fn a_word_longer_than_the_row_is_hard_split() {
+    assert_eq!(rows_of("supercalifragilistic", 5), vec!["super", "calif", "ragil", "istic"]);
+  }
+
+  #[test]
+  fn a_line_that_fits_is_one_row() {
+    assert_eq!(rows_of("short", 10), vec!["short"]);
+  }
+
+  #[test]
+  fn moving_down_lands_on_the_actual_wrapped_row_not_the_next_newline_line() {
+    let text = "the quick brown fox\nshort";
+    // "the quick brown fox" wraps into two rows at width 10 ("the quick" /
+    // "brown fox"); moving down from inside the first must land on its own
+    // second row, not skip straight to "short".
+    assert_eq!(move_prompt_caret_row(text, 3, 10, true), Some(13));
+    assert_eq!(move_prompt_caret_row(text, 13, 10, true), Some(23));
+  }
+
+  #[test]
+  fn moving_up_mirrors_moving_down() {
+    let text = "the quick brown fox\nshort";
+    assert_eq!(move_prompt_caret_row(text, 23, 10, false), Some(13));
+    assert_eq!(move_prompt_caret_row(text, 13, 10, false), Some(3));
+  }
+
+  #[test]
+  fn there_is_no_row_past_the_first_or_last() {
+    let text = "the quick brown fox\nshort";
+    assert_eq!(move_prompt_caret_row(text, 3, 10, false), None);
+    assert_eq!(move_prompt_caret_row(text, 23, 10, true), None);
+  }
+
+  #[test]
+  fn the_column_clamps_to_a_shorter_destination_row() {
+    let text = "the quick\nshort";
+    assert_eq!(move_prompt_caret_row(text, 8, 10, true), Some(10 + 5));
+  }
+
+  fn rendered_rows_of(text: &str, room: usize) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    wrapped_prompt_rows(text, room)
+      .into_iter()
+      .map(|(start, take)| chars[start..start + take].iter().collect())
+      .collect()
+  }
+
+  #[test]
+  fn a_stored_newline_always_breaks_regardless_of_position() {
+    // Position 3 of a 30-wide row is nowhere near its end, but a `\n` -
+    // whether just typed with Enter or loaded from the agents file -
+    // always breaks the row right where it is.
+    let text = "abc\ndef ghi jkl mno";
+    assert_eq!(rendered_rows_of(text, 30), vec!["abc", "def ghi jkl mno"]);
+  }
+
+  #[test]
+  fn a_trailing_newline_still_leaves_a_blank_row() {
+    let text = "abcdefghij\n";
+    assert_eq!(rendered_rows_of(text, 30), vec!["abcdefghij", ""]);
+  }
+
+  #[test]
+  fn an_ordinary_trailing_space_does_not_grow_a_spurious_blank_row() {
+    // The break's own space is dropped at the end of the text same as
+    // anywhere else - unlike a trailing `\n`, it must not leave a row of
+    // its own behind.
+    let text = "aaaaaaaaaa ";
+    assert_eq!(rendered_rows_of(text, 10), vec!["aaaaaaaaaa"]);
+  }
 }

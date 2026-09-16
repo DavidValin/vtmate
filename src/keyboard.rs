@@ -633,6 +633,7 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
       let _ = ctx.stop_play_tx.try_send(());
       thread::sleep(Duration::from_millis(10));
       state.processing_response.store(false, Ordering::Relaxed);
+      state.reply_in_flight.store(false, Ordering::Relaxed);
       if state.debate_enabled.load(Ordering::SeqCst) {
         // only send the message once when we transition from running to paused
         if !state.debate_paused.load(Ordering::SeqCst) {
