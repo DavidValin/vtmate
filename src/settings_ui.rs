@@ -801,6 +801,7 @@ fn step_value(ui: &mut SettingsUi, field: Field, direction: i32) {
     }
     Field::Provider => {
       draft.provider = cycle(&providers(), &draft.provider, direction);
+      maybe_default_baseurl(draft);
     }
     Field::Model if !model_options.is_empty() => {
       draft.model = cycle(&model_options, &draft.model, direction);
@@ -826,6 +827,24 @@ fn step_value(ui: &mut SettingsUi, field: Field, direction: i32) {
   if field == Field::Provider {
     refresh_cli_models(ui);
     maybe_spawn_ollama_poller(ui);
+  }
+}
+
+/// Fills `baseurl` with the new provider's own default, unless it already
+/// holds something other than one of the known local-provider defaults - a
+/// value the user typed in by hand, which is left alone.
+fn maybe_default_baseurl(draft: &mut crate::config::AgentSettings) {
+  let Some(default) = crate::llm::default_baseurl_for(&draft.provider) else {
+    return;
+  };
+  let current = draft.baseurl.trim();
+  let looks_hand_typed = !current.is_empty()
+    && crate::llm::LOCAL_PROVIDERS
+      .iter()
+      .filter_map(|p| crate::llm::default_baseurl_for(p))
+      .all(|known_default| current != known_default);
+  if !looks_hand_typed {
+    draft.baseurl = default.to_string();
   }
 }
 

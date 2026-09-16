@@ -28,6 +28,17 @@ use std::time::Duration;
 /// unrelated, actual OpenAI hosted api and has no baseurl of its own.
 pub const LOCAL_PROVIDERS: &[&str] = &["ollama", "llama-server", "openai-compatible-api"];
 
+/// Each local provider's well-known default baseurl - `None` for
+/// `openai-compatible-api`, which has no default (see above). Used by the
+/// settings popup to fill in `baseurl` when the provider field changes.
+pub fn default_baseurl_for(provider: &str) -> Option<&'static str> {
+  match provider {
+    "ollama" => Some("http://127.0.0.1:11434"),
+    "llama-server" => Some("http://localhost:8080"),
+    _ => None,
+  }
+}
+
 /// Hosted providers handled by the `llm` crate backends (an api key is
 /// needed). Named with an `-api` suffix so they read clearly next to their
 /// cli-subscription counterpart in the settings picker (`anthropic-api` /
