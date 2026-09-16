@@ -720,10 +720,13 @@ fn place_caret(ui: &mut SettingsUi, forward: bool) {
   };
 }
 
-/// Move the caret one line up or down inside the prompt. `false` when there
-/// is no such line, so the arrow moves to another field instead.
+/// Move the caret one visual row up or down inside the prompt box - the row
+/// actually rendered, which word-wrap can split a single `\n`-delimited
+/// line into several of. `false` when there is no such row, so the arrow
+/// moves to another field instead.
 fn move_caret_line(ui: &mut SettingsUi, down: bool) -> bool {
-  match crate::text_field::move_caret_vertical(&ui.form.draft.system_prompt, ui.form.caret, down) {
+  let room = system_prompt_room();
+  match move_prompt_caret_row(&ui.form.draft.system_prompt, ui.form.caret, room, down) {
     Some(caret) => {
       ui.form.caret = caret;
       true
@@ -1616,8 +1619,8 @@ fn column_widths(inner: usize) -> (Vec<usize>, Option<usize>) {
 
 fn form_lines(ui: &SettingsUi, inner: usize, rows: u16) -> (String, Vec<String>, Vec<String>) {
   let form = &ui.form;
-  let label_width = 15usize;
-  let value_width = inner.saturating_sub(label_width + 1).max(10);
+  let label_width = FORM_LABEL_WIDTH;
+  let value_width = field_value_width(inner);
   let mut lines: Vec<String> = Vec::new();
   // where each field starts, so the focused one can be scrolled into view
   let mut anchors: Vec<usize> = Vec::new();
@@ -1982,6 +1985,69 @@ fn wrap_prompt_row(chars: &[char], room: usize) -> (usize, usize) {
   }
 }
 
+/// Every row of `text` as `prompt_box` renders it - one entry per visual
+/// row, in order, as the char offset (into `text`) it starts at and how
+/// many characters it holds.
+fn wrapped_prompt_rows(text: &str, room: usize) -> Vec<(usize, usize)> {
+  let mut rows = Vec::new();
+  let mut offset = 0usize;
+  for line in text.split('\n') {
+    let chars: Vec<char> = line.chars().collect();
+    let mut at = 0usize;
+    loop {
+      let (take, skip) = wrap_prompt_row(&chars[at..], room);
+      rows.push((offset + at, take));
+      at += take + skip;
+      if at >= chars.len() {
+        break;
+      }
+    }
+    offset += chars.len() + 1; // the line break
+  }
+  rows
+}
+
+/// Move the caret to the equivalent column on the visual row above/below,
+/// the row `prompt_box` actually renders - which a word-wrapped line splits
+/// into several, unlike the `\n`-delimited lines `text_field`'s generic
+/// vertical movement works from. `None` at the box's first (going up) or
+/// last (going down) row, so the caller can fall back to leaving the field.
+fn move_prompt_caret_row(text: &str, caret: usize, room: usize, down: bool) -> Option<usize> {
+  let rows = wrapped_prompt_rows(text, room);
+  let row_idx = rows.iter().rposition(|&(start, _)| caret >= start)?;
+  let (row_start, _) = rows[row_idx];
+  let column = caret - row_start;
+  if down {
+    let &(next_start, next_len) = rows.get(row_idx + 1)?;
+    Some(next_start + column.min(next_len))
+  } else {
+    if row_idx == 0 {
+      return None;
+    }
+    let (prev_start, prev_len) = rows[row_idx - 1];
+    Some(prev_start + column.min(prev_len))
+  }
+}
+
+/// Label column width every form row's field name is cut/padded to.
+const FORM_LABEL_WIDTH: usize = 15;
+
+/// Room left for a field's value once `FORM_LABEL_WIDTH` and the space after
+/// it are taken from `inner` (the popup's full interior width).
+fn field_value_width(inner: usize) -> usize {
+  inner.saturating_sub(FORM_LABEL_WIDTH + 1).max(10)
+}
+
+/// The System Prompt box's current wrap width - the same chain `draw` and
+/// `form_lines` use to size it from the live terminal, so caret movement
+/// wraps exactly where the box renders.
+fn system_prompt_room() -> usize {
+  let (cols, _rows) = terminal::size().unwrap_or((80, 24));
+  let width = cols.saturating_sub(4).min(120).max(30);
+  let inner = width as usize - 4;
+  field_value_width(inner).saturating_sub(2).max(8)
+}
+
 /// The prompt as an editable block, wrapped to the width of the box so no
 /// part of a long line is hidden, and scrolled to wherever the caret is.
 fn prompt_box(text: &str, caret: usize, focused: bool, width: usize) -> Vec<String> {
@@ -2278,5 +2344,35 @@ mod prompt_wrap_tests {
   #[test]
   fn a_line_that_fits_is_one_row() {
     assert_eq!(rows_of("short", 10), vec!["short"]);
+  }
+
+  #[test]
+  fn moving_down_lands_on_the_actual_wrapped_row_not_the_next_newline_line() {
+    let text = "the quick brown fox\nshort";
+    // "the quick brown fox" wraps into two rows at width 10 ("the quick" /
+    // "brown fox"); moving down from inside the first must land on its own
+    // second row, not skip straight to "short".
+    assert_eq!(move_prompt_caret_row(text, 3, 10, true), Some(13));
+    assert_eq!(move_prompt_caret_row(text, 13, 10, true), Some(23));
+  }
+
+  #[test]
+  fn moving_up_mirrors_moving_down() {
+    let text = "the quick brown fox\nshort";
+    assert_eq!(move_prompt_caret_row(text, 23, 10, false), Some(13));
+    assert_eq!(move_prompt_caret_row(text, 13, 10, false), Some(3));
+  }
+
+  #[test]
+  fn there_is_no_row_past_the_first_or_last() {
+    let text = "the quick brown fox\nshort";
+    assert_eq!(move_prompt_caret_row(text, 3, 10, false), None);
+    assert_eq!(move_prompt_caret_row(text, 23, 10, true), None);
+  }
+
+  #[test]
+  fn the_column_clamps_to_a_shorter_destination_row() {
+    let text = "the quick\nshort";
+    assert_eq!(move_prompt_caret_row(text, 8, 10, true), Some(10 + 5));
   }
 }
