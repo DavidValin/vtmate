@@ -1965,38 +1965,59 @@ fn text_box(text: &str, caret: usize, focused: bool, width: usize) -> String {
   )
 }
 
+/// How many of `chars` (a logical line from wherever the previous row left
+/// off) fit in the next row of at most `room` characters, and how many more
+/// past that to skip before the row after starts - a single dropped space
+/// at a word-boundary break, or nothing when the break needed no space (the
+/// whole rest of the line fits, or a single word alone exceeds `room` and
+/// has to be hard-split).
+fn wrap_prompt_row(chars: &[char], room: usize) -> (usize, usize) {
+  if chars.len() <= room {
+    return (chars.len(), 0);
+  }
+  match chars[..room].iter().rposition(|c| *c == ' ') {
+    Some(space_at) => (space_at, 1),
+    None if chars.get(room) == Some(&' ') => (room, 1),
+    None => (room, 0),
+  }
+}
+
 /// The prompt as an editable block, wrapped to the width of the box so no
 /// part of a long line is hidden, and scrolled to wherever the caret is.
 fn prompt_box(text: &str, caret: usize, focused: bool, width: usize) -> Vec<String> {
   let room = width.saturating_sub(2).max(8);
   let max_rows = 6usize;
 
-  // every line of the prompt, cut into rows of `room` characters, with the
-  // offset each row starts at so the caret can be placed on one of them
+  // every line of the prompt, cut into rows of at most `room` characters
+  // without cutting a word in half, with the offset each row starts at so
+  // the caret can be placed on one of them
   let mut rows: Vec<(usize, String)> = Vec::new();
   let mut caret_row = 0usize;
+  let mut caret_matched = false;
   let mut offset = 0usize;
   for line in text.split('\n') {
     let chars: Vec<char> = line.chars().collect();
     let mut at = 0usize;
     loop {
-      let take = room.min(chars.len() - at);
+      let (take, skip) = wrap_prompt_row(&chars[at..], room);
       let start = offset + at;
-      // the caret sits on this row when it falls inside it, or right at its
-      // end when the line does not wrap any further
-      if caret >= start
-        && caret <= start + take
-        && (caret < start + take || at + take >= chars.len())
-      {
+      // A caret on the space a break drops shows at this row's end, since
+      // that space is never itself displayed.
+      if caret >= start && caret < start + take + skip {
         caret_row = rows.len();
+        caret_matched = true;
       }
       rows.push((start, chars[at..at + take].iter().collect()));
-      at += take;
+      at += take + skip;
       if at >= chars.len() {
         break;
       }
     }
     offset += chars.len() + 1; // the line break
+  }
+  if !caret_matched {
+    // Past every row's own range: the caret sits at the very end of the text.
+    caret_row = rows.len().saturating_sub(1);
   }
 
   let first = caret_row
@@ -2211,4 +2232,51 @@ fn scroll_for(cursor: usize, total: usize, room: usize) -> usize {
     return 0;
   }
   (cursor + 1 - room).min(total.saturating_sub(room))
+}
+
+#[cfg(test)]
+mod prompt_wrap_tests {
+  use super::*;
+
+  fn chars(s: &str) -> Vec<char> {
+    s.chars().collect()
+  }
+
+  fn rows_of(text: &str, room: usize) -> Vec<String> {
+    let chars = chars(text);
+    let mut rows = Vec::new();
+    let mut at = 0;
+    loop {
+      let (take, skip) = wrap_prompt_row(&chars[at..], room);
+      rows.push(chars[at..at + take].iter().collect::<String>());
+      at += take + skip;
+      if at >= chars.len() {
+        break;
+      }
+    }
+    rows
+  }
+
+  #[test]
+  fn a_word_that_fits_is_never_split() {
+    assert_eq!(rows_of("hello world", 5), vec!["hello", "world"]);
+  }
+
+  #[test]
+  fn the_break_space_is_dropped_not_carried() {
+    for row in rows_of("the quick brown fox", 10) {
+      assert!(!row.starts_with(' ') && !row.ends_with(' '), "{:?}", row);
+    }
+    assert_eq!(rows_of("the quick brown fox", 10), vec!["the quick", "brown fox"]);
+  }
+
+  #[test]
+  fn a_word_longer_than_the_row_is_hard_split() {
+    assert_eq!(rows_of("supercalifragilistic", 5), vec!["super", "calif", "ragil", "istic"]);
+  }
+
+  #[test]
+  fn a_line_that_fits_is_one_row() {
+    assert_eq!(rows_of("short", 10), vec!["short"]);
+  }
 }
