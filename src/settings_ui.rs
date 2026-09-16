@@ -570,7 +570,9 @@ fn close_form(ui: &mut SettingsUi) {
   draft.model = draft.model.trim().to_string();
   draft.api_key = draft.api_key.trim().to_string();
   draft.whisper_model_path = draft.whisper_model_path.trim().to_string();
-  draft.system_prompt = draft.system_prompt.trim().to_string();
+  // HARD_BREAK only means anything to this file's own live editing; past
+  // this point it is just a line break like any other.
+  draft.system_prompt = draft.system_prompt.replace(HARD_BREAK, "\n").trim().to_string();
 
   let dirty = ui.form.dirty();
   match ui.form.editing {
@@ -632,7 +634,9 @@ fn form_key(ui: &mut SettingsUi, k: &KeyEvent) {
     }
     KeyCode::Enter => {
       if field == Some(Field::SystemPrompt) {
-        insert_char(ui, '\n');
+        // A line break the user just asked for, always honored - unlike a
+        // `\n` loaded from the file (see `HARD_BREAK`).
+        insert_char(ui, HARD_BREAK);
         return;
       }
       move_cursor(ui, true, last);
@@ -1971,20 +1975,34 @@ fn text_box(text: &str, caret: usize, focused: bool, width: usize) -> String {
 /// How near the end of a full room-width row a stored `\n` must fall to be
 /// honored as a real line break, rather than treated as a plain space (see
 /// `wrap_prompt_row`).
-const PROMPT_NEWLINE_KEEP_WITHIN: usize = 5;
+const PROMPT_NEWLINE_KEEP_WITHIN: usize = 20;
+
+/// Stands in for a line break the user typed with Enter during this editing
+/// session, so `wrap_prompt_row` always honors it regardless of where it
+/// falls - unlike a stored `\n` loaded from the file, whose position is
+/// somebody else's hard-wrap and not something the user just asked for.
+/// Converted back to a plain `\n` the moment the form commits (`close_form`),
+/// so nothing outside this file's live editing ever sees it. Unicode LINE
+/// SEPARATOR: nothing on a keyboard types it, so it cannot collide with
+/// anything the user actually enters.
+const HARD_BREAK: char = '\u{2028}';
 
 /// How many of `chars` (from wherever the previous row left off) fit in the
 /// next row of at most `room` characters, and how many more past that to
 /// skip before the row after starts.
 ///
-/// A `\n` within `PROMPT_NEWLINE_KEEP_WITHIN` characters of a full row is
-/// honored as an intentional break. Any earlier `\n` - typically left by
-/// whatever hard-wrapped this text at some other width before it was saved
-/// - is treated as an ordinary space instead: just another word-boundary
-/// break candidate, so the text reflows to this box's own width. A single
-/// word too long for a whole row is still hard-split, and a break's own
-/// space (or demoted `\n`) is dropped rather than carried onto either row.
+/// `HARD_BREAK` always ends the row right there. A stored `\n` does too, but
+/// only within `PROMPT_NEWLINE_KEEP_WITHIN` characters of a full row; any
+/// earlier one - typically left by whatever hard-wrapped this text at some
+/// other width before it was saved - is treated as an ordinary space
+/// instead: just another word-boundary break candidate, so the text
+/// reflows to this box's own width. A single word too long for a whole row
+/// is still hard-split, and a break's own space (or demoted `\n`) is
+/// dropped rather than carried onto either row.
 fn wrap_prompt_row(chars: &[char], room: usize) -> (usize, usize) {
+  if let Some(at) = chars.iter().take(room + 1).position(|c| *c == HARD_BREAK) {
+    return (at, 1);
+  }
   if let Some(at) = chars.iter().take(room + 1).position(|c| *c == '\n') {
     if at + PROMPT_NEWLINE_KEEP_WITHIN >= room {
       return (at, 1);
@@ -2034,7 +2052,10 @@ fn wrapped_prompt_rows(text: &str, room: usize) -> Vec<(usize, usize)> {
 /// A row's displayed text, with any `\n` `wrap_prompt_row` demoted to a
 /// space shown as one.
 fn prompt_row_text(chars: &[char]) -> String {
-  chars.iter().map(|&c| if c == '\n' { ' ' } else { c }).collect()
+  chars
+    .iter()
+    .map(|&c| if c == '\n' || c == HARD_BREAK { ' ' } else { c })
+    .collect()
 }
 
 /// Move the caret to the equivalent column on the visual row above/below,
@@ -2155,7 +2176,15 @@ fn prompt_box(text: &str, caret: usize, focused: bool, width: usize) -> Vec<Stri
 
 /// How the prompt will be written to the agents file.
 fn prompt_summary(agent: &AgentSettings) -> String {
-  let lines = agent.system_prompt.split('\n').count();
+  // Counts a freshly-typed HARD_BREAK the same as a stored `\n`, so a line
+  // just added with Enter shows up here right away, before the form commits
+  // and turns it into one.
+  let lines = agent
+    .system_prompt
+    .chars()
+    .filter(|&c| c == '\n' || c == HARD_BREAK)
+    .count()
+    + 1;
   let inline = lines <= crate::config::INLINE_PROMPT_MAX_LINES;
   format!(
     "{}{} line{} - saved {}{}",
@@ -2411,25 +2440,26 @@ mod prompt_wrap_tests {
 
   #[test]
   fn a_stored_newline_far_from_the_row_end_is_demoted_to_a_space() {
-    // Nowhere near the end of a 20-wide row, so it reflows instead of
-    // forcing a break - as if some other tool hard-wrapped this at a
-    // narrower width before it was saved.
+    // Position 3 of a 30-wide row is nowhere near its end (PROMPT_NEWLINE_
+    // KEEP_WITHIN is 20), so it reflows instead of forcing a break - as if
+    // some other tool hard-wrapped this at a narrower width before it was
+    // saved.
     let text = "abc\ndef ghi jkl mno";
-    assert_eq!(rendered_rows_of(text, 20), vec!["abc def ghi jkl mno"]);
+    assert_eq!(rendered_rows_of(text, 30), vec!["abc def ghi jkl mno"]);
   }
 
   #[test]
   fn a_stored_newline_near_the_row_end_is_honored() {
-    // room=8: 7 characters in, within PROMPT_NEWLINE_KEEP_WITHIN (5) of the
-    // end of a full row - kept as a real break.
-    let text = "abcdefg\nh";
-    assert_eq!(rendered_rows_of(text, 8), vec!["abcdefg", "h"]);
+    // Position 10 of a 30-wide row is exactly PROMPT_NEWLINE_KEEP_WITHIN
+    // (20) from its end - kept as a real break.
+    let text = "abcdefghij\nk";
+    assert_eq!(rendered_rows_of(text, 30), vec!["abcdefghij", "k"]);
   }
 
   #[test]
   fn an_honored_trailing_newline_still_leaves_a_blank_row() {
-    let text = "abcdefg\n";
-    assert_eq!(rendered_rows_of(text, 8), vec!["abcdefg", ""]);
+    let text = "abcdefghij\n";
+    assert_eq!(rendered_rows_of(text, 30), vec!["abcdefghij", ""]);
   }
 
   #[test]
@@ -2439,5 +2469,14 @@ mod prompt_wrap_tests {
     // its own behind.
     let text = "aaaaaaaaaa ";
     assert_eq!(rendered_rows_of(text, 10), vec!["aaaaaaaaaa"]);
+  }
+
+  #[test]
+  fn a_hard_break_is_always_honored_regardless_of_position() {
+    // Position 3 of a 30-wide row is nowhere near its end, so a stored `\n`
+    // there would be demoted (see the test above) - but a HARD_BREAK, what
+    // Enter inserts, always breaks the row right where it is.
+    let text = format!("abc{HARD_BREAK}def ghi jkl mno");
+    assert_eq!(rendered_rows_of(&text, 30), vec!["abc", "def ghi jkl mno"]);
   }
 }
