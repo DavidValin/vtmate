@@ -135,6 +135,7 @@ impl Controller {
   fn speaking_now(&self) -> bool {
     self.state.playback.playback_active.load(Ordering::Relaxed)
       || self.state.processing_response.load(Ordering::Relaxed)
+      || self.state.reply_in_flight.load(Ordering::Relaxed)
       || self.state.tts_read_active.load(Ordering::Relaxed)
   }
 
@@ -146,6 +147,7 @@ impl Controller {
       .state
       .processing_response
       .store(false, Ordering::Relaxed);
+    self.state.reply_in_flight.store(false, Ordering::Relaxed);
     self.state.ui.thinking.store(false, Ordering::Relaxed);
   }
 

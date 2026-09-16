@@ -215,7 +215,10 @@ pub async fn stream_cli_response_into(
   // agentic clis can sit quietly for a while before their first token,
   // longer than the plain http path's stall timeout allows for
   let stall_timeout = Duration::from_secs(180);
-  let poll_interval = Duration::from_millis(250);
+  // Also the ceiling on how stale `interrupted()` can be during a gap
+  // between lines (a barge-in mid-"thinking" pause), so that gap stays
+  // imperceptible.
+  let poll_interval = Duration::from_millis(80);
   let mut since_last = Duration::ZERO;
   let mut got_any_text = false;
   let mut hard_error: Option<String> = None;

@@ -246,7 +246,10 @@ pub async fn stream_response_into(
   // the connection but stops sending bytes mid-stream (no close, no data) hangs here
   // forever and is deaf to Esc/Undo, since those are only checked between chunks.
   let stall_timeout = Duration::from_secs(120);
-  let poll_interval = Duration::from_millis(250);
+  // Also the ceiling on how stale `interrupted()` can be during a gap
+  // between chunks (a barge-in mid-"thinking" pause), so that gap stays
+  // imperceptible.
+  let poll_interval = Duration::from_millis(80);
   let mut since_last_chunk = Duration::ZERO;
 
   loop {
