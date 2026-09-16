@@ -4,7 +4,6 @@
 
 use crate::tts;
 use crate::util::get_user_home_path;
-use crate::util::terminate;
 use anyhow::Error;
 use clap::Parser;
 use cpal::Device;
@@ -15,8 +14,6 @@ use std::collections::HashMap;
 use std::fs::{File, create_dir_all, read_to_string};
 use std::io::Write;
 use std::panic;
-use std::thread::{self};
-use std::time::Duration;
 use url::Url;
 
 // API
@@ -1511,26 +1508,17 @@ pub fn try_load_settings(
   Ok(agents)
 }
 
+/// Both `LoadError` variants (a file that cannot be parsed, or one that
+/// parses but holds invalid values) are reported the same way: returned to
+/// the caller, which decides how to display the error and how to give up -
+/// each of `load_settings`'s callers already has its own correct way to do
+/// that (a plain terminal print, a daemon start-error file, ...), and this
+/// function has no way to know which applies.
 pub fn load_settings(
   agents_path: &std::path::Path,
   args: &Args,
 ) -> Result<Vec<AgentSettings>, Error> {
-  match try_load_settings(agents_path, args) {
-    Ok(agents) => Ok(agents),
-    // A file we cannot parse is reported to the caller, which decides how to
-    // give up; values we can parse but cannot accept stop vtmate right here,
-    // with the whole list of what is wrong.
-    Err(e @ LoadError::Syntax(_)) => {
-      print!("\u{274c} {}", e);
-      thread::sleep(Duration::from_millis(30));
-      Err(Error::msg(e.to_string()))
-    }
-    Err(e @ LoadError::Invalid(_)) => {
-      print!("\u{274c} {}", e);
-      thread::sleep(Duration::from_millis(30));
-      terminate(1);
-    }
-  }
+  try_load_settings(agents_path, args).map_err(|e| Error::msg(e.to_string()))
 }
 
 /// Create `~/.vtmate/settings` (the `[general]` and `[daemon]` sections)
