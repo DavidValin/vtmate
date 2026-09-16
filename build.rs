@@ -496,6 +496,7 @@ fn main() {
       }
     }
   }
+  println!("cargo:warning=Supertonic 2 model embedded from {}", model_dest.display());
 
   // Supertonic 3 model (multilingual TTS)
   ensure_supertonic3_model(&home, &dest, is_release);
@@ -540,6 +541,7 @@ fn main() {
     let dest_path = dest.join(name);
     fs::copy(&src, &dest_path).expect("failed to copy asset");
   }
+  println!("cargo:warning=Kokoro and Whisper models embedded from {}", dest.display());
 
   println!("cargo:warning=Assets copied to {}", dest.display());
   for &(_, name) in &needed_files {
