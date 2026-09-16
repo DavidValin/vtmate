@@ -810,8 +810,8 @@ fn step_value(ui: &mut SettingsUi, field: Field, direction: i32) {
     }
     Field::Ptt => draft.ptt = !draft.ptt,
     Field::VoiceSpeed => {
-      let steps = ((draft.voice_speed - 1.0) * 10.0).round() as i32 + direction;
-      draft.voice_speed = 1.0 + (steps.clamp(0, 80) as f32) / 10.0;
+      let steps = ((draft.voice_speed - 0.2) * 10.0).round() as i32 + direction;
+      draft.voice_speed = 0.2 + (steps.clamp(0, 16) as f32) / 10.0;
     }
     Field::Threshold => {
       let steps = (draft.sound_threshold_peak * 20.0).round() as i32 + direction;
@@ -874,7 +874,7 @@ impl Field {
       Field::Tts => "←/→ pick the voice engine; it decides the languages and voices below",
       Field::Language => "←/→ pick a language of this engine; also used to transcribe you",
       Field::Voice => "←/→ pick a voice of this engine and language",
-      Field::VoiceSpeed => "←/→ how fast the agent speaks (1.0 to 9.0)",
+      Field::VoiceSpeed => "←/→ how fast the agent speaks (0.2 to 1.8)",
       Field::Ptt => "←/→ ON holds SPACE to talk, OFF listens and cuts on silence (LIVE)",
       Field::Provider => "←/→ where the answers come from; hosted ones need an api key",
       Field::BaseUrl => "host and port of a local server, empty for a hosted provider's default",
@@ -1810,7 +1810,7 @@ fn field_value(
   if field.is_slider() {
     let (position, text) = match field {
       Field::VoiceSpeed => (
-        ((agent.voice_speed - 1.0) / 8.0).clamp(0.0, 1.0),
+        ((agent.voice_speed - 0.2) / 1.6).clamp(0.0, 1.0),
         format!("{:.1}x", agent.voice_speed),
       ),
       Field::Threshold => (

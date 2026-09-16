@@ -155,7 +155,7 @@ sound_threshold_peak = 0.1
 end_silence_ms = 2000
 ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
-voice_speed = 5.0
+voice_speed = 1.1
 "#;
 
 const AGENT_B: &str = r#"[agent]
@@ -171,7 +171,7 @@ sound_threshold_peak = 0.1
 end_silence_ms = 2000
 ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
-voice_speed = 5.0
+voice_speed = 1.1
 "#;
 
 #[test]
@@ -352,7 +352,7 @@ sound_threshold_peak = "0.1"
 end_silence_ms = "2000"
 ptt = "false"
 whisper_model_path = "~/.whisper-models/ggml-tiny.bin"
-voice_speed = 5.0
+voice_speed = 1.1
 "#;
 
   let mut file = File::create(&path).expect("Failed to create temp config file");
@@ -404,7 +404,7 @@ voice_speed = 5.0
   assert_eq!(agent.ptt, true);
   assert_eq!(agent.sound_threshold_peak, 0.1);
   assert_eq!(agent.end_silence_ms, 2000);
-  assert_eq!(agent.voice_speed, 5.0);
+  assert_eq!(agent.voice_speed, 1.1);
   assert_eq!(agent.whisper_model_path, "~/.whisper-models/ggml-tiny.bin");
 }
 
@@ -434,7 +434,7 @@ sound_threshold_peak = 0.1
 end_silence_ms = 2000
 ptt = true
 whisper_model_path = ~/.whisper-models/ggml-tiny.bin
-voice_speed = 5.0
+voice_speed = 1.1
 "#;
 
   let mut file = File::create(&path).expect("Failed to create temp config file");
@@ -486,7 +486,7 @@ voice_speed = 5.0
   assert_eq!(agent.ptt, true);
   assert_eq!(agent.sound_threshold_peak, 0.1);
   assert_eq!(agent.end_silence_ms, 2000);
-  assert_eq!(agent.voice_speed, 5.0);
+  assert_eq!(agent.voice_speed, 1.1);
   assert_eq!(agent.whisper_model_path, "~/.whisper-models/ggml-tiny.bin");
 }
 
@@ -514,7 +514,7 @@ fn unknown_section_is_reported_and_headers_are_case_insensitive() {
 /// An agent block whose `system_prompt` line is `prompt`.
 fn agent_with_prompt(name: &str, prompt: &str) -> String {
   format!(
-    "[agent]\nname = {}\nlanguage = en\ntts = kokoro\nvoice = bf_alice\nprovider = ollama\nbaseurl = http://127.0.0.1:11434\nmodel = llama3.2:3b\nsystem_prompt = {}\nsound_threshold_peak = 0.1\nend_silence_ms = 2000\nptt = true\nwhisper_model_path = ~/.whisper-models/ggml-tiny.bin\nvoice_speed = 5.0\n",
+    "[agent]\nname = {}\nlanguage = en\ntts = kokoro\nvoice = bf_alice\nprovider = ollama\nbaseurl = http://127.0.0.1:11434\nmodel = llama3.2:3b\nsystem_prompt = {}\nsound_threshold_peak = 0.1\nend_silence_ms = 2000\nptt = true\nwhisper_model_path = ~/.whisper-models/ggml-tiny.bin\nvoice_speed = 1.1\n",
     name, prompt
   )
 }
