@@ -270,6 +270,7 @@ fn ensure_supertonic3_model(home: &str, embedded_dest: &Path, is_release: bool) 
           rel, expected, got
         );
       }
+      println!("cargo:warning=File {} downloaded and checksum OK", rel);
     }
 
     let dest_path = embedded_dest.join("supertonic3-model").join(rel);
@@ -325,6 +326,7 @@ fn ensure_speaker_model(home: &str, embedded_dest: &Path, is_release: bool) {
         SPEAKER_MODEL_SHA256, got
       );
     }
+    println!("cargo:warning=File speaker_encoder.onnx downloaded and checksum OK");
   }
 
   let dest_path = embedded_dest
@@ -473,6 +475,7 @@ fn main() {
         panic!("Failed to download {}: {:?}", tarball_name, output);
       }
       verify_file(&tarball_path, tarball_name).expect("Checksum mismatch after download");
+      println!("cargo:warning=File {} downloaded and checksum OK", tarball_name);
       extract_supertonic2(&tarball_path);
     }
   }
@@ -523,6 +526,7 @@ fn main() {
         }
         if is_release {
           verify_file(&dest_path, name).expect("Checksum mismatch after download");
+          println!("cargo:warning=File {} downloaded and checksum OK", name);
         }
         continue;
       } else {
