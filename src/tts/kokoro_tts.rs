@@ -30,6 +30,13 @@ pub struct StreamingTts {
 /// unload; this flag does.
 static FORCE_CPU: AtomicBool = AtomicBool::new(false);
 
+/// kokoro-micro's own "1.0" is paced noticeably slower than supertonic2's and
+/// supertonic3's "1.0" at the same nominal value, since each engine has its
+/// own model-specific calibration for what "1.0" means. vtmate exposes one
+/// speed dial across all three engines, so kokoro's share of it is scaled up
+/// here to match the others' perceived pace at the same dial position.
+const KOKORO_SPEED_COMPENSATION: f32 = 1.5;
+
 /// Load the Kokoro model. Device::Auto takes the GPU when this build carries
 /// a GPU execution provider (`ort-cuda`) and it comes up; FORCE_CPU is the
 /// stronger statement made after a failure past initialisation, which Auto
@@ -333,7 +340,7 @@ impl StreamingTts {
       if let Ok(mut samples) = e.synthesize_with_options(
         &phrase,
         Some(&voice),
-        crate::state::get_speed(),
+        crate::state::get_speed() * KOKORO_SPEED_COMPENSATION,
         gain,
         Some(&language),
       ) {
