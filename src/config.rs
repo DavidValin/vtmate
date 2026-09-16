@@ -2245,18 +2245,22 @@ fn validate_end_silence_ms(value: u64) -> Result<(), std::io::Error> {
 }
 
 fn validate_voice_speed(value: f32) -> Result<(), std::io::Error> {
-  if value < 0.6 || value > 1.8 {
-    return Err(std::io::Error::new(
-      std::io::ErrorKind::Other,
-      "'voice_speed' must be between 0.6 and 1.8",
-    ));
-  }
   // Ensure one decimal place only
   let scaled = (value * 10.0).round();
   if (scaled / 10.0 - value).abs() > 1e-6 {
     return Err(std::io::Error::new(
       std::io::ErrorKind::Other,
       "'voice_speed' must have one decimal place",
+    ));
+  }
+  // Compared as tenths, not the raw float: 0.1-step arithmetic upstream (the
+  // popup's stepper starts from 0.6, itself not exact in binary floating
+  // point) can land a hair to either side of a bound like 1.8, which a
+  // direct `value > 1.8` would then wrongly reject.
+  if scaled < 6.0 || scaled > 18.0 {
+    return Err(std::io::Error::new(
+      std::io::ErrorKind::Other,
+      "'voice_speed' must be between 0.6 and 1.8",
     ));
   }
   Ok(())
@@ -2278,4 +2282,24 @@ fn sanitize_agent_settings(agent: &mut AgentSettings) {
   agent.system_prompt = agent.system_prompt.trim_matches('"').to_string();
   // agent.ptt is a bool; no trimming needed
   agent.whisper_model_path = agent.whisper_model_path.trim_matches('"').to_string();
+}
+
+#[cfg(test)]
+mod voice_speed_tests {
+  use super::*;
+
+  #[test]
+  fn the_popups_stepper_arithmetic_lands_within_bounds_at_both_ends() {
+    // Same formula settings_ui's stepper uses: 0.6 + steps/10.0. Neither 0.6
+    // nor 1.2 is exact in binary floating point, so their sum at the top of
+    // the range can land a hair above the literal 1.8.
+    assert!(validate_voice_speed(0.6 + 0.0 / 10.0).is_ok());
+    assert!(validate_voice_speed(0.6 + 12.0 / 10.0).is_ok());
+  }
+
+  #[test]
+  fn genuinely_out_of_range_is_still_rejected() {
+    assert!(validate_voice_speed(0.5).is_err());
+    assert!(validate_voice_speed(1.9).is_err());
+  }
 }
