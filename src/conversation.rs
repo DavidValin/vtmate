@@ -917,6 +917,18 @@ struct SpokenPhrase {
   tts: String,
 }
 
+/// True when a trailing `.` reads as the end of a sentence, rather than a
+/// list marker ("1.") or a decimal ("3.14") still streaming in - both have a
+/// digit immediately before the period. Flushing on those splits a numbered
+/// list's marker from its text and forces a stray line break between them.
+fn ends_sentence(buf: &str) -> bool {
+  let mut chars = buf.chars().rev();
+  if chars.next() != Some('.') {
+    return false;
+  }
+  !matches!(chars.next(), Some(c) if c.is_ascii_digit())
+}
+
 /// Emits phrases when punctuation/newline/length threshold happens.
 ///
 /// Shared between threads behind a `Mutex`; each emitted phrase carries both
@@ -933,7 +945,7 @@ impl PhraseSpeaker {
   fn push_text(&mut self, s: &str) -> Option<SpokenPhrase> {
     self.buf.push_str(s);
     // cap phrases by new lines or dots
-    let trigger = self.buf.contains('\n') || self.buf.ends_with('.');
+    let trigger = self.buf.contains('\n') || ends_sentence(&self.buf);
     if trigger { self.flush() } else { None }
   }
   fn flush(&mut self) -> Option<SpokenPhrase> {
@@ -1530,4 +1542,37 @@ pub fn save_conversation(
 
   fs::write(filepath, content)?;
   Ok(())
+}
+
+#[cfg(test)]
+mod phrase_speaker_tests {
+  use super::*;
+
+  #[test]
+  fn a_list_markers_period_does_not_end_the_sentence() {
+    assert!(!ends_sentence("1."));
+    assert!(!ends_sentence("10."));
+    assert!(!ends_sentence("Step 2."));
+  }
+
+  #[test]
+  fn a_decimal_still_streaming_in_does_not_end_the_sentence() {
+    assert!(!ends_sentence("The value is 3."));
+  }
+
+  #[test]
+  fn a_real_sentence_period_still_ends_it() {
+    assert!(ends_sentence("This is a sentence."));
+    assert!(ends_sentence("."));
+  }
+
+  #[test]
+  fn a_numbered_list_item_streams_as_one_phrase_not_split_at_its_marker() {
+    let mut speaker = PhraseSpeaker::new();
+    assert!(speaker.push_text("1").is_none());
+    assert!(speaker.push_text(".").is_none());
+    assert!(speaker.push_text(" first line here").is_none());
+    let phrase = speaker.push_text(".").expect("sentence period flushes");
+    assert_eq!(phrase.text, "1. first line here.");
+  }
 }
