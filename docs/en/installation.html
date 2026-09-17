@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>vtmate | Installation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Nunito:wght@500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../styles.css" />
+  <style>
+    .feature-cards {display:flex; flex-wrap:wrap; gap:1rem;}
+    .card{flex:1 1 calc(33% - 1rem); min-width:300px;}
+    .page-panel{margin-bottom:1.2rem;}
+  </style>
+  <script defer src="../app.js"></script>
+</head>
+<body data-site-lang="en" data-page="installation.html" data-title-en="vtmate | Installation" data-title-es="vtmate | Instalacion">
+  <div class="grain"></div>
+  <div class="layout">
+    <aside class="docs-sidebar panel">
+      <h3 class="docs-title">Navigation</h3>
+      <ul class="docs-list">
+        <li><a data-page-link="index.html">Home</a></li>
+        <li><a data-page-link="installation.html">Installation</a></li>
+        <li><a data-page-link="configuration.html">Configuration</a></li>
+        <li><a data-page-link="documentation.html">Tutorials</a></li>
+        <li><a data-page-link="video.html">Video</a></li>
+        <li><a data-page-link="features.html">Features</a></li>
+      </ul>
+      <a href="https://github.com/DavidValin/vtmate" target="_blank" style="display:block;padding-top: 10px">
+        <img src="https://upload.wikimedia.org/wikipedia/commons/c/c2/GitHub_Invertocat_Logo.svg" alt="GitHub" width="32" height="32" style="width: 23px; height: 14px;" /> Github
+      </a>
+      <a href="https://crates.io/crates/vtmate" target="_blank" style="display:block;padding-top: 10px">
+        <img src="https://cdn-1.webcatalog.io/catalog/crates-io/crates-io-icon.png?v=1714780430365" alt="crates.io" width="32" height="32" style="width: 23px; height: 14px;" /> Crates.io
+      </a>
+    </aside>
+    <main class="container">
+      <div class="topbar panel">
+        <div class="brand-lockup">
+          <div class="brand-title">vtmate</div>
+          <div class="brand-subtitle">Local voice AI for the terminal</div>
+        </div>
+        <div class="lang-switch">
+          <a class="flag-link" data-lang-switch="en" href="#" aria-label="English">🇬🇧</a>
+          <a class="flag-link" data-lang-switch="es" href="#" aria-label="Espanol">🇪🇸</a>
+        </div>
+      </div>
+      <header class="panel hero page-panel">
+        <div class="hero-intro">
+          <h1 class="eyebrow">Installation</h1>
+        </div>
+        <div aria-label="Install vtmate">
+          <div class="card">
+            <h3 class="card-title">Install vtmate</h3>
+            <p>Paste the next code in your terminal to download and install vtmate as a command .</p>
+            <p>This method of installation will auto-detect gpu acceleration and install the most suitable version available.</p>
+            <pre class="install-code"><code>curl -fsSL https://vtmate.eu/install.sh | sh</code></pre>
+            <p>If you prefer you can <a href="https://github.com/DavidValin/vtmate/releases">download it manually</a> or compile it <a href="https://crates.io/crates/vtmate">via cargo</a> or <a href="https://github.com/DavidValin/vtmate">manually from source code</a>.</p>
+          </div>
+          <div class="card">
+            <h3 class="card-title">Install llm engine</h3>
+            <p class="command-label">Install ollama</p>
+            <pre class="install-code"><code>curl -fsSL https://ollama.com/install.sh | sh</code></pre>
+            <p class="command-label">Optional: Install default llm model</p>
+            <pre class="install-code"><code>ollama pull llama3.2:3b</code></pre>
+            <p class="command-label">Optional: OpenTTS support</p>
+            <pre class="install-code"><code>docker pull synesthesiam/opentts:all</code></pre>
+            <p class="command-label">(only Windows) Download compatible terminal</p>
+            <a href="https://apps.microsoft.com/detail/9n0dx20hk701">https://apps.microsoft.com/detail/9n0dx20hk701</a>
+          </div>
+        </div>
+      </header>
+    </main>
+  </div>
+</body>
+</html>
