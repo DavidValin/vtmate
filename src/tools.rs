@@ -8,10 +8,12 @@ use glob::GlobTool;
 use grep::GrepTool;
 use http_request::HttpRequestTool;
 use read_file::ReadFileTool;
+use remember::RememberTool;
 use search::SearchTool;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::OnceLock;
+use store_memory::StoreMemoryTool;
 use web_fetch::WebFetchTool;
 
 // API
@@ -23,7 +25,9 @@ pub mod glob;
 pub mod grep;
 pub mod http_request;
 pub mod read_file;
+pub mod remember;
 pub mod search;
+pub mod store_memory;
 pub mod web_fetch;
 
 pub trait Tool {
@@ -33,6 +37,10 @@ pub trait Tool {
     tool_call_args: &Value,
   ) -> Result<String, Box<dyn std::error::Error + Send + Sync>>;
   fn json_schema(&self) -> Result<Value, Box<dyn std::error::Error + Send + Sync>>;
+}
+
+pub fn get_available_tools() -> Result<Vec<Value>, Box<dyn std::error::Error + Send + Sync>> {
+  Ok(vec![StoreMemoryTool::new().json_schema()?])
 }
 
 // Global cache for dynamically loaded HTTP request tools
@@ -66,6 +74,8 @@ pub fn tools_schemas(
       "read_file" => schemas.push(ReadFileTool::new().json_schema()?),
       "glob" => schemas.push(GlobTool::new().json_schema()?),
       "grep" => schemas.push(GrepTool::new().json_schema()?),
+      "store_memory" => schemas.push(StoreMemoryTool::new().json_schema()?),
+      "remember" => schemas.push(RememberTool::new().json_schema()?),
       _ => {
         if let Some(tool) = http_tool_map.get(name.as_str()) {
           schemas.push(tool.json_schema()? as Value);
@@ -176,6 +186,8 @@ fn try_handle_tool_call(
     "read_file" => ReadFileTool::new().json_schema()?,
     "glob" => GlobTool::new().json_schema()?,
     "grep" => GrepTool::new().json_schema()?,
+    "store_memory" => StoreMemoryTool::new().json_schema()?,
+    "remember" => RememberTool::new().json_schema()?,
     _ => {
       let http_tools = load_http_tools();
       let tool = http_tools
@@ -197,6 +209,8 @@ fn try_handle_tool_call(
     "read_file" => ReadFileTool::new().handle(args),
     "glob" => GlobTool::new().handle(args),
     "grep" => GrepTool::new().handle(args),
+    "store_memory" => StoreMemoryTool::new().handle(args),
+    "remember" => RememberTool::new().handle(args),
     _ => {
       let http_tools = load_http_tools();
       let tool = http_tools
