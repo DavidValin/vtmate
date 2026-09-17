@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use ctrlc;
 use std::io::IsTerminal;
+use std::process;
 use std::sync::{Arc, OnceLock, atomic::Ordering};
 use std::thread::{self, Builder as ThreadBuilder};
 use std::time::Duration;
@@ -27,6 +28,8 @@ mod tools;
 mod tts;
 mod ui;
 mod util;
+mod memory;
+
 use crate::conversation::Command;
 
 static START_INSTANT: OnceLock<Instant> = OnceLock::new();
@@ -44,6 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   }
   crate::log::set_verbose(args.verbose || false);
   let _ = START_INSTANT.get_or_init(Instant::now);
+  let memory_path = memory::ensure_memory_path();
 
   // Ctrl-C handler to set should_exit flag
   let should_exit = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -540,6 +544,133 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   env_logger::init();
   whisper_rs::install_logging_hooks();
 
+  if args.get_memories {
+    use crate::memory::Memory;
+    use std::path::Path;
+    let path = memory_path.as_str();
+    if Path::new(path).exists() {
+      let memory = Memory::load_from_file(path).expect("failed to load memory");
+      for v in memory.index_map.values() {
+        let unit = v.knowledge.clone();
+        let text = Memory::build_context_from_units(&[unit]);
+        println!("{}", text);
+      }
+    } else {
+      eprintln!("No memory file found");
+    }
+    process::exit(0);
+  }
+
+  // Get by subject
+  if let Some(subj) = args.get_memories_by_subject {
+    use crate::memory::Memory;
+    use std::path::Path;
+    let path = memory_path.as_str();
+    if !Path::new(path).exists() {
+      eprintln!("No memory file found");
+      process::exit(1);
+    }
+    let memory = Memory::load_from_file(path).expect("failed to load memory");
+    let results = memory.get_by_subject(&subj, None, None, None);
+    for unit in results {
+      let text = Memory::build_context_from_units(&[unit]);
+      println!("{}", text);
+    }
+    process::exit(0);
+  }
+
+  // Get by predicate
+  if let Some(pred) = args.get_memories_by_predicate {
+    use crate::memory::Memory;
+    use std::path::Path;
+    let path = memory_path.as_str();
+    if !Path::new(path).exists() {
+      eprintln!("No memory file found");
+      process::exit(1);
+    }
+    let memory = Memory::load_from_file(path).expect("failed to load memory");
+    let results = memory.get_by_predicate(&pred, None, None, None);
+    for unit in results {
+      let text = Memory::build_context_from_units(&[unit]);
+      println!("{}", text);
+    }
+    process::exit(0);
+  }
+
+  // Get by object
+  if let Some(obj) = args.get_memories_by_object {
+    use crate::memory::Memory;
+    use std::path::Path;
+    let path = memory_path.as_str();
+    if !Path::new(path).exists() {
+      eprintln!("No memory file found");
+      process::exit(1);
+    }
+    let memory = Memory::load_from_file(path).expect("failed to load memory");
+    let results = memory.get_by_object(&obj, None, None, None);
+    for unit in results {
+      let text = Memory::build_context_from_units(&[unit]);
+      println!("{}", text);
+    }
+    process::exit(0);
+  }
+
+  // Get by location
+  if let Some(loc) = args.get_memories_by_location {
+    use crate::memory::Memory;
+    use std::path::Path;
+    let path = memory_path.as_str();
+    if !Path::new(path).exists() {
+      eprintln!("No memory file found");
+      process::exit(1);
+    }
+    let memory = Memory::load_from_file(path).expect("failed to load memory");
+    let results = memory.get_by_location(&loc, None, None);
+    for unit in results {
+      let text = Memory::build_context_from_units(&[unit]);
+      println!("{}", text);
+    }
+    process::exit(0);
+  }
+
+  // Query memory
+  if let Some(query) = args.query_memory {
+    use crate::memory::Memory;
+    use std::path::Path;
+    let path = memory_path.as_str();
+    if !Path::new(path).exists() {
+      eprintln!("No memory file found");
+      process::exit(1);
+    }
+    let memory = Memory::load_from_file(path).expect("failed to load memory");
+    let top_k = memory.index_map.len();
+    let ef_search = 200;
+    let results = memory.query(&query, top_k, ef_search);
+    let cleaned_query = |s: &str| {
+      s.to_lowercase()
+        .replace(|c: char| !c.is_ascii_alphanumeric(), " ")
+    };
+    let cleaned_query_str = cleaned_query(&query);
+    let query_words: Vec<&str> = cleaned_query_str.split_whitespace().collect();
+    for unit in results {
+      let combined = format!(
+        "{} {} {} {}",
+        unit.subject,
+        unit.predicate.name,
+        unit.object,
+        unit.location.clone().unwrap_or_default()
+      );
+      let cleaned_combined = cleaned_query(&combined);
+      if query_words.iter().any(|w| cleaned_combined.contains(w)) {
+        let text = Memory::build_context_from_units(&[unit]);
+        println!("{}", text);
+      }
+    }
+    process::exit(0);
+  }
+
+
+
   // ---------------------------------------------------
   // Load Settings
   // ---------------------------------------------------
@@ -609,6 +740,26 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let mut initial_prompt: Option<String> = None;
   let status_line = state.status_line.clone();
   let conversation_history = state.conversation_history.clone();
+
+  // Check if the LLM supports tool calls and set the global flag
+  let tools_supported_rt = tokio::runtime::Builder::new_current_thread()
+    .enable_all()
+    .build()
+    .unwrap();
+  let tools_supported = tools_supported_rt.block_on(crate::llm::supports_tool_calls(
+    &settings.model,
+    &settings.provider,
+    &settings.baseurl,
+  ))?;
+  crate::llm::TOOLS_SUPPORTED.set(tools_supported).ok();
+  log::log(
+    "info",
+    &format!("Model supports tools: {}", tools_supported),
+  );
+
+  // ---------------------------------------------------
+  // Thread: UI
+  // ---------------------------------------------------
 
   // Start UI thread
   let ui_handle = ui::spawn_ui_thread(
@@ -686,12 +837,18 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     "info",
     &format!("Playback stream SR (truth): {}", out_sample_rate),
   );
+  // Set global UI sender for memory notifications
+  crate::memory::TX_UI.set(tx_ui.clone()).unwrap();
 
   log::log("info", &format!("Agent: {}", settings.name));
   log::log("info", &format!("TTS: {}", settings.tts));
   log::log("info", &format!("Language: {}", settings.language));
   log::log("info", &format!("TTS voice: {}", settings.voice));
   log::log("info", &format!("LLM provider: {}", settings.provider));
+
+  if settings.tts == "kokoro" {
+    tts::kokoro_tts::start_kokoro_engine()?;
+  }
 
   if settings.provider == "ollama" {
     log::log("info", &format!("ollama base url: {}", settings.baseurl));

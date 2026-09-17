@@ -5,8 +5,12 @@
 use bytes::Bytes;
 use futures_util::StreamExt;
 use reqwest::StatusCode;
-use serde_json::json;
-use std::sync::{Arc, atomic::AtomicU64};
+use serde_json::{Value, json};
+use std::sync::{Arc, OnceLock, atomic::AtomicU64};
+
+/// Whether the connected model/server was detected to support tool calling
+/// (see `supports_tool_calls`). Tool schemas are only sent to the LLM when this is true.
+pub static TOOLS_SUPPORTED: OnceLock<bool> = OnceLock::new();
 
 /// Stream response from Llama/Ollama endpoints, fallback if one fails, and mid-stream cancellation support.
 /// When `include_tools` is true, the LLM may return tool_calls which are delivered via `on_tool_call`.
@@ -25,6 +29,8 @@ pub async fn llama_server_stream_response_into(
   mut on_reasoning: Option<&mut dyn FnMut(&str)>,
   think: bool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  // Only send tool schemas once the connected model/server is known to support them.
+  let include_tools = include_tools && TOOLS_SUPPORTED.get().copied().unwrap_or(false);
   crate::log::log(
     "debug",
     &format!(
@@ -412,4 +418,86 @@ pub async fn llama_server_stream_response_into(
       .unwrap_or_else(|| "No endpoint candidates succeeded".to_string())
       .into(),
   )
+}
+
+/// Probe whether the connected model/server supports tool calling, so callers can decide
+/// whether to send tool schemas at all (some servers/models error or silently ignore them).
+pub async fn supports_tool_calls(
+  model: &str,
+  llm_engine_type: &str,
+  base_url: &str,
+) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+  let client = reqwest::Client::new();
+
+  match llm_engine_type {
+    "ollama" => {
+      // Use /api/show with POST
+      let endpoint = format!("{}/api/show", base_url);
+      let payload = serde_json::json!({ "name": model });
+
+      let resp = client.post(&endpoint).json(&payload).send().await?;
+
+      if !resp.status().is_success() {
+        return Ok(false);
+      }
+
+      let data: Value = resp.json().await?;
+      if let Some(capabilities) = data.get("capabilities").and_then(|v| v.as_array()) {
+        // Check if "tools" is in capabilities
+        return Ok(capabilities.iter().any(|c| c.as_str() == Some("tools")));
+      }
+
+      Ok(false)
+    }
+
+    "llama-server" => {
+      // Minimal test: send a prompt asking for JSON tool call
+      let payload = serde_json::json!({
+          "stream": false,
+          "messages": [
+            { "role": "system", "content": "You are a helpful assistant." },
+            { "role": "user", "content": "Calculate 1 + 1 using the available tools" }
+          ],
+          "max_tokens": 200,
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "calculator",
+                "description": "Perform a calculation",
+                "parameters": {
+                  "type": "object",
+                  "properties":{
+                    "operation": {
+                      "type": "string",
+                      "description": "The operation to be calculated"
+                    }
+                  },
+                  "required":["operation"]
+                }
+              }
+            }
+          ]
+      });
+
+      let endpoint = format!("{}/v1/chat/completions", base_url); // wrapper endpoint
+      let resp = client.post(&endpoint).json(&payload).send().await?;
+      let data: Value = resp.json().await?;
+
+      if let Some(choice) = data.get("choices").and_then(|c: &serde_json::Value| c.get(0)) {
+        if let Some(message) = choice.get("message") {
+          if message
+            .get("tool_calls")
+            .and_then(|arr: &serde_json::Value| arr.as_array())
+            .map_or(false, |a: &Vec<serde_json::Value>| !a.is_empty())
+          {
+            return Ok(true);
+          }
+        }
+      }
+
+      Ok(false)
+    }
+    _ => Ok(false),
+  }
 }

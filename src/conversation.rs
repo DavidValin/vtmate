@@ -452,6 +452,72 @@ pub fn conversation_thread(
         if reply.as_deref().map_or(false, |t| !t.is_empty()) {
           wait_for_playback(state, &interrupt_counter, my_interrupt);
         }
+
+        // In the background, ask the LLM to store any memories worth keeping from this
+        // exchange. Runs silently (no spoken output), only once tool calling is known
+        // to be supported by the connected model/server.
+        if crate::llm::TOOLS_SUPPORTED.get().copied().unwrap_or(false) {
+          let baseurl = settings.baseurl.clone();
+          let model = settings.model.clone();
+          let provider = settings.provider.clone();
+          let interrupt_counter_for_memory = interrupt_counter.clone();
+          let user_text_for_memory = user_text.clone();
+          std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+              .enable_all()
+              .build()
+              .unwrap();
+            rt.block_on(async {
+              let messages = vec![
+                ChatMessage {
+                  role: "system".to_string(),
+                  content: "Extract any useful facts worth remembering from the user's message using the store_memory tool. Only call it when there is something concrete to store.".to_string(),
+                  ..Default::default()
+                },
+                ChatMessage {
+                  role: "user".to_string(),
+                  content: user_text_for_memory,
+                  ..Default::default()
+                },
+              ];
+              let mut on_piece = |_: &str| {};
+              let mut on_tool_call = |tc: &serde_json::Value| {
+                let name = tc
+                  .get("function")
+                  .and_then(|f| f.get("name"))
+                  .and_then(|n| n.as_str())
+                  .unwrap_or("");
+                let args = tc
+                  .get("function")
+                  .and_then(|f| f.get("arguments"))
+                  .and_then(|a| a.as_str())
+                  .unwrap_or("{}");
+                let arguments: serde_json::Value =
+                  serde_json::from_str(args).unwrap_or_else(|_| serde_json::json!({}));
+                let payload = serde_json::json!({ "name": name, "arguments": arguments }).to_string();
+                let _ = crate::tools::handle_tool_call(&payload);
+              };
+              if let Err(e) = crate::llm::llama_server_stream_response_into(
+                &messages,
+                baseurl.as_str(),
+                model.as_str(),
+                provider.as_str(),
+                interrupt_counter_for_memory,
+                my_interrupt,
+                &mut on_piece,
+                true,
+                &["store_memory".to_string()],
+                Some(&mut on_tool_call),
+                None,
+                false,
+              )
+              .await
+              {
+                crate::log::log("error", &format!("memory collection call failed: {e}"));
+              }
+            });
+          });
+        }
         ui_thinking_cloned_for_closure.store(false, Ordering::Relaxed);
       }
     }
