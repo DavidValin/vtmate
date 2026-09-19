@@ -184,6 +184,7 @@ pub fn spawn_ui_thread(
 
     let mut waiting_for_first_line = true;
     let mut skip_next_bottom_bar = false;
+    let mut interrupt_shown = false;
 
     loop {
       // Dragging a window edge produces a run of sizes; the redraw waits for
@@ -287,6 +288,7 @@ pub fn spawn_ui_thread(
           }
 
           "stream" => {
+            interrupt_shown = false;
             let msg_str = parts.next().unwrap();
 
             if waiting_for_first_line {
@@ -310,19 +312,22 @@ pub fn spawn_ui_thread(
             pending_stream.clear();
             waiting_for_first_line = false;
 
-            handle_line_message(
-              &mut out,
-              // A geometric shape, not an emoji: no colour-emoji font to
-              // install, one column in any terminal, and the red comes from
-              // the escape rather than from the glyph.
-              "\n\n \x1b[31m■ USER interrupted\x1b[0m",
-              &mut buffer,
-              &mut ui_state,
-              &spinner,
-              &status_line,
-              &mut bottom_bar,
-            );
-            skip_next_bottom_bar = true;
+            if !interrupt_shown {
+              handle_line_message(
+                &mut out,
+                // A geometric shape, not an emoji: no colour-emoji font to
+                // install, one column in any terminal, and the red comes from
+                // the escape rather than from the glyph.
+                "\n\n \x1b[31m■ USER interrupted\x1b[0m",
+                &mut buffer,
+                &mut ui_state,
+                &spinner,
+                &status_line,
+                &mut bottom_bar,
+              );
+              interrupt_shown = true;
+              skip_next_bottom_bar = true;
+            }
           }
 
           "modal_show" => {

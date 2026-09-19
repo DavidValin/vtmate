@@ -324,6 +324,9 @@ impl AppState {
       end_silence_ms: self.end_silence_ms.load(Ordering::Relaxed),
       voice_speed: self.speed.load(Ordering::Relaxed) as f32 / 10.0,
       system_prompt_name: None,
+      // TODO: AppState doesn't track the live agent's tool list yet, so a
+      // Ctrl+S save currently drops it. Needs a `tools` field on AppState.
+      tools: Vec::new(),
     }
   }
 
@@ -437,6 +440,7 @@ mod tests {
       end_silence_ms: 900,
       voice_speed: 1.5,
       system_prompt_name: None,
+      tools: Vec::new(),
     }
   }
 
