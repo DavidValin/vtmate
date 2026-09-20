@@ -1,61 +1,127 @@
 %%{init: {'flowchart': {'curve': 'linear'}}}%%
 flowchart LR
 
-    %% Main thread
+    %% Main thread: builds the channels, starts the threads below, then joins them
+    %% (daemon: runs the platform hotkey loop, attached client: runs the key loop)
     Main(Main)
 
     %% Thread groups
     subgraph Audio[Audio Stack]
-        Rec[Record thread]
-        Conv[Conversation thread]
-        TTS[TTS thread]
-        Play[Playback thread]
+        Rec["Record thread - cpal input, VAD"]
+        Conv["Conversation thread - STT, LLM turns, agent orchestration"]
+        TTS["TTS thread"]
+        Play["Playback thread - cpal output"]
     end
     subgraph Control[Control Stack]
         Key[Keyboard thread]
         UI[UI thread]
     end
+    subgraph Helpers[Short-lived helper threads]
+        LLM["LLM stream thread - one per reply, own tokio runtime"]
+        Syn["Synthesis worker + interrupt monitor - per phrase, inside the TTS engines"]
+        Load["Engine loader thread - tts::apply_residency"]
+        Wav["WAV writer thread - only with -s / save"]
+        Probe["Settings probe threads - provider reachable, ollama models"]
+    end
+    subgraph ReadFile[Read-file mode - replaces Rec, Conv, Key and UI]
+        RKey["Keyboard thread - phrase navigation, pause"]
+    end
     subgraph Daemon[Daemon mode only - replaces Key and UI]
-        Ctl[Controller thread - global shortcuts, attached keys]
-        Srv[IPC server thread - local socket, one reader/writer per attached client]
-        Sink[UI sink thread - drains tx_ui, fans out to clients]
-        Att[Attached vtmate - UI thread fed by the socket, keys forwarded]
+        Hot["Global hotkey listener - own thread on X11, main thread pump on Windows and macOS"]
+        Ctl["Controller thread - global shortcuts, attached keys"]
+        Job["Read-aloud job thread - one per selection or Say"]
+        Sel["Selection watch thread - X11 only"]
+        Srv["IPC server thread - accepts local socket connections"]
+        Conn["Connection thread - one per client, reads its messages"]
+        CWr["Client writer thread - one per client"]
+        Sink["UI sink thread - drains tx_ui, fans out to clients"]
+        Stop["Stop thread - one shot, orderly daemon exit"]
+    end
+    subgraph Attached[Attached vtmate - plain vtmate while a daemon runs]
+        AMain["Main thread - polls keys, forwards them"]
+        ARd["Reader thread - daemon messages to the local UI"]
+        AUI["UI thread - same as UI, fed by the socket"]
     end
 
-    %% Global stop propagation
-    Main -->|stop_all_tx| Audio
-    Main -->|stop_all_tx| Control
+    %% Process exit: there is no global stop channel, whoever ends the run calls terminate()
+    Term["terminate - restore terminal, run exit hook, exit process"]
+    Main -->|startup errors| Term
+    Key -->|quit key| Term
+    RKey -->|quit key| Term
+    Conv -->|quiet mode finished, --max-turns reached| Term
+    AMain -->|Ctrl+C detach or lost connection| Term
+    Stop --> Term
+    Hot -->|platform hotkey loop ended| Term
+
+    %% Main starts everything
+    Main -.->|spawns and joins| Audio
+    Main -.->|spawns and joins| Control
 
     %% Record -> Conversation
-    Rec -->|tx_utt - microphone audio| Conv
-    Rec -->|tx_utt - recognized utterance audio| Conv
+    Rec -->|tx_utt - utterance audio, VAD segmented| Conv
     Rec -->|tx_ui - user_interrupt_show| UI
 
     %% Conversation -> others
     Conv -->|tx_tts - TTS sentence| TTS
-    Conv -->|tx_play - speech audio| Play
-    Conv -->|tx_ui - conversation chunks & 🧠 Memory saved| UI
-    Conv -->|stop_all_tx - global stop| Main
+    TTS -->|tts_done - rendezvous with the interrupt epoch of the finished phrase| Conv
+    Conv -->|tx_ui - conversation chunks, banners, Memory saved| UI
+    Conv -->|stop_play_tx - interruption| Play
+    Conv -->|spawns per reply| LLM
+    LLM -->|tx_tts - phrases as they stream in| TTS
+    LLM -->|tx_ui - stream chunks| UI
+    Conv -->|user audio| Wav
+    Conv -->|spawns on agent change| Load
+    Main -.->|spawns at startup| Load
+    Ctl -.->|spawns on agent change| Load
+    Conn -.->|spawns on attach overrides| Load
 
     %% TTS -> Playback
     TTS -->|tx_play - synthetized audio chunks| Play
-    TTS -->|stop_play_tx - interruption| Play
+    TTS -->|stop_play_tx - cancelled turn| Play
+    TTS -->|spawns per phrase| Syn
+    Syn -.->|interrupt_counter watched| TTS
+    Load -.->|engines loaded / unloaded| TTS
 
     %% Playback interactions
     Play -->|stop_play_rx - stop playback| Play
-    Play -->|stop_all_rx - global stop| Main
+    Play -->|speech audio| Wav
+    Play -.->|UiState - playing, peak, playback_active, gate_until_ms| UI
+    Play -.->|playback_active, gate_until_ms - mute the microphone while speaking| Rec
 
     %% Keyboard interactions
-    Key -->|stop_all_tx - global stop| Main
-    Key -->|stop_play_tx - ESC stop| Play
+    Key -->|stop_play_tx + interrupt_counter - ESC stop, skip| Play
+    Key -->|tx_cmd_conv - Undo| Conv
+    Key -->|tx_ui - lines, redraw| UI
+    Key -.->|recording_paused - push-to-talk| Rec
+    Key -.->|spawns on agent change| Load
+    Key -.->|spawns from the settings screen| Probe
+    Ctl -.->|spawns from the settings screen - forwarded keys| Probe
+
+    %% Read-file mode interactions
+    Main -->|tx_tts - one phrase at a time, waits for tts_done| TTS
+    TTS -->|tts_done| Main
+    RKey -->|stop_play_tx + interrupt_counter - stop, skip| Play
+    RKey -.->|display_update_tx, current_phrase, tts_paused| Main
+    Main -.->|spawns, only with -s| Wav
 
     %% Daemon mode interactions
+    Hot -->|hotkey events| Ctl
     Ctl -->|recording_paused / utterance_meta - push-to-talk with selection| Rec
-    Ctl -->|tx_tts - read selection aloud| TTS
+    Ctl -->|tx_utt - Say text utterance| Conv
+    Ctl -->|tx_cmd_conv - Undo, reset| Conv
+    Ctl -->|spawns| Job
+    Job -->|tx_tts - read selection aloud, waits for tts_done| TTS
     Ctl -->|stop_play_tx + interrupt_counter - stop speech| Play
     Conv -->|tx_action - paste transcript at cursor| Ctl
+    Sel -.->|selection age| Ctl
     UI -.->|tx_ui lines| Sink
-    Sink -->|Ui / State / History messages| Srv
-    Srv -->|snapshot + live stream| Att
-    Att -->|Key events| Srv
-    Srv -->|ClientEvent - keys, Say| Ctl
+    Sink -->|Ui / State / History messages| CWr
+    Srv -->|spawns per connection| Conn
+    Srv -->|spawns per client| CWr
+    Conn -->|ClientEvent - keys, Say, StartSave| Ctl
+    Conn -->|IPC Stop| Stop
+    CWr -->|snapshot + live stream| ARd
+
+    %% Attached client interactions
+    ARd -->|tx_ui - lines, state, history| AUI
+    AMain -->|Key events, Detach| Conn
