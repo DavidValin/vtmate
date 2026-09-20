@@ -441,7 +441,7 @@ fn build_page(history: &[ChatMessage], meta: &SaveMetadata, audio: &[Option<Stri
 }
 
 const PAGE: &str = r##"<!doctype html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -541,6 +541,25 @@ dd.prompt{white-space:pre-wrap; max-height:7em; overflow:auto}
 a{color:inherit}
 .hint{margin-top:9px}
 kbd{border:1px solid var(--line); border-bottom-width:2px; border-radius:4px; padding:0 5px; font-size:12px}
+.head{flex-wrap:wrap}
+@media (max-width:640px){
+  body{font-size:15px}
+  header{gap:6px 10px; padding:8px 12px}
+  .brand{font-size:17px; gap:6px}
+  .brand img{width:40px; height:40px}
+  .brand small{font-size:13px}
+  .who{flex:1 1 0; min-width:0; font-size:12px; overflow-wrap:anywhere}
+  .controls{flex:1 1 100%; gap:4px; justify-content:space-between}
+  button,select{font-size:13px; padding:6px 8px}
+  #play{min-width:0; flex:1 1 auto}
+  #counter{min-width:0; flex:0 1 auto; font-size:12px; white-space:nowrap}
+  #theme{min-width:0}
+  main{padding:14px 10px 0}
+  .turn{padding:10px 11px 12px}
+  footer{padding:16px 12px 50px}
+  .card{flex-basis:100%}
+  .hint{display:none}
+}
 </style>
 </head>
 <body>
@@ -563,7 +582,7 @@ kbd{border:1px solid var(--line); border-bottom-width:2px; border-radius:4px; pa
       <option value="1.5">1.5x</option>
       <option value="2">2x</option>
     </select>
-    <button id="theme" title="light / dark theme">☀ light</button>
+    <button id="theme" title="light / dark theme">☾ dark</button>
   </div>
 </header>
 
@@ -593,7 +612,7 @@ let timer = null;    // silent turns are held for a readable moment
 let timerEnds = 0, timerLeft = 0;
 let ticker = null;
 
-// light unless this browser remembers otherwise; storage is unavailable on
+// dark unless this browser remembers otherwise; storage is unavailable on
 // file:// in some browsers, so every access is guarded
 function setTheme(theme){
   root.dataset.theme = theme;
@@ -602,7 +621,7 @@ function setTheme(theme){
 }
 let stored = null;
 try { stored = localStorage.getItem('vtmate-theme'); } catch (e) {}
-setTheme(stored === 'dark' ? 'dark' : 'light');
+setTheme(stored === 'light' ? 'light' : 'dark');
 themeBtn.addEventListener('click', function(){
   setTheme(root.dataset.theme === 'dark' ? 'light' : 'dark');
 });
