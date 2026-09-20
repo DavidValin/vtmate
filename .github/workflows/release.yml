@@ -60,6 +60,29 @@ jobs:
       - name: Show what was built
         run: find artifacts -type f | sort
 
+      # LICENSE.third_party lists the license of every crate in Cargo.lock. It
+      # is regenerated from the tagged commit's Cargo.lock so the archives
+      # never carry a stale list (the hand-written native libraries and models
+      # section after its marker line is kept as is). The regenerated file is
+      # only packaged, not committed.
+      - name: Regenerate LICENSE.third_party
+        run: |
+          set -euo pipefail
+          CARGO_ABOUT_VERSION=0.9.2
+          BIN_DIR="$HOME/.cargo/bin"
+          mkdir -p "$BIN_DIR"
+          export PATH="$BIN_DIR:$PATH"
+          curl -fsSL "https://github.com/EmbarkStudios/cargo-about/releases/download/${CARGO_ABOUT_VERSION}/cargo-about-${CARGO_ABOUT_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | tar -xz --strip-components=1 -C "$BIN_DIR" "cargo-about-${CARGO_ABOUT_VERSION}-x86_64-unknown-linux-musl/cargo-about" \
+            || { echo "failed to install cargo-about" >&2; exit 1; }
+          scripts/third_party_licenses.sh
+          if git diff --quiet -- LICENSE.third_party; then
+            echo "LICENSE.third_party was already up to date"
+          else
+            echo "::warning::LICENSE.third_party in the repo was stale, the release archives carry the regenerated one; commit the regenerated file"
+            git diff --stat -- LICENSE.third_party
+          fi
+
       # Asset naming: vtmate-<version>-<os>-<arch>[-<variant>].<tgz|zip>, with
       # the binary (plus any bundled DLLs on Windows) at the archive's top
       # level. The CI artifact name is the <os>-<arch>[-<variant>] part.
