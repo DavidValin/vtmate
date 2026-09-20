@@ -1,55 +1,86 @@
 Domain:
 ---------------------------------------------------------------------------------------------------
-  ai voice assistant for the terminal
+  ai voice assistant for the terminal (and, in daemon mode, for the whole desktop)
   includes integrated stt and tts systems
-  integrates with ollama and llama.cpp engines
+  integrates with local llm servers (ollama, llama.cpp llama-server, any OpenAI-compatible server),
+  hosted providers (openai, anthropic, google, groq, mistral, openrouter, deepseek, xai) and
+  coding-agent CLIs (claude, codex, gemini, copilot, kiro-cli, vibe, hermes, opencode, pi)
 
 Tech Stack:
 ---------------------------------------------------------------------------------------------------
 
-  Language: Rust
-  Key libraries: whisper-rs, supertonic2, kokoro-micro, ort, cpal, crossbeam-channel
-  Testing: no testing framework
-  Data persistance: -
+  Language: Rust (edition 2024)
+  Key libraries: whisper-rs (stt), supertonic2-tts, supertonic3-tts, kokoro-micro (tts), ort (onnx runtime),
+    cpal (audio i/o), crossbeam-channel (thread messaging), crossterm (terminal ui), tokio + reqwest + llm (llm calls),
+    global-hotkey + arboard + enigo (daemon shortcuts, selection, paste), interprocess (daemon socket),
+    numbertext + num2words2-core (numbers spelled out for tts)
+  Testing: cargo test (unit tests inside the src modules, integration tests in tests/)
+  Data persistance: plain files under ~/.vtmate
+    settings (general + daemon shortcuts), agents (system prompts and agents), conversations/ (saved sessions),
+    read-files/ (saved read mode audio), tts/ (supertonic models, voice styles), install-manifest, daemon.log;
+    whisper models in ~/.whisper-models; settings and agents are backed up before a reinstall
 
 Architecture:
 ---------------------------------------------------------------------------------------------------
 
-  Multithreaded event-driven terminal application using terminal raw mode
+  Multithreaded event-driven terminal application using terminal raw mode (see threads.txt for the diagram)
   Consists of several main threads:
     UI thread: receives messages with new state and draws the terminal ui continuously
     TTS thread: receives sentences to turn into audio
     Playback thread: receives audio to be played
-    Record thread: records audio from the microphone and sends the audio chunks to TTS thread
-    Conversation thread: handles a single conversation with an agent, orchestrating user input and agent responses
-    Keyword thread: handles keyboard events from the user
+    Record thread: records audio from the microphone, detects speech and sends each utterance to the conversation thread
+    Conversation thread: transcribes the utterances (whisper) and handles the conversation with the agents (single, debate),
+      orchestrating user input, llm replies and speech
+    Keyboard thread: handles keyboard events from the user
+  Short-lived helper threads:
+    LLM stream thread (one per reply), synthesis worker and interrupt monitor (per phrase, inside the tts engines),
+    engine loader (loads and unloads the tts engines the agents in play need), WAV writer (when saving),
+    settings probe threads (is the provider reachable, which ollama models exist)
+  There is no global stop channel: the run ends through util::terminate(), which restores the terminal and exits.
+  A reply is split into phrases. Every phrase has the text shown on screen and the text spoken: code inside ``` is never
+  spoken, and digits are spelled out only for tts (spoken_numbers.rs, en / es by hand, the other languages through crates).
+  Read mode (vtmate -r file): the main thread feeds phrases to the TTS thread, with its own keyboard thread for navigation;
+    no record, conversation or llm threads. `-r-stdout` streams the speech as a wav to stdout from the main thread alone.
   Daemon mode (vtmate --daemon): the same engine threads without a terminal, plus
     Controller thread: global shortcut state machine (push-to-talk, read selection aloud, paste dictation, reset)
-    IPC server thread: local socket; attached terminals get the UI stream and forward their keys
+    Global hotkey listener (own thread on x11, main thread loop on windows and macos)
+    IPC server thread: local socket; per client a connection thread and a writer thread; attached terminals get the UI stream
+      and forward their keys
     UI sink thread: drains the UI channel headless and fans it out to attached clients
-    Attached client (plain `vtmate` while a daemon runs): the normal UI thread fed by the socket
+    Read-aloud job thread (one per selection), selection watch thread (x11) and a one shot stop thread
+    Attached client (plain `vtmate` while a daemon runs): the normal UI thread fed by the socket, a reader thread for the
+      daemon messages and the main thread forwarding the keys
 
 Features:
 ---------------------------------------------------------------------------------------------------
 
   - 📌 Continuous Voice chat (live conversation): `records user continuously and stops on silence, submitting the request to the agent`
-  - 📌 Push to Talk mode (PTT): `keep &lt;SPACE&gt; pressed while talking and release to stop recording`
-  - 🚀 AI agents debate (2 agents talking to each other): `give an initial input and let the agents talk to each other. You can interrupt in the middle of the debate changing the subject`
-  - 📌 Realtime agent swap: `change the agent by pressing &lt;ARROW_LEFT&gt; / &lt;ARROW_RIGHT&gt; (applicable to next response)`
+  - 📌 Push to Talk mode (PTT): `keep <SPACE> pressed while talking and release to stop recording`
+  - 🚀 AI agents debate (2 agents talking to each other): `give an initial input (--debate agent1 agent2 subject, or Ctrl+D) and let the agents talk to each other. You can take part in between, and interrupt changing the subject; --max-turns ends the program after N turns`
+  - 📌 Realtime agent swap: `change the agent by pressing <ARROW_LEFT> / <ARROW_RIGHT> (applicable to next response)`
+  - 📌 Edit agents in the terminal: `Ctrl+S opens the settings popup, edit or pick an agent`
   - 📌 Voice interrupt: `the agent stops talking if you interrupt via voice`
-  - 📌 Recording Pause / Resume: `toggle "&lt;SPACE&gt;" key to pause / resume voice recording only`
-  - 📌 Stop PlayBack: `press "&lt;ESCAPE&gt;" ONCE to stop the playback for the current response`
-  - 📌 Interrupt: `press "&lt;ESCAPE&gt;" TWICE to interrupt the current response alltogether`
-  - 📌 Voice speed change: `change the agent voice speed by pressing &lt;ARROW_UP&gt; / &lt;ARROW_DOWN&gt; (applicable to next response)`
-  - 📌 Daemon mode: `vtmate --daemon` runs in the background driven by global shortcuts (hold ctrl+alt+a to talk, selected text is appended; ctrl+alt+r reads the selection aloud; ctrl+alt+s dictates at the cursor; ctrl+escape resets); `vtmate` attaches to it, Ctrl+C detaches
+  - 📌 Recording Pause / Resume: `press <SPACE> once in live mode to pause / resume voice recording only`
+  - 📌 Stop PlayBack: `press <ESCAPE> ONCE to stop the playback for the current response (in a debate it also pauses it)`
+  - 📌 Reset the conversation: `press <ESCAPE> TWICE within a second to reset the history`
+  - 📌 Undo: `press "u" to remove the last response from the history`
+  - 📌 Voice speed change: `change the agent voice speed by pressing <ARROW_UP> / <ARROW_DOWN> (applicable to next response)`
+  - 📌 Source code in replies (text inside ``` blocks) is shown but never spoken
+  - 📌 Numbers and years are spelled out for the voice (`in 1950` is spoken "nineteen fifty") in all 41 languages, the screen keeps the digits
+  - 📌 Daemon mode: `vtmate --daemon` runs in the background driven by global shortcuts (hold ctrl+alt+a to talk, selected text is appended; ctrl+alt+r reads the selection aloud; ctrl+alt+s dictates at the cursor; ctrl+q resets), `vtmate` attaches to it, Ctrl+C detaches; `--daemon-status` and `--daemon-stop` (shortcuts are configurable in `[daemon]`)
   - 📌 Persistent agent selection: `[general] selected_agent` in the settings file, updated on every agent switch
-  - 📌 Voice read a txt file: `vtmate -r myfile.txt`
+  - 📌 Voice read a txt file: `vtmate -r myfile.txt` (phrase navigation and pause / resume from the keyboard)
   - 📌 Voice read text from stdin phrase by phrase: `echo "Hello. How are you?" | vtmate -r -`
-  - 📌 Save conversation as audio and text: `vtmate -s`
+  - 📌 Speech as a wav stream for piping: `vtmate -r-stdout myfile.txt`
+  - 📌 Transcribe a wav file (no llm, no tts): `vtmate --stt file.wav`
+  - 📌 Single run: `vtmate -q -p "question"` produces one response and exits
+  - 📌 Save conversation as audio and text (`vtmate -s`), or as an html player with one audio file per turn (`--save-html`); Ctrl+E starts / stops saving
+  - 📌 Clone and refine voices: `--clone-voice` / `--refine-voice` train supertonic3 voices from a wav reference
   - 📌 Load separate settings file with different agents: `vtmate -c philosophers-settings.txt`
   - 📌 Integrated `whisper`
-  - 📌 Integrated `kokoro TTS` system
+  - 📌 Integrated `kokoro TTS`, `supertonic2 TTS` and `supertonic3 TTS` systems
   - 📌 Interface with `OpenTTS` system
-  - 📌 Supports `ollama` or `llama-server`
-  - 📌 28 languages supported (`vtmate --list-voices`)
+  - 📌 Supports `ollama`, `llama-server`, OpenAI-compatible servers, hosted providers and coding-agent CLIs
+  - 📌 41 languages supported (`vtmate --list-voices`)
   - 📌 Use any gguf model from huggingface.com or ollama models (small models reply faster)
+  - 📌 GPU acceleration: CUDA (linux, windows), Vulkan (linux, windows) and Metal (macos)
