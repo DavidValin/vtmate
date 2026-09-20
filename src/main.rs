@@ -26,6 +26,7 @@ mod log;
 mod playback;
 mod record;
 mod settings_ui;
+mod spoken_numbers;
 mod state;
 mod stt;
 mod text_field;

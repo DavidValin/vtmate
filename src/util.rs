@@ -231,9 +231,20 @@ pub fn strip_special_chars(s: &str) -> String {
 }
 
 /// Text to hand to TTS for one phrase: fenced code removed (stateful across
-/// phrases through `in_code`), then special characters stripped.
+/// phrases through `in_code`), numbers spelled out in the spoken language,
+/// then special characters stripped.
 pub fn tts_text(phrase: &str, in_code: &mut bool) -> String {
-  strip_special_chars(&strip_code_blocks(phrase, in_code))
+  let prose = strip_code_blocks(phrase, in_code);
+  // Before the strip: it would erase the "-" and "/" that separate the
+  // numbers of a date or a range and run their digits together.
+  let spoken = match crate::state::GLOBAL_STATE.get() {
+    Some(state) => {
+      let language = state.language.lock().unwrap().clone();
+      crate::spoken_numbers::expand(&prose, &language)
+    }
+    None => prose,
+  };
+  strip_special_chars(&spoken)
 }
 
 #[cfg(test)]

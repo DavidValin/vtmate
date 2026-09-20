@@ -96,10 +96,11 @@ jobs:
                 out="release_assets/$(basename "$tgz")"
                 gzip -dc "$tgz" > "${out%.tgz}.tar"
                 tar -rf "${out%.tgz}.tar" -C "$PDF_DIR" README.pdf quicksheet.pdf
+                tar -rf "${out%.tgz}.tar" LICENSE LICENSE.commercial LICENSE.noncommercial LICENSE.third_party
                 gzip -n -c "${out%.tgz}.tar" > "$out"
                 rm -f "${out%.tgz}.tar"
               done < <(find "$dir" -name '*.tgz')
-              echo "packaged (pre-built archive + README.pdf + quicksheet.pdf): $name"
+              echo "packaged (pre-built archive + README.pdf + quicksheet.pdf + licenses): $name"
               continue
             fi
 
@@ -116,19 +117,20 @@ jobs:
             bindir="$(dirname "$bin")"
             case "$bin" in
               *.exe)
+                cp LICENSE LICENSE.commercial LICENSE.noncommercial LICENSE.third_party "$bindir"
                 ( cd "$bindir" && zip -qr "${GITHUB_WORKSPACE}/release_assets/vtmate-${VERSION}-${name}.zip" . )
-                echo "packaged (zip): $name" ;;
+                echo "packaged (zip + licenses): $name" ;;
               *)
-                cp "$PDF" "$QUICKSHEET" "$bindir"
+                cp "$PDF" "$QUICKSHEET" LICENSE LICENSE.commercial LICENSE.noncommercial LICENSE.third_party "$bindir"
                 ( cd "$bindir" && tar -czf "${GITHUB_WORKSPACE}/release_assets/vtmate-${VERSION}-${name}.tgz" -- * )
-                echo "packaged (tgz + README.pdf + quicksheet.pdf): $name" ;;
+                echo "packaged (tgz + README.pdf + quicksheet.pdf + licenses): $name" ;;
             esac
           done
 
           echo "--- release_assets ---"
           ls -lh release_assets
 
-      - name: Verify README.pdf and quicksheet.pdf reached every tgz
+      - name: Verify README.pdf, quicksheet.pdf and the licenses reached every tgz
         run: |
           set -euo pipefail
           for a in release_assets/*.tgz; do
@@ -137,7 +139,21 @@ jobs:
             # lets grep exit on the match while tar is still writing, and the
             # resulting EPIPE trips pipefail even though the PDF is there.
             listing="$(tar -tzf "$a")"
-            for want in README.pdf quicksheet.pdf; do
+            for want in README.pdf quicksheet.pdf LICENSE LICENSE.commercial LICENSE.noncommercial LICENSE.third_party; do
+              grep -qxF "$want" <<<"$listing" || {
+                echo "$want missing from $a" >&2; exit 1; }
+            done
+            echo "ok: $a"
+          done
+
+      # The zips carry the licenses (the PDFs are tgz-only).
+      - name: Verify the licenses reached every zip
+        run: |
+          set -euo pipefail
+          for a in release_assets/*.zip; do
+            [ -e "$a" ] || continue
+            listing="$(unzip -Z1 "$a")"
+            for want in LICENSE LICENSE.commercial LICENSE.noncommercial LICENSE.third_party; do
               grep -qxF "$want" <<<"$listing" || {
                 echo "$want missing from $a" >&2; exit 1; }
             done

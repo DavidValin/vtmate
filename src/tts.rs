@@ -173,6 +173,8 @@ pub fn speak(
   interrupt_counter: Arc<AtomicU64>,
   expected_interrupt: u64,
 ) -> Result<SpeakOutcome, Box<dyn std::error::Error + Send + Sync>> {
+  // Engines skip or misread digits, so they are spoken as words.
+  let text = &crate::spoken_numbers::expand(text, language);
   let outcome = if tts == "opentts" {
     opentts_tts::speak_via_opentts(
       text,

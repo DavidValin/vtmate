@@ -1,0 +1,15 @@
+Third-party licenses of the Rust crates used by vtmate
+=======================================================
+
+{{#each licenses}}
+--------------------------------------------------------------------------------
+{{name}}
+
+Used by:
+{{#each used_by}}
+  - {{crate.name}} {{crate.version}}{{#if crate.repository}} ({{crate.repository}}){{/if}}
+{{/each}}
+
+{{{text}}}
+
+{{/each}}

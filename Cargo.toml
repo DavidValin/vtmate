@@ -1,6 +1,6 @@
 [package]
 name = "vtmate"
-version = "0.15.0"
+version = "0.16.0"
 edition = "2024"
 build = "build.rs"
 
@@ -12,6 +12,9 @@ license-file = "LICENSE"
 readme = "README.md"
 
 [dependencies]
+numbertext = "0.1"
+num2words2-core = "0.1"
+num-bigint = "0.4"
 anyhow = "1.0"
 serde_ini = "0.2.0"
 clap = { version = "4", features = ["derive", "env"] }

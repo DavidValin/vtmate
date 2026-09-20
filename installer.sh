@@ -34,7 +34,7 @@ Options:
                         has a runtime for; cpu-static is the musl build, which
                         runs anywhere but cannot use a sound server)
   --version TAG         install a specific release tag instead of the latest
-  --yes                 answer yes to every question (reinstall, uninstall)
+  --yes                 answer yes to every question (reinstall, uninstall, accepting the licenses)
   --dry-run             detect, select and report; download and install nothing
   --uninstall           remove the program, its libraries, PATH entries and ~/.vtmate
   --help                this text
@@ -70,12 +70,20 @@ die()  { printf '❌ %s\n' "$*" >&2; exit 1; }
 
 # colour only when stdout is a terminal, so redirected output stays plain
 if [ -t 1 ]; then
-  GREEN="$(printf '\033[32m')"; RESET="$(printf '\033[0m')"
+  GREEN="$(printf '\033[32m')"; YELLOW="$(printf '\033[33m')"; RESET="$(printf '\033[0m')"; HYPERLINKS=1
 else
-  GREEN=""; RESET=""
+  GREEN=""; YELLOW=""; RESET=""; HYPERLINKS=0
 fi
 
-have_tty() { [ -r /dev/tty ] && [ -w /dev/tty ]; }
+# link URL -> the URL as a clickable terminal hyperlink (plain text when the
+# output is not a terminal)
+link() {
+  if [ "$HYPERLINKS" -eq 1 ]; then printf '\033]8;;%s\033\\%s\033]8;;\033\\' "$1" "$1"; else printf '%s' "$1"; fi
+}
+
+# /dev/tty can exist yet fail to open when there is no controlling terminal
+# (cron, CI, ssh -T), so it is opened to be sure
+have_tty() { [ -r /dev/tty ] && [ -w /dev/tty ] && ( exec </dev/tty ) 2>/dev/null; }
 
 # ask "question" "default"  -> prints the answer (default when non-interactive)
 ask() {
@@ -661,6 +669,19 @@ if [ "$DRY_RUN" -eq 1 ]; then
   for B in $CANDIDATES; do url_exists "$BASE_URL/$B" && { say "Would install: $B"; break; }; done
   exit 0
 fi
+
+# -------------------------
+# Licenses: shown and accepted before anything is installed
+# -------------------------
+LICENSE_URL="https://raw.githubusercontent.com/$REPO/refs/heads/main"
+printf '\n%s' "$YELLOW"
+printf 'vtmate licenses\n\n'
+printf ' Non commercial use:     %s\n' "$(link "$LICENSE_URL/LICENSE.noncommercial")"
+printf ' Commercial use:         %s\n' "$(link "$LICENSE_URL/LICENSE.commercial")"
+printf ' Third party licenses:   %s\n' "$(link "$LICENSE_URL/LICENSE.third_party")"
+printf '%s\n' "$RESET"
+if [ "$YES" -eq 0 ] && ! have_tty; then die "the licenses must be accepted; rerun with --yes to accept them"; fi
+confirm "I have read and accept the licenses above" "n" || { say "Aborted: the licenses were not accepted."; exit 1; }
 
 # -------------------------
 # Install: try candidates in order, keep the first one that starts
