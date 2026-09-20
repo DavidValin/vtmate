@@ -433,85 +433,159 @@ pub fn voice_styles_in(dir: std::path::PathBuf, builtin: &[&str]) -> Vec<String>
   names
 }
 
+/// Engines shown by `--list-voices`, in display order: (id, quality note).
+const LISTED_ENGINES: [(&str, &str); 4] = [
+  ("supertonic3", "★ high quality"),
+  ("supertonic2", "★ high quality"),
+  ("kokoro", "★ high quality"),
+  ("opentts", "standard quality"),
+];
+
+fn language_name(code: &str) -> &str {
+  match code {
+    "ar" => "Arabic",
+    "bg" => "Bulgarian",
+    "bn" => "Bengali",
+    "ca" => "Catalan",
+    "cs" => "Czech",
+    "da" => "Danish",
+    "de" => "German",
+    "el" => "Greek",
+    "en" => "English",
+    "es" => "Spanish",
+    "et" => "Estonian",
+    "fi" => "Finnish",
+    "fr" => "French",
+    "gu" => "Gujarati",
+    "hi" => "Hindi",
+    "hr" => "Croatian",
+    "hu" => "Hungarian",
+    "id" => "Indonesian",
+    "it" => "Italian",
+    "ja" => "Japanese",
+    "kn" => "Kannada",
+    "ko" => "Korean",
+    "lt" => "Lithuanian",
+    "lv" => "Latvian",
+    "mr" => "Marathi",
+    "nl" => "Dutch",
+    "pa" => "Punjabi",
+    "pl" => "Polish",
+    "pt" => "Portuguese",
+    "ro" => "Romanian",
+    "ru" => "Russian",
+    "sk" => "Slovak",
+    "sl" => "Slovenian",
+    "sv" => "Swedish",
+    "sw" => "Swahili",
+    "ta" => "Tamil",
+    "te" => "Telugu",
+    "tr" => "Turkish",
+    "uk" => "Ukrainian",
+    "vi" => "Vietnamese",
+    "zh" => "Chinese",
+    other => other,
+  }
+}
+
+/// Greedy word wrap of `items` (joined by `sep`) into lines of at most `width`
+/// display columns.
+fn wrap_items(items: &[String], sep: &str, width: usize) -> Vec<String> {
+  use unicode_width::UnicodeWidthStr;
+  let mut lines: Vec<String> = Vec::new();
+  let mut cur = String::new();
+  for item in items {
+    if !cur.is_empty() && cur.width() + sep.width() + item.width() > width {
+      lines.push(std::mem::take(&mut cur));
+    }
+    if !cur.is_empty() {
+      cur.push_str(sep);
+    }
+    cur.push_str(item);
+  }
+  if !cur.is_empty() {
+    lines.push(cur);
+  }
+  lines
+}
+
 pub fn print_voices() {
+  use std::io::IsTerminal;
+  let color = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
+  let paint = |code: &str, text: &str| {
+    if color {
+      format!("\x1b[{}m{}\x1b[0m", code, text)
+    } else {
+      text.to_string()
+    }
+  };
+  let term_width = crossterm::terminal::size()
+    .map(|(w, _)| w as usize)
+    .unwrap_or(100)
+    .clamp(60, 120);
+
   let langs = get_all_available_languages();
-
-  println!(
-    "supertonic3 ★ High Quality Voices\n======================================================\n{:<8}\t{:<12}\t{:<2}\t{}",
-    "TTS", "Language", "Flag", "Voices"
-  );
-  println!("======================================================");
-  for lang in langs.iter() {
-    let voices = get_voices_for("supertonic3", lang);
-    if voices.is_empty() {
+  println!();
+  for (tts, quality) in LISTED_ENGINES {
+    // languages sharing an identical voice list are shown once
+    let mut groups: Vec<(Vec<String>, Vec<&str>)> = Vec::new();
+    for lang in langs.iter() {
+      let voices = get_voices_for(tts, lang);
+      if voices.is_empty() {
+        continue;
+      }
+      match groups.iter_mut().find(|(v, _)| *v == voices) {
+        Some((_, l)) => l.push(lang),
+        None => groups.push((voices, vec![lang])),
+      }
+    }
+    if groups.is_empty() {
       continue;
     }
-    let code = crate::util::lang_code(lang);
-    let voices_str = voices.join(", ");
+    let lang_total: usize = groups.iter().map(|(_, l)| l.len()).sum();
     println!(
-      "{:<8}\t{:<12}\t{:<2}\t{}",
-      "supertonic3", lang, code, voices_str
+      "{}  {}  {}",
+      paint("1;36", tts),
+      paint("33", quality),
+      paint("2", &format!("{} languages", lang_total))
     );
-  }
-  print_voice_styles_hint("supertonic3");
-  println!();
-  println!(
-    "supertonic2 ★ High Quality Voices\n======================================================\n{:<8}\t{:<12}\t{:<2}\t{}",
-    "TTS", "Language", "Flag", "Voices"
-  );
-  println!("======================================================");
-  for lang in langs.iter() {
-    let voices = get_voices_for("supertonic2", lang);
-    if voices.is_empty() {
-      continue;
-    }
-    let code = crate::util::lang_code(lang);
-    let voices_str = voices.join(", ");
-    println!(
-      "{:<8}\t{:<12}\t{:<2}\t{}",
-      "supertonic2", lang, code, voices_str
-    );
-  }
-  print_voice_styles_hint("supertonic2");
-  println!();
-  println!(
-    "Standard Quality Voices\n======================================================\n{:<8}\t{:<12}\t{:<2}\t{}",
-    "TTS", "Language", "Flag", "Voices"
-  );
-  println!();
-  println!();
+    println!("{}", paint("2", &"─".repeat(term_width.min(72))));
 
-  println!(
-    "kokoro ★ High Quality Voices\n======================================================\n{:<8}\t{:<12}\t{:<2}\t{}",
-    "TTS", "Language", "Flag", "Voices"
-  );
-  println!("======================================================");
-  // kokoro
-  for lang in langs.iter() {
-    let voices = get_voices_for("kokoro", lang);
-    if voices.is_empty() {
-      continue;
+    for (voices, group_langs) in &groups {
+      if group_langs.len() > 1 {
+        let names: Vec<String> = group_langs.iter().map(|l| l.to_string()).collect();
+        println!("  {}", paint("1", &format!("{} languages", names.len())));
+        for line in wrap_items(&names, "  ", term_width - 4) {
+          println!("    {}", line);
+        }
+        println!("  {}", paint("2", "voices"));
+        for line in wrap_items(voices, "  ", term_width - 4) {
+          println!("    {}", paint("32", &line));
+        }
+        println!();
+      } else {
+        let lang = group_langs[0];
+        let label = format!("{:<4}{:<12}", lang, language_name(lang));
+        // hanging indent so wrapped voices line up under the first one
+        let indent = " ".repeat(2 + 16);
+        let lines = wrap_items(voices, "  ", term_width.saturating_sub(indent.len()));
+        for (i, line) in lines.iter().enumerate() {
+          if i == 0 {
+            println!("  {}{}", paint("1", &label), paint("32", line));
+          } else {
+            println!("{}{}", indent, paint("32", line));
+          }
+        }
+      }
     }
-    let code = crate::util::lang_code(lang);
-    let voices_str = voices.join(", ");
-    println!("{:<8}\t{:<12}\t{:<2}\t{}", "kokoro", lang, code, voices_str);
-  }
-  println!();
-  println!();
-
-  println!("======================================================");
-  // OpenTTS
-  for lang in langs.iter() {
-    let voices = get_voices_for("opentts", lang);
-    if voices.is_empty() {
-      continue;
+    // separate the per-language rows from the hint / next engine
+    if groups.iter().all(|(_, l)| l.len() == 1) {
+      println!();
     }
-    let code = crate::util::lang_code(lang);
-    let voices_str = voices.join(", ");
-    println!(
-      "{:<8}\t{:<12}\t{:<2}\t{}",
-      "opentts", lang, code, voices_str
-    );
+    print_voice_styles_hint(tts);
+    if voice_styles_dir_for(tts).is_some() {
+      println!();
+    }
   }
 }
 
@@ -520,7 +594,7 @@ pub fn print_voices() {
 fn print_voice_styles_hint(tts: &str) {
   if let Some(dir) = voice_styles_dir_for(tts) {
     println!(
-      "add your own {} voices as <name>.json in {}",
+      "  add your own {} voices as <name>.json in {}",
       tts,
       dir.display()
     );
