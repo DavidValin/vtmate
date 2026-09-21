@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/DavidValin/vtmate/releases"><img src="https://img.shields.io/github/v/release/DavidValin/vtmate?style=flat&label=release" alt="Latest release" /></a>
+  <a href="https://github.com/DavidValin/vtmate/releases"><img src="https://img.shields.io/github/v/release/DavidValin/vtmate?style=flat&label=release&color=brightgreen" alt="Latest release" /></a>
   <a href="https://github.com/DavidValin/vtmate"><img src="https://img.shields.io/github/stars/DavidValin/vtmate?style=flat&logo=github&label=Star" alt="GitHub stars" /></a>
 </p>
 
