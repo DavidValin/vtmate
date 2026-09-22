@@ -93,7 +93,7 @@ mod config;
 use config::{
   Args, DaemonSettings, GeneralSettings, load_daemon_settings,
   load_general_settings, load_settings, persist_selected_agent, resolve_agents_path,
-  resolve_settings_path, save_settings, select_agent, split_leading_sections,
+  resolve_settings_path, save_settings, select_agent, select_startup_agent, split_leading_sections,
   try_load_settings, validate_agent,
 };
 
@@ -268,6 +268,28 @@ fn select_agent_precedence() {
   // unknown persisted selection falls back to the first agent
   let general = GeneralSettings { selected_agent: "nobody".to_string() };
   assert_eq!(select_agent(&agents, None, &general).unwrap().name, "main agent");
+}
+
+#[test]
+fn select_startup_agent_ignores_general_selection_under_dash_c() {
+  let path = temp_settings(&format!("{}\n{}", AGENT_A, AGENT_B));
+  let agents = load_settings(&path, &default_args()).unwrap();
+  let general = GeneralSettings { selected_agent: "explainer".to_string() };
+
+  // without -c the persisted selection applies
+  let args = default_args();
+  assert_eq!(select_startup_agent(&agents, &args, &general).unwrap().name, "explainer");
+
+  // with -c it belongs to another agents file: the first agent starts
+  let mut args = default_args();
+  args.config = Some("/tmp/other-agents".to_string());
+  assert_eq!(select_startup_agent(&agents, &args, &general).unwrap().name, "main agent");
+
+  // -a still picks, and still fails when unknown
+  args.agent = Some("explainer".to_string());
+  assert_eq!(select_startup_agent(&agents, &args, &general).unwrap().name, "explainer");
+  args.agent = Some("nobody".to_string());
+  assert!(select_startup_agent(&agents, &args, &general).is_err());
 }
 
 #[test]

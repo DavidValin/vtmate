@@ -1146,6 +1146,21 @@ pub fn select_agent(
   }
 }
 
+/// The agent to start with, given how vtmate was launched. `[general]
+/// selected_agent` names an agent of `~/.vtmate/agents`, so under `-c` it says
+/// nothing about the agents file in use: that run starts on the file's first
+/// agent, unless `-a` names another.
+pub fn select_startup_agent(
+  agents: &[AgentSettings],
+  args: &Args,
+  general: &GeneralSettings,
+) -> Result<AgentSettings, String> {
+  if args.config.is_some() {
+    return select_agent(agents, args.agent.as_deref(), &GeneralSettings::default());
+  }
+  select_agent(agents, args.agent.as_deref(), general)
+}
+
 /// Write `selected_agent = <name>` into the `[general]` section of the
 /// settings file, touching nothing else. The section is created at the top of
 /// the file when missing. The file is replaced atomically (tmp + rename).

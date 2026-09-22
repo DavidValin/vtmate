@@ -74,7 +74,7 @@ pub fn spawn_detached(args: &Args) -> ! {
     }
   };
   let general = config::load_general_settings(&settings_path).unwrap_or_default();
-  if let Err(e) = config::select_agent(&agents, args.agent.as_deref(), &general) {
+  if let Err(e) = config::select_startup_agent(&agents, &args, &general) {
     println!("✗ {}", e);
     plain_exit(1);
   }
@@ -361,7 +361,7 @@ pub fn run_foreground(args: &Args) -> ! {
     )
   });
   let general = config::load_general_settings(&settings_path).unwrap_or_default();
-  let settings = config::select_agent(&agents, args.agent.as_deref(), &general)
+  let settings = config::select_startup_agent(&agents, &args, &general)
     .unwrap_or_else(|e| fail_start(&e, EXIT_BAD_SETTINGS));
   let daemon_settings = config::load_daemon_settings(&settings_path)
     .unwrap_or_else(|e| fail_start(&e.to_string(), EXIT_BAD_SETTINGS));

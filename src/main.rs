@@ -232,7 +232,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // Select agent: -a, else [general] selected_agent, else the first one
     let general = config::load_general_settings(&settings_path).unwrap_or_default();
-    let settings = match config::select_agent(&agents, args.agent.as_deref(), &general) {
+    let settings = match config::select_startup_agent(&agents, &args, &general) {
       Ok(a) => a,
       Err(e) => {
         let _ = terminal::disable_raw_mode();
@@ -726,7 +726,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   };
   // Select agent: -a, else [general] selected_agent, else the first one
   let general = config::load_general_settings(&settings_path).unwrap_or_default();
-  let settings = match config::select_agent(&agents, args.agent.as_deref(), &general) {
+  let settings = match config::select_startup_agent(&agents, &args, &general) {
     Ok(a) => a,
     Err(e) => {
       let _ = terminal::disable_raw_mode();
@@ -939,7 +939,7 @@ fn run_read_stdout_cli(input: &str, args: &config::Args) -> ! {
   });
   let general = config::load_general_settings(&settings_path).unwrap_or_default();
   let settings =
-    config::select_agent(&agents, args.agent.as_deref(), &general).unwrap_or_else(|e| {
+    config::select_startup_agent(&agents, &args, &general).unwrap_or_else(|e| {
       eprintln!("✗ {}", e);
       std::process::exit(1);
     });
@@ -1088,7 +1088,7 @@ fn run_stt_cli(input: &str, args: &config::Args) -> ! {
   });
   let general = config::load_general_settings(&settings_path).unwrap_or_default();
   let settings =
-    config::select_agent(&agents, args.agent.as_deref(), &general).unwrap_or_else(|e| {
+    config::select_startup_agent(&agents, &args, &general).unwrap_or_else(|e| {
       eprintln!("✗ {}", e);
       std::process::exit(1);
     });
