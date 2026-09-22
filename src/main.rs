@@ -14,6 +14,7 @@ use std::time::Instant;
 mod assets;
 mod attach;
 mod audio;
+mod compose;
 mod config;
 mod conversation;
 mod daemon;
@@ -32,12 +33,24 @@ mod stt;
 mod text_field;
 mod tts;
 mod ui;
+mod ui_file_browser;
 mod util;
 use crate::conversation::Command;
 
 static START_INSTANT: OnceLock<Instant> = OnceLock::new();
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  // Internal: the compose popup runs this binary again to read a PDF, so a
+  // file the parser chokes on can only ever take this child process down.
+  {
+    let mut raw = std::env::args_os().skip(1);
+    if raw.next().is_some_and(|a| a == "--extract-pdf-text") {
+      match raw.next() {
+        Some(path) => crate::compose::print_pdf_text(std::path::Path::new(&path)),
+        None => std::process::exit(2),
+      }
+    }
+  }
   crate::audio::install_alsa_error_handler();
   crate::audio::ensure_alsa_plugin_dir();
 
@@ -399,6 +412,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
           interrupt_counter,
           Some(read_file_mode),
           tx_cmd_conv,
+          None,
         )
       }
     });
@@ -805,6 +819,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let stop_play_tx = engine.stop_play_tx.clone();
     let interrupt_counter = engine.interrupt_counter.clone();
     let tx_cmd_conv = engine.tx_cmd_conv.clone();
+    let tx_utt = engine.tx_utt.clone();
     move || {
       keyboard::keyboard_thread(
         tx_ui,
@@ -813,6 +828,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         interrupt_counter,
         None, // No read-file mode
         tx_cmd_conv,
+        Some(tx_utt),
       );
     }
   });

@@ -178,6 +178,8 @@ pub struct AppState {
   pub daemon_mode: AtomicBool,
   /// The Ctrl+S settings popup: closed, or the agent list / form being edited.
   pub settings_ui: Arc<Mutex<crate::settings_ui::SettingsUi>>,
+  /// The Enter compose popup: closed, or the message and files being edited.
+  pub compose_ui: Arc<Mutex<crate::compose::ComposeUi>>,
   /// `--ptt` as it was given on the command line. It overrides what the file
   /// says, at startup and every time the settings popup reloads it.
   pub ptt_override: Mutex<Option<bool>>,
@@ -257,6 +259,7 @@ impl AppState {
       tts_read_active: Arc::new(AtomicBool::new(false)),
       daemon_mode: AtomicBool::new(false),
       settings_ui: Arc::new(Mutex::new(crate::settings_ui::SettingsUi::default())),
+      compose_ui: Arc::new(Mutex::new(crate::compose::ComposeUi::default())),
       ptt_override: Mutex::new(None),
     }
   }

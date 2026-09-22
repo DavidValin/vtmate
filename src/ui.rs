@@ -7,6 +7,7 @@ use crate::util::lang_code;
 use crossbeam_channel::Receiver;
 use crossterm::{
   cursor::{Hide, MoveTo, Show},
+  event::{KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags},
   execute,
   style::{Print, ResetColor},
   terminal::{self, Clear, ClearType, ScrollUp},
@@ -155,6 +156,11 @@ pub fn spawn_ui_thread(
     let mut modal_visible = false;
     let mut settings_visible = false;
     let mut save_modal_visible = false;
+    let mut compose_visible = false;
+    // The compose popup is drawn once per batch of messages, not once per
+    // message: a paste reaches it as one key per character, and every one of
+    // those asks for a redraw.
+    let mut compose_dirty = false;
     // A popup runs on the alternate screen, so neither it nor anything
     // scrolling underneath it reaches the primary screen's scrollback.
     let mut popup_on_alt = false;
@@ -226,6 +232,8 @@ pub fn spawn_ui_thread(
             render_debate_modal(&mut out, &buffer.wrapped);
           } else if save_modal_visible {
             render_save_modal(&mut out, &buffer.wrapped);
+          } else if compose_visible {
+            render_compose_modal(&mut out, &buffer.wrapped);
           }
         }
       }
@@ -400,6 +408,43 @@ pub fn spawn_ui_thread(
             }
           }
 
+          "compose_show" => {
+            if !compose_visible {
+              compose_visible = true;
+              open_popup_screen(&mut out, &mut popup_on_alt, &mut resized_during_popup);
+              // Lets a terminal that supports it report Ctrl+Enter as such;
+              // one that does not ignores the request. Only asked for while
+              // the popup is up, where Ctrl+Enter sends.
+              let _ = execute!(
+                out,
+                PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+              );
+            }
+            render_compose_modal(&mut out, &buffer.wrapped);
+            compose_dirty = false;
+          }
+
+          "compose_hide" => {
+            if compose_visible {
+              let _ = execute!(out, PopKeyboardEnhancementFlags);
+            }
+            compose_visible = false;
+            compose_dirty = false;
+            bottom_bar = close_popup_screen(
+              &mut out,
+              &mut popup_on_alt,
+              resized_during_popup,
+              &buffer,
+              &ui_state,
+              &spinner,
+              &status_line,
+            );
+          }
+
+          "compose_update" => {
+            compose_dirty |= compose_visible;
+          }
+
           "redraw_full_history" => {
             // Rebuilt in bulk (rebuild_history) and printed once
             // (reprint_history): the character-reveal path redraws the bottom
@@ -426,8 +471,14 @@ pub fn spawn_ui_thread(
           render_debate_modal(&mut out, &buffer.wrapped);
         } else if save_modal_visible && !msg_type.starts_with("save_modal") {
           render_save_modal(&mut out, &buffer.wrapped);
+        } else if compose_visible && !msg_type.starts_with("compose") {
+          compose_dirty = true;
         }
       }
+      if compose_dirty && compose_visible {
+        render_compose_modal(&mut out, &buffer.wrapped);
+      }
+      compose_dirty = false;
 
       // Checked after draining, not before: a caller printing its own final
       // line sends it and sets this in either order (see attach::finish), and
@@ -2003,6 +2054,295 @@ fn render_debate_modal<W: Write>(out: &mut W, buffer: &[String]) {
     .unwrap();
   }
 
+  out.flush().unwrap();
+}
+
+/// The Enter popup: a message field, the files attached to it, and the Send
+/// and Add file buttons - the same dark bordered box [`render_debate_modal`]
+/// uses.
+fn render_compose_modal<W: Write>(out: &mut W, buffer: &[String]) {
+  // The whole frame goes out in one write: stdout is line-buffered, so drawing
+  // straight to it sends the frame in many small pieces the terminal can paint
+  // half-way through.
+  let mut frame: Vec<u8> = Vec::with_capacity(16 * 1024);
+  draw_compose_modal(&mut frame, buffer);
+  let _ = out.write_all(&frame);
+  let _ = out.flush();
+}
+
+fn draw_compose_modal<W: Write>(out: &mut W, buffer: &[String]) {
+  use crate::compose::Focus;
+  let state = GLOBAL_STATE.get().expect("AppState not initialized");
+  let ui = state.compose_ui.lock().unwrap().clone();
+
+  let (cols, rows) = terminal::size().unwrap_or((80, 24));
+  let modal_width = std::cmp::min(76, cols.saturating_sub(4)).max(20);
+  let modal_height = std::cmp::min(19, rows.saturating_sub(2)).max(8);
+  let modal_x = cols.saturating_sub(modal_width) / 2;
+  let modal_y = rows.saturating_sub(modal_height) / 2;
+  let box_width = modal_width as usize - 4;
+  let avail = box_width.saturating_sub(1).max(1);
+
+  // Every row is written over in place (its text, then erase to the end of the
+  // line) rather than the screen being blanked first, so no frame ever shows
+  // an empty screen between two drawings.
+  let (view_start, visible) = viewport(buffer.len(), rows);
+  for y in 0..rows {
+    let line = buffer
+      .get(view_start + y as usize)
+      .filter(|_| (y as usize) < visible);
+    execute!(
+      out,
+      MoveTo(0, y),
+      ResetColor,
+      Print(match line {
+        Some(line) => format!("\x1b[90m{}\x1b[0m\x1b[K", line),
+        None => "\x1b[K".to_string(),
+      })
+    )
+    .unwrap();
+  }
+
+  for y in modal_y..modal_y + modal_height {
+    execute!(
+      out,
+      MoveTo(modal_x, y),
+      Print(format!(
+        "\x1b[48;5;234m{}\x1b[0m",
+        " ".repeat(modal_width as usize)
+      ))
+    )
+    .unwrap();
+  }
+  execute!(
+    out,
+    MoveTo(modal_x, modal_y),
+    Print(format!(
+      "\x1b[48;5;234m\x1b[97m┌{}┐\x1b[0m",
+      "─".repeat(modal_width as usize - 2)
+    ))
+  )
+  .unwrap();
+  let title = " Write a message ";
+  execute!(
+    out,
+    MoveTo(
+      modal_x + (modal_width - title.len() as u16) / 2,
+      modal_y
+    ),
+    Print(format!("\x1b[48;5;234m\x1b[97;1m{}\x1b[0m", title))
+  )
+  .unwrap();
+
+  // Layout, top down: message label, TEXT_ROWS of message, files label,
+  // FILE_ROWS of files, one row for the path prompt or a notice, then the
+  // buttons and the footer, anchored to the bottom border.
+  const TEXT_ROWS: u16 = 5;
+  const FILE_ROWS: u16 = 3;
+  let browsing = ui.browser.is_some();
+  let text_focused = ui.focus == Focus::Text && !browsing;
+  let label = |focused: bool| {
+    if focused { "\x1b[97;1m" } else { "\x1b[90m" }
+  };
+
+  execute!(
+    out,
+    MoveTo(modal_x + 2, modal_y + 1),
+    Print(format!(
+      "\x1b[48;5;234m{}{}\x1b[0m",
+      label(text_focused),
+      fit_to_width(" Message:", box_width)
+    ))
+  )
+  .unwrap();
+
+  let chars: Vec<char> = ui.text.chars().collect();
+  let total = chars.len();
+  let caret = ui.caret.min(total);
+  let mut line_bounds: Vec<(usize, usize)> = Vec::new();
+  let mut seg_start = 0;
+  for (i, c) in chars.iter().enumerate() {
+    if *c == '\n' {
+      line_bounds.push((seg_start, i));
+      seg_start = i + 1;
+    }
+  }
+  line_bounds.push((seg_start, total));
+  let caret_line = line_bounds
+    .iter()
+    .position(|(s, e)| caret >= *s && caret <= *e)
+    .unwrap_or(0);
+  let total_lines = line_bounds.len();
+  let start_line = if !text_focused || total_lines <= TEXT_ROWS as usize {
+    0
+  } else {
+    caret_line
+      .saturating_sub(TEXT_ROWS as usize - 1)
+      .min(total_lines - TEXT_ROWS as usize)
+  };
+  for row in 0..TEXT_ROWS {
+    let li = start_line + row as usize;
+    let content = match line_bounds.get(li) {
+      Some(&(s, e)) if s == e && li == 0 && !text_focused && ui.text.is_empty() => {
+        "\x1b[2m(write here, or hold Space on a button and speak)\x1b[22m".to_string()
+      }
+      Some(&(s, e)) => {
+        let caret_col = (text_focused && li == caret_line).then(|| caret - s);
+        render_field_line(&chars[s..e], caret_col, avail)
+      }
+      None => String::new(),
+    };
+    let pad = box_width.saturating_sub(visible_columns(&content) + 1);
+    execute!(
+      out,
+      MoveTo(modal_x + 2, modal_y + 2 + row),
+      Print(format!(
+        "\x1b[48;5;237m\x1b[97m {}{}\x1b[0m",
+        content,
+        " ".repeat(pad)
+      ))
+    )
+    .unwrap();
+  }
+
+  let files_y = modal_y + 2 + TEXT_ROWS;
+  let files_focused = ui.focus == Focus::Files && !browsing;
+  let files_label = if ui.loading > 0 {
+    format!(" Files ({}) - reading {}...", ui.files.len(), ui.loading)
+  } else {
+    format!(" Files ({}):", ui.files.len())
+  };
+  execute!(
+    out,
+    MoveTo(modal_x + 2, files_y),
+    Print(format!(
+      "\x1b[48;5;234m{}{}\x1b[0m",
+      label(files_focused),
+      fit_to_width(&files_label, box_width)
+    ))
+  )
+  .unwrap();
+  let first_file = if ui.file_cursor >= FILE_ROWS as usize {
+    ui.file_cursor + 1 - FILE_ROWS as usize
+  } else {
+    0
+  };
+  for row in 0..FILE_ROWS {
+    let idx = first_file + row as usize;
+    let line = match ui.files.get(idx) {
+      Some(f) => {
+        let selected = files_focused && idx == ui.file_cursor;
+        let text = format!(
+          " {} {}  \x1b[90m({} chars)",
+          if selected { "▶" } else { "•" },
+          f.name,
+          f.chars
+        );
+        format!(
+          "{}{}",
+          if selected { "\x1b[47;30m" } else { "\x1b[97m" },
+          fit_to_width(&text, box_width)
+        )
+      }
+      None if idx == 0 => "\x1b[90m (none attached)".to_string(),
+      None => String::new(),
+    };
+    let pad = box_width.saturating_sub(visible_columns(&line));
+    execute!(
+      out,
+      MoveTo(modal_x + 2, files_y + 1 + row),
+      Print(format!("\x1b[48;5;234m{}{}\x1b[0m", line, " ".repeat(pad)))
+    )
+    .unwrap();
+  }
+
+  let status_y = files_y + 1 + FILE_ROWS;
+  let status = match &ui.notice {
+    Some(notice) => format!(
+      "\x1b[91m▲ {}",
+      fit_to_width(notice, box_width.saturating_sub(2))
+    ),
+    None => String::new(),
+  };
+  execute!(
+    out,
+    MoveTo(modal_x + 2, status_y),
+    Print(format!("\x1b[48;5;234m{}\x1b[0m", status))
+  )
+  .unwrap();
+
+  // Send on the left half, Add file on the right half.
+  let instructions_y = modal_y + modal_height - 3;
+  let button_y = (status_y + 1).min(instructions_y.saturating_sub(4));
+  let half = modal_width / 2;
+  render_modal_button(
+    out,
+    modal_x,
+    half,
+    button_y,
+    "Send",
+    ui.focus == Focus::Send && !browsing,
+    "\x1b[30;42m",
+  );
+  render_modal_button(
+    out,
+    modal_x + half,
+    modal_width - half,
+    button_y,
+    "Add file",
+    ui.focus == Focus::Attach && !browsing,
+    "\x1b[30;47m",
+  );
+
+  execute!(
+    out,
+    MoveTo(modal_x + 2, instructions_y),
+    Print(format!(
+      "\x1b[48;5;234m\x1b[90m{}\x1b[0m",
+      "─".repeat(modal_width as usize - 4)
+    ))
+  )
+  .unwrap();
+  let footer = if ui.focus == Focus::Files {
+    "\x1b[97m Tab \x1b[90mSwitch focus   \x1b[97mDel \x1b[90mRemove   \x1b[97mCtrl+Enter \x1b[90mSend   \x1b[97mEsc \x1b[90mClose"
+  } else if ui.focus == Focus::Text {
+    "\x1b[97m Tab \x1b[90mSwitch focus   \x1b[97mCtrl+Enter \x1b[90mSend   \x1b[97mEsc \x1b[90mClose"
+  } else {
+    "\x1b[97m Tab \x1b[90mSwitch focus   \x1b[97mSpace \x1b[90mTalk   \x1b[97mCtrl+Enter \x1b[90mSend   \x1b[97mEsc \x1b[90mClose"
+  };
+  execute!(
+    out,
+    MoveTo(modal_x + 2, instructions_y + 1),
+    Print(format!("\x1b[48;5;234m{}\x1b[0m", footer))
+  )
+  .unwrap();
+
+  execute!(
+    out,
+    MoveTo(modal_x, modal_y + modal_height - 1),
+    Print(format!(
+      "\x1b[48;5;234m\x1b[97m└{}┘\x1b[0m",
+      "─".repeat(modal_width as usize - 2)
+    ))
+  )
+  .unwrap();
+  for y in (modal_y + 1)..(modal_y + modal_height - 1) {
+    execute!(
+      out,
+      MoveTo(modal_x, y),
+      Print("\x1b[48;5;234m\x1b[97m│\x1b[0m")
+    )
+    .unwrap();
+    execute!(
+      out,
+      MoveTo(modal_x + modal_width - 1, y),
+      Print("\x1b[48;5;234m\x1b[97m│\x1b[0m")
+    )
+    .unwrap();
+  }
+  if let Some(browser) = &ui.browser {
+    crate::ui_file_browser::render(out, browser, "Add file");
+  }
   out.flush().unwrap();
 }
 

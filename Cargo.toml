@@ -60,6 +60,7 @@ global-hotkey = "0.8"
 arboard = { version = "3.6", default-features = false }
 enigo = { version = "0.6", default-features = false, features = ["x11rb"] }
 interprocess = "2.4"
+pdf-extract = "0.12.1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

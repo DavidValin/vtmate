@@ -58,6 +58,7 @@ pub fn keyboard_thread(
   // Optional parameters for read-file mode
   read_file_mode: Option<ReadFileMode>,
   tx_cmd: Sender<Command>,
+  tx_utt: Option<Sender<crate::audio::Utterance>>,
 ) {
   // Raw mode lets us capture single key presses (space to pause/resume).
   let ctx = KeyCtx {
@@ -66,6 +67,7 @@ pub fn keyboard_thread(
     stop_play_tx: &stop_play_tx,
     interrupt_counter: &interrupt_counter,
     tx_cmd: &tx_cmd,
+    tx_utt: tx_utt.as_ref(),
   };
   let mut st = KeyLocalState::default();
   loop {
@@ -184,6 +186,9 @@ pub struct KeyCtx<'a> {
   pub stop_play_tx: &'a Sender<()>,
   pub interrupt_counter: &'a Arc<AtomicU64>,
   pub tx_cmd: &'a Sender<Command>,
+  /// Where a message typed in the compose popup goes, as if it were an
+  /// utterance; absent where no conversation is running.
+  pub tx_utt: Option<&'a Sender<crate::audio::Utterance>>,
 }
 
 /// Per-input-source state: double-ESC timing and the space push-to-talk hold.
@@ -237,6 +242,27 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
       let _ = ctx.tx_ui.send(message);
     }
     return KeyOutcome::Continue;
+  }
+
+  // The compose popup takes the keyboard the same way, except for the space
+  // that is push-to-talk while its message field is not the one being typed in.
+  if crate::compose::is_open(state) {
+    match crate::compose::handle_key(state, k, ctx.tx_ui) {
+      crate::compose::Outcome::Handled(messages) => {
+        for message in messages {
+          let _ = ctx.tx_ui.send(message);
+        }
+        return KeyOutcome::Continue;
+      }
+      crate::compose::Outcome::Submit(text, messages) => {
+        for message in messages {
+          let _ = ctx.tx_ui.send(message);
+        }
+        submit_typed_message(state, ctx, text);
+        return KeyOutcome::Continue;
+      }
+      crate::compose::Outcome::PassThrough => {}
+    }
   }
 
   if k.modifiers.contains(KeyModifiers::CONTROL) {
@@ -587,6 +613,11 @@ pub fn handle_key(k: &KeyEvent, ctx: &KeyCtx, st: &mut KeyLocalState) -> KeyOutc
   }
 
   match k.code {
+    KeyCode::Enter if k.kind == KeyEventKind::Press => {
+      for message in crate::compose::open(state) {
+        let _ = ctx.tx_ui.send(message);
+      }
+    }
     KeyCode::Char(' ') => {
       if state.ptt.load(Ordering::Relaxed) {
         crate::log::log("debug", &format!("SPACE event kind={:?}", k.kind));
@@ -837,6 +868,41 @@ fn start_debate(
       max_turns
     ));
   }
+}
+
+/// Hand a message typed in the compose popup to the conversation as a turn of
+/// the user's own, cutting off whatever is being said or generated the way
+/// speaking over it does.
+fn submit_typed_message(state: &crate::state::AppState, ctx: &KeyCtx, text: String) {
+  ctx.interrupt_counter.fetch_add(1, Ordering::SeqCst);
+  let _ = ctx.stop_play_tx.try_send(());
+  state.processing_response.store(false, Ordering::Relaxed);
+  state.reply_in_flight.store(false, Ordering::Relaxed);
+  state.ui.thinking.store(false, Ordering::Relaxed);
+  let Some(tx_utt) = ctx.tx_utt else {
+    return;
+  };
+  let utterance = crate::audio::Utterance {
+    audio: crate::audio::AudioChunk {
+      data: Vec::new(),
+      channels: 1,
+      sample_rate: 16_000,
+    },
+    kind: crate::state::UtteranceKind::Llm,
+    attachment: None,
+    text: Some(text),
+  };
+  // The utterance channel holds one item; waiting for room happens off the
+  // key-handling thread.
+  let tx_utt = tx_utt.clone();
+  thread::spawn(move || {
+    if tx_utt
+      .send_timeout(utterance, Duration::from_secs(5))
+      .is_err()
+    {
+      crate::log::log("warning", "conversation busy, typed message dropped");
+    }
+  });
 }
 
 /// Open the Ctrl+E save popup: refreshes the running session's folder name

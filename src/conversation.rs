@@ -278,6 +278,15 @@ pub fn conversation_thread(
                 }
               };
               let user_text = user_text.trim().to_string();
+              if utt.text.is_none()
+                && utt.kind == UtteranceKind::Llm
+                && !user_text.is_empty()
+                && crate::compose::append_transcript(state, &user_text)
+              {
+                state.processing_response.store(false, Ordering::Relaxed);
+                let _ = tx_ui.send("compose_update|".to_string());
+                continue;
+              }
               if utt.kind == UtteranceKind::Paste {
                 state.processing_response.store(false, Ordering::Relaxed);
                 if let (false, Some(tx)) = (user_text.is_empty(), &tx_action) {
@@ -520,6 +529,19 @@ pub fn conversation_thread(
         };
         crate::log::log("info", &format!("Transcribed: '{}'", user_text));
         let user_text = user_text.trim().to_string();
+
+        // Speech while the compose popup is open is written into its message
+        // field, not sent.
+        if utt.text.is_none()
+          && utt.kind == UtteranceKind::Llm
+          && !user_text.is_empty()
+          && crate::compose::append_transcript(state, &user_text)
+        {
+          state.processing_response.store(false, Ordering::Relaxed);
+          state.reply_in_flight.store(false, Ordering::Relaxed);
+          let _ = tx_ui.send("compose_update|".to_string());
+          continue;
+        }
 
         // Daemon dictation: the transcript goes to the clipboard/paste, not to the LLM.
         if utt.kind == UtteranceKind::Paste {

@@ -764,6 +764,12 @@ const SHORTCUTS_BODY: &str = "  \x1b[90mCtrl+S\x1b[0m
     Opens the save popup, to start saving the
       conversation (.txt/.wav, html, or both) or stop
       a running save, without leaving the conversation.
+  \x1b[90mENTER\x1b[0m
+    Opens the message popup, to type a message and attach
+      .txt / .pdf files (Add file), then send it with the
+      Send button or \x1b[90mCtrl+Enter\x1b[0m. Speech is written into the
+      message while the popup is open: move focus off the
+      text with TAB, then hold SPACE and talk.
   \x1b[90mESCAPE (once)\x1b[0m
     Stops ongoing playback. In debate mode, this also
       pauses the debate - speak again to continue.

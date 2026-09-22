@@ -143,6 +143,9 @@ pub struct StateView {
   /// agents file; the client only renders this copy.
   #[serde(default)]
   pub settings: Option<crate::settings_ui::SettingsUi>,
+  /// The Enter compose popup while it is open, same idea as `settings`.
+  #[serde(default)]
+  pub compose: Option<crate::compose::ComposeUi>,
 }
 
 impl StateView {
@@ -187,6 +190,10 @@ impl StateView {
       settings: {
         let settings = state.settings_ui.lock().unwrap();
         settings.open.then(|| settings.clone())
+      },
+      compose: {
+        let compose = state.compose_ui.lock().unwrap();
+        compose.open.then(|| compose.clone())
       },
     }
   }
@@ -269,6 +276,7 @@ impl StateView {
     *state.save_modal_focus.lock().unwrap() = self.save_modal_focus;
     *state.save_modal_folder.lock().unwrap() = self.save_modal_folder.clone();
     *state.settings_ui.lock().unwrap() = self.settings.clone().unwrap_or_default();
+    *state.compose_ui.lock().unwrap() = self.compose.clone().unwrap_or_default();
   }
 }
 

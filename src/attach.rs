@@ -156,6 +156,7 @@ pub fn run(args: &crate::config::Args) -> ! {
             let was_open = crate::settings_ui::is_open(&state);
             let was_debate_open = state.debate_modal_visible.load(Ordering::Relaxed);
             let was_save_open = state.save_modal_visible.load(Ordering::Relaxed);
+            let was_compose_open = crate::compose::is_open(&state);
             v.apply(&state);
             // The popup is drawn from this mirror, and a state update is what
             // makes the daemon's last key press visible here: an explicit
@@ -179,6 +180,12 @@ pub fn run(args: &crate::config::Args) -> ! {
               forward("modal_update|".to_string());
             } else if was_debate_open {
               forward("modal_hide|".to_string());
+            }
+            let is_compose_open = crate::compose::is_open(&state);
+            if is_compose_open {
+              forward("compose_update|".to_string());
+            } else if was_compose_open {
+              forward("compose_hide|".to_string());
             }
             let is_save_open = state.save_modal_visible.load(Ordering::Relaxed);
             if is_save_open {

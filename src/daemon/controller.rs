@@ -104,6 +104,7 @@ macro_rules! key_ctx {
       stop_play_tx: &$c.stop_play_tx,
       interrupt_counter: &$c.state.interrupt_counter,
       tx_cmd: &$c.tx_cmd_conv,
+      tx_utt: Some(&$c.tx_utt),
     }
   };
 }
@@ -454,6 +455,8 @@ impl Controller {
       && !self.state.save_modal_visible.load(Ordering::SeqCst)
       // a space typed into the settings popup is text, not push-to-talk
       && !crate::settings_ui::is_open(&self.state)
+      // ...and so is one typed into the compose popup's message or path field
+      && !crate::compose::space_is_text(&self.state)
       && matches!(k.kind, KeyEventKind::Press | KeyEventKind::Repeat)
     {
       match self.active_ptt {
