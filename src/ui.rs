@@ -764,14 +764,30 @@ fn rebuild_history<'a>(
   buffer: &mut History,
   messages: impl Iterator<Item = &'a crate::conversation::ChatMessage>,
 ) {
+  // A debate needs the label to say which agent said what; a normal
+  // conversation shows the generic label live (see conversation::ASSIST_LABEL's
+  // caller) regardless of which agent is actually configured, so a rebuild
+  // matches that unless a debate is running - the same condition
+  // `SaveMetadata::is_debate` gates on when writing a transcript to disk.
+  // Read once per rebuild, not once per message: every message here belongs
+  // to the same session. Absent (no GLOBAL_STATE - a standalone unit test)
+  // means not a debate.
+  let show_agent_names = crate::state::GLOBAL_STATE
+    .get()
+    .is_some_and(|s| s.debate_enabled.load(Ordering::Relaxed));
   buffer.clear();
   for msg in messages {
     let role_label = if msg.role == "assistant" {
-      "\x1b[48;5;22;37mASSISTANT\x1b[0m"
+      let name = if show_agent_names {
+        msg.agent_name.as_deref().unwrap_or("ASSISTANT")
+      } else {
+        "ASSISTANT"
+      };
+      format!("\x1b[48;5;22;37m{}\x1b[0m", name)
     } else {
-      "\x1b[47;30mUSER\x1b[0m"
+      "\x1b[47;30mUSER\x1b[0m".to_string()
     };
-    for text in [role_label, msg.content.as_str()] {
+    for text in [role_label.as_str(), msg.content.as_str()] {
       if buffer.wrapped.is_empty() {
         buffer.newline();
       }
@@ -3881,6 +3897,40 @@ mod tests {
       "row before ASSISTANT should be blank: {:?}",
       h.wrapped[assistant_row - 1]
     );
+  }
+
+  #[test]
+  fn rebuild_history_shows_agent_names_only_while_a_debate_is_running() {
+    // Shared with every other test in this binary (GLOBAL_STATE is a
+    // OnceLock, set at most once) - reset the one flag this test cares
+    // about at both ends, the same convention the UI_SHUTDOWN tests above
+    // follow, so test order cannot change the outcome here or elsewhere.
+    let _ = crate::state::GLOBAL_STATE.set(std::sync::Arc::new(crate::state::AppState::new()));
+    let state = crate::state::GLOBAL_STATE.get().unwrap();
+
+    let messages = vec![crate::conversation::ChatMessage {
+      role: "assistant".to_string(),
+      content: "hello".to_string(),
+      agent_name: Some("Skeptic".to_string()),
+    }];
+
+    state.debate_enabled.store(false, Ordering::Relaxed);
+    let mut h = History::new();
+    rebuild_history(&mut h, messages.iter());
+    assert!(h.wrapped.iter().any(|l| l.contains("ASSISTANT")));
+    assert!(!h.wrapped.iter().any(|l| l.contains("Skeptic")));
+
+    state.debate_enabled.store(true, Ordering::Relaxed);
+    let mut h = History::new();
+    rebuild_history(&mut h, messages.iter());
+    assert!(
+      h.wrapped.iter().any(|l| l.contains("Skeptic")),
+      "agent name missing while a debate is running: {:?}",
+      h.wrapped
+    );
+    assert!(!h.wrapped.iter().any(|l| l.contains("ASSISTANT")));
+
+    state.debate_enabled.store(false, Ordering::Relaxed);
   }
 
   #[test]
